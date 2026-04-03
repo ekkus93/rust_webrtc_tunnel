@@ -382,9 +382,9 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] Set up `tracing`
 - [x] Support text/json output
 - [x] Support stdout/file logging
-- [ ] Redact secrets always
-- [ ] Redact SDP by default
-- [ ] Redact ICE candidates by default
+- [x] Redact secrets always
+- [x] Redact SDP by default
+- [x] Redact ICE candidates by default
 
 ### 10.2 Status output
 - [x] Write local `status.json`
@@ -404,41 +404,41 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] frame codec
 
 ### 11.2 Integration tests
-- [ ] two-node signaling round trip over mocked MQTT
-- [ ] offer/answer session setup
-- [ ] candidate exchange
-- [ ] ICE failure path sends encrypted error
-- [ ] unauthorized peer rejected
-- [ ] replayed message rejected
+- [x] two-node signaling round trip over mocked MQTT
+- [x] offer/answer session setup
+- [x] candidate exchange
+- [x] ICE failure path sends encrypted error
+- [x] unauthorized peer rejected
+- [x] replayed message rejected
 
 ### 11.3 End-to-end manual test targets
-- [ ] localhost broker + two local nodes
-- [ ] answer daemon always-on idle wait
-- [ ] local SSH-style tunnel through data channel
-- [ ] disconnect and reconnect attempt
+- [x] localhost broker + two local nodes
+- [x] answer daemon always-on idle wait
+- [x] local SSH-style tunnel through data channel
+- [x] disconnect and reconnect attempt
 
 ---
 
 ## 12. Documentation tasks
 
 ### 12.1 README
-- [ ] Explain architecture
-- [ ] Explain trust model
-- [ ] Explain key workflow
-- [ ] Explain config file
-- [ ] Explain how to run offer and answer
+- [x] Explain architecture
+- [x] Explain trust model
+- [x] Explain key workflow
+- [x] Explain config file
+- [x] Explain how to run offer and answer
 
 ### 12.2 Operator docs
-- [ ] Example setup for always-on home answer daemon
-- [ ] Example setup for laptop offer node
-- [ ] Example broker config
-- [ ] Example authorized key exchange
+- [x] Example setup for always-on home answer daemon
+- [x] Example setup for laptop offer node
+- [x] Example broker config
+- [x] Example authorized key exchange
 
 ### 12.3 Security notes
-- [ ] Explain why MQTT is untrusted
-- [ ] Explain why Ed25519 + X25519 are both needed
-- [ ] Explain why TURN is unsupported in v1
-- [ ] Explain replay protection
+- [x] Explain why MQTT is untrusted
+- [x] Explain why Ed25519 + X25519 are both needed
+- [x] Explain why TURN is unsupported in v1
+- [x] Explain replay protection
 
 ---
 
@@ -480,19 +480,19 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] ICE restart attempt
 - [x] renegotiation fallback
 - [x] backoff and jitter
-- [ ] status file
-- [ ] logging polish
-- [ ] integration tests
+- [x] status file
+- [x] logging polish
+- [x] integration tests
 
 ---
 
 ## 14. Explicit v1 constraints to preserve during implementation
 
-- [ ] Do not add TURN support
-- [ ] Do not add GUI code
-- [ ] Do not switch to PEM/PuTTY-centric key management
-- [ ] Do not allow plaintext MQTT messages
-- [ ] Do not allow unsigned MQTT messages
-- [ ] Do not allow more than one active tunnel session
-- [ ] Do not trust MQTT broker contents
-- [ ] Do not log secrets, decrypted payloads, SDP, or ICE candidates by default
+- [x] Do not add TURN support
+- [x] Do not add GUI code
+- [x] Do not switch to PEM/PuTTY-centric key management
+- [x] Do not allow plaintext MQTT messages
+- [x] Do not allow unsigned MQTT messages
+- [x] Do not allow more than one active tunnel session
+- [x] Do not trust MQTT broker contents
+- [x] Do not log secrets, decrypted payloads, SDP, or ICE candidates by default

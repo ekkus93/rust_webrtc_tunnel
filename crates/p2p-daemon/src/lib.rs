@@ -20,7 +20,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 pub use error::DaemonError;
-pub use logging::setup_logging;
+pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
 pub use status::{DaemonStatus, StatusWriter};
 
 pub struct ActiveSession {

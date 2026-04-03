@@ -8,6 +8,8 @@ use p2p_core::LoggingConfig;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
+const REDACTED: &str = "<redacted>";
+
 pub fn setup_logging(config: &LoggingConfig) -> Result<(), DaemonError> {
     let writer = build_writer(config)?;
     let builder = tracing_subscriber::fmt()
@@ -20,6 +22,26 @@ pub fn setup_logging(config: &LoggingConfig) -> Result<(), DaemonError> {
         _ => builder.try_init(),
     }
     .map_err(|error| DaemonError::Logging(error.to_string()))
+}
+
+pub fn redact_secret(_value: &str) -> String {
+    REDACTED.to_owned()
+}
+
+pub fn redact_sdp(config: &LoggingConfig, value: &str) -> String {
+    if config.redact_sdp {
+        format!("{REDACTED}:sdp:{}-bytes", value.len())
+    } else {
+        value.to_owned()
+    }
+}
+
+pub fn redact_candidate(config: &LoggingConfig, value: &str) -> String {
+    if config.redact_candidates {
+        format!("{REDACTED}:candidate:{}-bytes", value.len())
+    } else {
+        value.to_owned()
+    }
 }
 
 fn build_writer(config: &LoggingConfig) -> Result<BoxMakeWriter, DaemonError> {
@@ -83,5 +105,47 @@ impl Write for MultiWriter {
             file.flush()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use p2p_core::LoggingConfig;
+
+    use super::{redact_candidate, redact_sdp, redact_secret};
+
+    fn config() -> LoggingConfig {
+        LoggingConfig {
+            level: "info".to_owned(),
+            format: "text".to_owned(),
+            file_logging: false,
+            stdout_logging: true,
+            log_file: PathBuf::from("/tmp/log.txt"),
+            redact_secrets: true,
+            redact_sdp: true,
+            redact_candidates: true,
+            log_rotation: "daily".to_owned(),
+        }
+    }
+
+    #[test]
+    fn secrets_are_always_redacted() {
+        assert_eq!(redact_secret("super-secret"), "<redacted>");
+    }
+
+    #[test]
+    fn sdp_is_redacted_by_default() {
+        let redacted = redact_sdp(&config(), "v=0\r\na=candidate");
+        assert!(redacted.starts_with("<redacted>:sdp:"));
+        assert!(!redacted.contains("candidate"));
+    }
+
+    #[test]
+    fn candidates_are_redacted_by_default() {
+        let redacted = redact_candidate(&config(), "candidate:1 1 UDP 2122252543 192.0.2.1 12345");
+        assert!(redacted.starts_with("<redacted>:candidate:"));
+        assert!(!redacted.contains("192.0.2.1"));
     }
 }
