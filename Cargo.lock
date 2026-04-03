@@ -1678,6 +1678,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "p2p-core",
+ "p2p-webrtc",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

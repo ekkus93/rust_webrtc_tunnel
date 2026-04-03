@@ -251,32 +251,32 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 ## 6. `p2p-tunnel`
 
 ### 6.1 Tunnel frame codec
-- [ ] Implement frame encoder
-- [ ] Implement frame decoder
-- [ ] Enforce frame version
-- [ ] Enforce single stream ID = 1
-- [ ] Support types: OPEN, DATA, CLOSE, ERROR, PING, PONG
+- [x] Implement frame encoder
+- [x] Implement frame decoder
+- [x] Enforce frame version
+- [x] Enforce single stream ID = 1
+- [x] Support types: OPEN, DATA, CLOSE, ERROR, PING, PONG
 
 ### 6.2 Offer-side TCP listener
-- [ ] Implement local TCP listener
-- [ ] Enforce max_concurrent_clients = 1
-- [ ] Reject second client when busy
+- [x] Implement local TCP listener
+- [x] Enforce max_concurrent_clients = 1
+- [x] Reject second client when busy
 
 ### 6.3 Answer-side TCP connector
-- [ ] Implement connect to `target_host:target_port`
-- [ ] Return clear `target_connect_failed` error on failure
+- [x] Implement connect to `target_host:target_port`
+- [x] Return clear `target_connect_failed` error on failure
 
 ### 6.4 Bridge logic
-- [ ] Local TCP -> tunnel DATA
-- [ ] Tunnel DATA -> local TCP
-- [ ] EOF -> CLOSE
-- [ ] Error -> ERROR
-- [ ] Flush/drain handling
+- [x] Local TCP -> tunnel DATA
+- [x] Tunnel DATA -> local TCP
+- [x] EOF -> CLOSE
+- [x] Error -> ERROR
+- [x] Flush/drain handling
 
 ### 6.5 Tests
-- [ ] Frame codec round-trip
-- [ ] Reject invalid frame lengths
-- [ ] Reject unsupported stream IDs
+- [x] Frame codec round-trip
+- [x] Reject invalid frame lengths
+- [x] Reject unsupported stream IDs
 
 ---
 
@@ -465,10 +465,10 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] data channel wrapper
 
 ### Phase 4: tunnel transport
-- [ ] tunnel frame codec
-- [ ] offer-side TCP listener
-- [ ] answer-side TCP connector
-- [ ] bridge loop
+- [x] tunnel frame codec
+- [x] offer-side TCP listener
+- [x] answer-side TCP connector
+- [x] bridge loop
 
 ### Phase 5: daemons
 - [ ] offer daemon orchestration
