@@ -7,7 +7,7 @@ use p2p_crypto::{
     derive_aead_key_from_shared_secret, encrypt_message, generate_ephemeral_secret,
     kid_from_signing_key, random_nonce, sign_message, verify_message,
 };
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use x25519_dalek::PublicKey as X25519PublicKey;
 
 use crate::ack::AckTracker;
@@ -222,6 +222,15 @@ impl MqttSignalingTransport {
 
     pub async fn poll(&mut self) -> Result<Event, SignalingError> {
         self.event_loop.poll().await.map_err(SignalingError::from)
+    }
+
+    pub async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError> {
+        match self.poll().await? {
+            Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
+                Ok(Some(publish.payload.to_vec()))
+            }
+            _ => Ok(None),
+        }
     }
 }
 

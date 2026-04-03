@@ -283,49 +283,49 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 ## 7. `p2p-daemon`
 
 ### 7.1 Session orchestration
-- [ ] Create `ActiveSession` struct
-- [ ] Track session_id, remote peer, state, handles
-- [ ] Enforce one active session at a time
+- [x] Create `ActiveSession` struct
+- [x] Track session_id, remote peer, state, handles
+- [x] Enforce one active session at a time
 
 ### 7.2 Offer daemon logic
-- [ ] Wait for local TCP client
-- [ ] Create new session on connect
-- [ ] Create WebRTC offer
-- [ ] Send encrypted `hello` and `offer`
-- [ ] Send encrypted ICE candidates
-- [ ] Handle encrypted `answer`
-- [ ] Handle remote ICE candidates
-- [ ] Open tunnel on data channel ready
+- [x] Wait for local TCP client
+- [x] Create new session on connect
+- [x] Create WebRTC offer
+- [x] Send encrypted `hello` and `offer`
+- [x] Send encrypted ICE candidates
+- [x] Handle encrypted `answer`
+- [x] Handle remote ICE candidates
+- [x] Open tunnel on data channel ready
 
 ### 7.3 Answer daemon logic
-- [ ] Stay connected to MQTT continuously
-- [ ] Wait for encrypted offer messages
-- [ ] Verify sender authorized
-- [ ] Create answer session
-- [ ] Send encrypted `answer`
-- [ ] Send encrypted ICE candidates
-- [ ] Connect target TCP when tunnel opens
-- [ ] Return to idle after session closes
+- [x] Stay connected to MQTT continuously
+- [x] Wait for encrypted offer messages
+- [x] Verify sender authorized
+- [x] Create answer session
+- [x] Send encrypted `answer`
+- [x] Send encrypted ICE candidates
+- [x] Connect target TCP when tunnel opens
+- [x] Return to idle after session closes
 
 ### 7.4 Reconnect logic
-- [ ] Detect WebRTC disconnect
-- [ ] Attempt ICE restart first
-- [ ] If restart fails, perform full renegotiation
-- [ ] Generate new session_id on full renegotiation
-- [ ] Apply exponential backoff with jitter
-- [ ] Do not preserve local TCP client across reconnect in v1
+- [x] Detect WebRTC disconnect
+- [x] Attempt ICE restart first
+- [x] If restart fails, perform full renegotiation
+- [x] Generate new session_id on full renegotiation
+- [x] Apply exponential backoff with jitter
+- [x] Do not preserve local TCP client across reconnect in v1
 
 ### 7.5 Failure handling
-- [ ] On ICE failure, send encrypted `error` over MQTT
-- [ ] On decrypt/signature failure, reject and log locally
-- [ ] On unauthorized peer, reject and log locally
-- [ ] On target connect failure, send encrypted `error`
-- [ ] Ensure clean teardown of failed sessions
+- [x] On ICE failure, send encrypted `error` over MQTT
+- [x] On decrypt/signature failure, reject and log locally
+- [x] On unauthorized peer, reject and log locally
+- [x] On target connect failure, send encrypted `error`
+- [x] Ensure clean teardown of failed sessions
 
 ### 7.6 State machine correctness
-- [ ] Implement explicit state transitions
-- [ ] Prevent stale events from old sessions mutating new sessions
-- [ ] Bind all runtime callbacks to session IDs
+- [x] Implement explicit state transitions
+- [x] Prevent stale events from old sessions mutating new sessions
+- [x] Bind all runtime callbacks to session IDs
 
 ---
 
@@ -344,16 +344,16 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] Implement `status`
 
 ### 8.2 `p2p-offer`
-- [ ] Implement `run`
-- [ ] Parse config path override
-- [ ] Parse broker override flags
-- [ ] Parse listen-port override flags
+- [x] Implement `run`
+- [x] Parse config path override
+- [x] Parse broker override flags
+- [x] Parse listen-port override flags
 
 ### 8.3 `p2p-answer`
-- [ ] Implement `run`
-- [ ] Parse config path override
-- [ ] Parse broker override flags
-- [ ] Parse target override flags
+- [x] Implement `run`
+- [x] Parse config path override
+- [x] Parse broker override flags
+- [x] Parse target override flags
 
 ---
 
@@ -361,8 +361,8 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 
 ### 9.1 Config loading
 - [x] Load config.toml
-- [ ] Apply env overrides
-- [ ] Apply CLI overrides
+- [x] Apply env overrides
+- [x] Apply CLI overrides
 - [x] Expand paths
 
 ### 9.2 Validation rules
@@ -379,17 +379,17 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 ## 10. Logging and status
 
 ### 10.1 Logging
-- [ ] Set up `tracing`
-- [ ] Support text/json output
-- [ ] Support stdout/file logging
+- [x] Set up `tracing`
+- [x] Support text/json output
+- [x] Support stdout/file logging
 - [ ] Redact secrets always
 - [ ] Redact SDP by default
 - [ ] Redact ICE candidates by default
 
 ### 10.2 Status output
-- [ ] Write local `status.json`
-- [ ] Include peer_id, role, mqtt connected state, active session ID, current state
-- [ ] Ensure status file contains no secrets
+- [x] Write local `status.json`
+- [x] Include peer_id, role, mqtt connected state, active session ID, current state
+- [x] Ensure status file contains no secrets
 
 ---
 
@@ -401,7 +401,7 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] file parsing
 - [x] wire encode/decode
 - [x] replay cache
-- [ ] frame codec
+- [x] frame codec
 
 ### 11.2 Integration tests
 - [ ] two-node signaling round trip over mocked MQTT
@@ -471,15 +471,15 @@ This TODO list is intended for implementation by GitHub Copilot or another codin
 - [x] bridge loop
 
 ### Phase 5: daemons
-- [ ] offer daemon orchestration
-- [ ] answer daemon orchestration
-- [ ] always-on answer idle mode
-- [ ] encrypted error reporting on ICE failure
+- [x] offer daemon orchestration
+- [x] answer daemon orchestration
+- [x] always-on answer idle mode
+- [x] encrypted error reporting on ICE failure
 
 ### Phase 6: reconnect and polish
-- [ ] ICE restart attempt
-- [ ] renegotiation fallback
-- [ ] backoff and jitter
+- [x] ICE restart attempt
+- [x] renegotiation fallback
+- [x] backoff and jitter
 - [ ] status file
 - [ ] logging polish
 - [ ] integration tests

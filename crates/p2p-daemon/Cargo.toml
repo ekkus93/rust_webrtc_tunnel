@@ -7,14 +7,17 @@ rust-version.workspace = true
 
 [dependencies]
 p2p-core = { path = "../p2p-core" }
+p2p-crypto = { path = "../p2p-crypto" }
 p2p-signaling = { path = "../p2p-signaling" }
 p2p-tunnel = { path = "../p2p-tunnel" }
 p2p-webrtc = { path = "../p2p-webrtc" }
+rand_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

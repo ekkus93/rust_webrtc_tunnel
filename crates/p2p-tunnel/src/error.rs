@@ -14,6 +14,8 @@ pub enum TunnelError {
     InvalidFrame(String),
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("failed to connect target tcp service: {0}")]
+    TargetConnectFailed(String),
     #[error("webrtc error: {0}")]
     WebRtc(#[from] p2p_webrtc::WebRtcError),
     #[error("offer listener is busy")]

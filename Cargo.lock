@@ -1587,6 +1587,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "p2p-core",
+ "p2p-crypto",
  "p2p-daemon",
  "tokio",
  "tracing",
@@ -1632,14 +1633,17 @@ name = "p2p-daemon"
 version = "0.1.0"
 dependencies = [
  "p2p-core",
+ "p2p-crypto",
  "p2p-signaling",
  "p2p-tunnel",
  "p2p-webrtc",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1648,6 +1652,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "p2p-core",
+ "p2p-crypto",
  "p2p-daemon",
  "tokio",
  "tracing",

@@ -16,6 +16,6 @@ impl AnswerTargetConnector {
     pub async fn connect_target(&self) -> Result<TcpStream, TunnelError> {
         TcpStream::connect((self.config.target_host.as_str(), self.config.target_port))
             .await
-            .map_err(TunnelError::from)
+            .map_err(|error| TunnelError::TargetConnectFailed(error.to_string()))
     }
 }
