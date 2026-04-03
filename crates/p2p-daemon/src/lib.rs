@@ -23,6 +23,14 @@ pub use error::DaemonError;
 pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
 pub use status::{DaemonStatus, StatusWriter};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BridgeSessionState {
+    Pending,
+    Active,
+    Reconnecting,
+    Closed,
+}
+
 pub struct ActiveSession {
     pub session_id: SessionId,
     pub remote_peer_id: PeerId,
@@ -30,6 +38,8 @@ pub struct ActiveSession {
     remote_authorized: AuthorizedKey,
     peer: WebRtcPeer,
     data_channel: Option<DataChannelHandle>,
+    bridge_handle: Option<JoinHandle<Result<(), p2p_tunnel::TunnelError>>>,
+    bridge_state: BridgeSessionState,
     signaling: SignalingSession,
 }
 
@@ -47,6 +57,8 @@ impl ActiveSession {
             remote_authorized,
             peer,
             data_channel: None,
+            bridge_handle: None,
+            bridge_state: BridgeSessionState::Pending,
             signaling: SignalingSession::new(replay_cache_size),
         }
     }
@@ -128,14 +140,14 @@ pub async fn run_answer_daemon(
         .await?;
 
     let connector = AnswerTargetConnector::new(&config.tunnel.answer);
+    let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
 
     loop {
         let Some(payload) = transport.poll_signal_payload().await? else {
             continue;
         };
 
-        let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
-        let decode_result = codec.decode(&payload, &mut replay_cache, None);
+        let decode_result = decode_idle_signaling_message(&codec, &payload, &mut replay_cache);
 
         let (envelope, message, sender) = match decode_result {
             Ok(decoded) => decoded,
@@ -145,19 +157,6 @@ pub async fn run_answer_daemon(
             }
         };
 
-        if message.message_type.requires_ack() {
-            publish_message(
-                &config,
-                &codec,
-                &mut transport,
-                None,
-                &sender,
-                codec.build_ack(sender.peer_id.clone(), message.session_id, envelope.msg_id),
-                true,
-            )
-            .await?;
-        }
-
         match &message.body {
             MessageBody::Hello(_) => {
                 tracing::info!("received optional hello from {}", sender.peer_id);
@@ -166,6 +165,22 @@ pub async fn run_answer_daemon(
                 if !config.tunnel.answer.allow_remote_peers.contains(&sender.peer_id) {
                     tracing::warn!("rejecting unauthorized peer {}", sender.peer_id);
                     continue;
+                }
+                if message.message_type.requires_ack() {
+                    publish_message(
+                        &config,
+                        &codec,
+                        &mut transport,
+                        None,
+                        &sender,
+                        codec.build_ack(
+                            sender.peer_id.clone(),
+                            message.session_id,
+                            envelope.msg_id,
+                        ),
+                        true,
+                    )
+                    .await?;
                 }
                 let peer = WebRtcPeer::new(&config.webrtc).await?;
                 peer.apply_remote_offer(&offer.sdp).await?;
@@ -323,7 +338,6 @@ async fn run_offer_session(
     let mut tick = interval(Duration::from_secs(1));
     let local_stream = client.into_stream()?;
     let mut pending_stream = Some(local_stream);
-    let mut bridge_handle: Option<JoinHandle<Result<(), p2p_tunnel::TunnelError>>> = None;
 
     loop {
         tokio::select! {
@@ -381,10 +395,15 @@ async fn run_offer_session(
                             ),
                             false,
                         ).await?;
-                        if let Some(handle) = bridge_handle.take() {
+                        if let Some(handle) = session.bridge_handle.take() {
                             handle.abort();
                         }
-                        if pending_stream.is_some()
+                        if session.bridge_state == BridgeSessionState::Active {
+                            session.bridge_state = BridgeSessionState::Closed;
+                            return Err(DaemonError::IceFailed(ice_state));
+                        }
+                        session.bridge_state = BridgeSessionState::Reconnecting;
+                        if should_attempt_offer_reconnect(config, pending_stream.is_some(), session.bridge_state)
                             && attempt_offer_reconnect(
                                 config,
                                 codec,
@@ -395,8 +414,10 @@ async fn run_offer_session(
                             )
                             .await?
                         {
+                            session.bridge_state = BridgeSessionState::Pending;
                             continue;
                         }
+                        session.bridge_state = BridgeSessionState::Closed;
                         return Err(DaemonError::IceFailed(ice_state));
                     }
                 }
@@ -407,7 +428,7 @@ async fn run_offer_session(
                 } else {
                     None
                 }
-            }, if bridge_handle.is_none() => {
+            }, if session.bridge_handle.is_none() => {
                 if let Some(DataChannelEvent::Open) = data_event {
                     status
                         .write(DaemonStatus::new(
@@ -423,16 +444,20 @@ async fn run_offer_session(
                         &config.tunnel,
                     );
                     if let Some(stream) = pending_stream.take() {
-                        bridge_handle = Some(tokio::spawn(async move { bridge.run_offer(stream).await }));
+                        session.bridge_state = BridgeSessionState::Active;
+                        session.bridge_handle =
+                            Some(tokio::spawn(async move { bridge.run_offer(stream).await }));
                     }
                 }
             }
             bridge_result = async {
-                let handle = bridge_handle.as_mut().expect("guarded by select");
+                let handle = session.bridge_handle.as_mut().expect("guarded by select");
                 handle.await
-            }, if bridge_handle.is_some() => {
+            }, if session.bridge_handle.is_some() => {
                 let result = bridge_result
                     .map_err(|error| DaemonError::Logging(format!("bridge task join error: {error}")))?;
+                session.bridge_handle = None;
+                session.bridge_state = BridgeSessionState::Closed;
                 let _ = publish_message(
                     config,
                     codec,
@@ -621,6 +646,10 @@ async fn run_answer_session(
                             ),
                             false,
                         ).await?;
+                        if let Some(handle) = session.bridge_handle.take() {
+                            handle.abort();
+                        }
+                        session.bridge_state = BridgeSessionState::Closed;
                         return Err(DaemonError::IceFailed(ice_state));
                     }
                 }
@@ -631,7 +660,7 @@ async fn run_answer_session(
                 } else {
                     None
                 }
-            }, if session.data_channel.is_some() => {
+            }, if should_poll_answer_data_events(session.data_channel.is_some(), session.bridge_handle.is_some()) => {
                 if let Some(DataChannelEvent::Open) = data_event {
                     status
                         .write(DaemonStatus::new(
@@ -646,47 +675,60 @@ async fn run_answer_session(
                         session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?,
                         &config.tunnel,
                     );
-                    let result = bridge.run_answer(connector).await;
-                    if let Err(p2p_tunnel::TunnelError::TargetConnectFailed(message)) = &result {
-                        let _ = publish_message(
-                            config,
-                            codec,
-                            transport,
-                            Some(&mut session.signaling),
-                            &session.remote_authorized,
-                            build_error_message(
-                                &config.node.peer_id,
-                                &session.remote_peer_id,
-                                session.session_id,
-                                FailureCode::TargetConnectFailed,
-                                message,
-                            ),
-                            false,
-                        )
-                        .await;
-                    }
+                    let connector = connector.clone();
+                    session.bridge_state = BridgeSessionState::Active;
+                    session.bridge_handle = Some(tokio::spawn(async move {
+                        bridge.run_answer(&connector).await
+                    }));
+                }
+            }
+            bridge_result = async {
+                let handle = session.bridge_handle.as_mut().expect("guarded by select");
+                handle.await
+            }, if session.bridge_handle.is_some() => {
+                let result = bridge_result
+                    .map_err(|error| DaemonError::Logging(format!("bridge task join error: {error}")))?;
+                session.bridge_handle = None;
+                session.bridge_state = BridgeSessionState::Closed;
+                if let Err(p2p_tunnel::TunnelError::TargetConnectFailed(message)) = &result {
                     let _ = publish_message(
                         config,
                         codec,
                         transport,
                         Some(&mut session.signaling),
                         &session.remote_authorized,
-                        InnerMessageBuilder::new(
+                        build_error_message(
+                            &config.node.peer_id,
+                            &session.remote_peer_id,
                             session.session_id,
-                            config.node.peer_id.clone(),
-                            session.remote_peer_id.clone(),
-                        )
-                        .build(MessageBody::Close(CloseBody {
-                            reason_code: "session_closed".to_owned(),
-                            message: None,
-                        })),
+                            FailureCode::TargetConnectFailed,
+                            message,
+                        ),
                         false,
                     )
                     .await;
-                    result?;
-                    session.peer.close().await?;
-                    return Ok(());
                 }
+                let _ = publish_message(
+                    config,
+                    codec,
+                    transport,
+                    Some(&mut session.signaling),
+                    &session.remote_authorized,
+                    InnerMessageBuilder::new(
+                        session.session_id,
+                        config.node.peer_id.clone(),
+                        session.remote_peer_id.clone(),
+                    )
+                    .build(MessageBody::Close(CloseBody {
+                        reason_code: "session_closed".to_owned(),
+                        message: None,
+                    })),
+                    false,
+                )
+                .await;
+                result?;
+                session.peer.close().await?;
+                return Ok(());
             }
         }
     }
@@ -763,6 +805,31 @@ async fn retry_pending_acks(
             .await?;
     }
     Ok(())
+}
+
+fn decode_idle_signaling_message<'a>(
+    codec: &SignalCodec<'a>,
+    payload: &[u8],
+    replay_cache: &mut p2p_signaling::ReplayCache,
+) -> Result<(p2p_signaling::OuterEnvelope, InnerMessage, AuthorizedKey), DaemonError> {
+    Ok(codec.decode(payload, replay_cache, None)?)
+}
+
+fn should_attempt_offer_reconnect(
+    config: &AppConfig,
+    pending_stream_present: bool,
+    bridge_state: BridgeSessionState,
+) -> bool {
+    config.reconnect.enable_auto_reconnect
+        && pending_stream_present
+        && matches!(bridge_state, BridgeSessionState::Pending | BridgeSessionState::Reconnecting)
+}
+
+fn should_poll_answer_data_events(
+    data_channel_present: bool,
+    bridge_handle_present: bool,
+) -> bool {
+    data_channel_present && !bridge_handle_present
 }
 
 fn apply_override_pairs(
@@ -1047,13 +1114,20 @@ mod tests {
 
     use p2p_core::AppConfig;
     use p2p_core::{
-        BrokerConfig, BrokerTlsConfig, HealthConfig, LoggingConfig, NodeConfig, NodeRole,
-        ReconnectConfig, SecurityConfig, TunnelAnswerConfig, TunnelConfig, TunnelOfferConfig,
-        WebRtcConfig,
+        BrokerConfig, BrokerTlsConfig, FailureCode, HealthConfig, LoggingConfig, NodeConfig,
+        NodeRole, ReconnectConfig, SecurityConfig, SessionId, TunnelAnswerConfig, TunnelConfig,
+        TunnelOfferConfig, WebRtcConfig,
+    };
+    use p2p_crypto::{AuthorizedKeys, generate_identity};
+    use p2p_signaling::{
+        ErrorBody, InnerMessageBuilder, MessageBody, OfferBody, ReplayCache, SignalCodec,
+        SignalingError,
     };
 
     use super::{
-        apply_answer_overrides, apply_offer_overrides, apply_override_pairs, compute_backoff_delay,
+        BridgeSessionState, DaemonError, apply_answer_overrides, apply_offer_overrides,
+        apply_override_pairs, compute_backoff_delay, decode_idle_signaling_message,
+        should_attempt_offer_reconnect, should_poll_answer_data_events,
     };
 
     fn sample_config() -> AppConfig {
@@ -1078,7 +1152,7 @@ mod tests {
                 qos: 1,
                 keepalive_secs: 30,
                 clean_session: true,
-                connect_timeout_secs: 10,
+                connect_timeout_secs: 5,
                 session_expiry_secs: 0,
                 tls: BrokerTlsConfig {
                     ca_file: PathBuf::from("/tmp/ca"),
@@ -1208,5 +1282,92 @@ mod tests {
         let first = compute_backoff_delay(&config, 0);
         let second = compute_backoff_delay(&config, 1);
         assert!(second >= first);
+    }
+
+    #[test]
+    fn idle_replay_cache_rejects_replayed_offer_across_iterations() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let message = InnerMessageBuilder::new(
+            SessionId::random(),
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "offer-sdp".to_owned() }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("offer encodes");
+
+        let mut replay_cache = ReplayCache::new(64);
+        decode_idle_signaling_message(&answer_codec, &payload, &mut replay_cache)
+            .expect("first decode succeeds");
+        assert!(matches!(
+            decode_idle_signaling_message(&answer_codec, &payload, &mut replay_cache),
+            Err(DaemonError::Signaling(SignalingError::Protocol(message)))
+                if message.contains("duplicate")
+        ));
+    }
+
+    #[test]
+    fn idle_replay_cache_rejects_replayed_ack_required_message_across_iterations() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let message = InnerMessageBuilder::new(
+            SessionId::random(),
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Error(ErrorBody {
+            code: FailureCode::IceFailed.as_str().to_owned(),
+            message: "ice failed".to_owned(),
+            fatal: true,
+        }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("error encodes");
+
+        let mut replay_cache = ReplayCache::new(64);
+        decode_idle_signaling_message(&answer_codec, &payload, &mut replay_cache)
+            .expect("first decode succeeds");
+        assert!(matches!(
+            decode_idle_signaling_message(&answer_codec, &payload, &mut replay_cache),
+            Err(DaemonError::Signaling(SignalingError::Protocol(message)))
+                if message.contains("duplicate")
+        ));
+    }
+
+    #[test]
+    fn active_offer_bridge_does_not_attempt_reconnect() {
+        let config = sample_config();
+        assert!(!should_attempt_offer_reconnect(&config, false, BridgeSessionState::Pending));
+        assert!(!should_attempt_offer_reconnect(&config, true, BridgeSessionState::Active));
+        assert!(should_attempt_offer_reconnect(&config, true, BridgeSessionState::Reconnecting));
+    }
+
+    #[test]
+    fn answer_bridge_task_disables_data_event_polling() {
+        assert!(should_poll_answer_data_events(true, false));
+        assert!(!should_poll_answer_data_events(true, true));
+        assert!(!should_poll_answer_data_events(false, false));
     }
 }

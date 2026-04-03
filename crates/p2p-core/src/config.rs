@@ -66,6 +66,56 @@ impl AppConfig {
                 "broker.url must use mqtts:// when TLS is required".to_owned(),
             ));
         }
+        if !self.security.require_message_encryption {
+            return Err(ConfigError::InvalidConfig(
+                "security.require_message_encryption must remain enabled in v1".to_owned(),
+            ));
+        }
+        if !self.security.require_message_signatures {
+            return Err(ConfigError::InvalidConfig(
+                "security.require_message_signatures must remain enabled in v1".to_owned(),
+            ));
+        }
+        if self.security.replay_cache_size == 0 {
+            return Err(ConfigError::InvalidConfig(
+                "security.replay_cache_size must be greater than zero".to_owned(),
+            ));
+        }
+        if self.broker.connect_timeout_secs != 5 {
+            return Err(ConfigError::InvalidConfig(
+                "broker.connect_timeout_secs is unsupported by the current MQTT transport"
+                    .to_owned(),
+            ));
+        }
+        if self.broker.session_expiry_secs != 0 {
+            return Err(ConfigError::InvalidConfig(
+                "broker.session_expiry_secs is unsupported with the MQTT v4 transport".to_owned(),
+            ));
+        }
+        if self.broker.url.starts_with("mqtts://") {
+            if self.broker.tls.ca_file.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidConfig(
+                    "broker.tls.ca_file must be set for mqtts:// brokers".to_owned(),
+                ));
+            }
+            if self.broker.tls.server_name.is_empty() {
+                return Err(ConfigError::InvalidConfig(
+                    "broker.tls.server_name must be set for mqtts:// brokers".to_owned(),
+                ));
+            }
+            if self.broker.tls.insecure_skip_verify {
+                return Err(ConfigError::InvalidConfig(
+                    "broker.tls.insecure_skip_verify is unsupported in v1".to_owned(),
+                ));
+            }
+            let client_cert_set = !self.broker.tls.client_cert_file.as_os_str().is_empty();
+            let client_key_set = !self.broker.tls.client_key_file.as_os_str().is_empty();
+            if client_cert_set != client_key_set {
+                return Err(ConfigError::InvalidConfig(
+                    "broker TLS client certificate and key must be configured together".to_owned(),
+                ));
+            }
+        }
 
         if self.security.require_authorized_keys && !self.paths.authorized_keys.is_file() {
             return Err(ConfigError::InvalidConfig(format!(
@@ -320,8 +370,8 @@ password_file = "{password_file}"
 qos = 1
 keepalive_secs = 30
 clean_session = false
-connect_timeout_secs = 10
-session_expiry_secs = 86400
+connect_timeout_secs = 5
+session_expiry_secs = 0
 
 [broker.tls]
 ca_file = "{ca_file}"
@@ -441,6 +491,54 @@ status_file = "{status_file}"
 
         let config = sample_config(&config_dir, &state_dir)
             .replace("allow_remote_peers = [\"offer-home\"]", "allow_remote_peers = []");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_rejects_unsupported_session_expiry() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        fs::write(config_dir.join("authorized_keys"), "").expect("write auth keys");
+
+        let config = sample_config(&config_dir, &state_dir)
+            .replace("session_expiry_secs = 0", "session_expiry_secs = 60");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_rejects_partial_broker_client_auth() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        fs::write(config_dir.join("authorized_keys"), "").expect("write auth keys");
+
+        let config = sample_config(&config_dir, &state_dir)
+            .replace("client_key_file = \"\"", "client_key_file = \"/tmp/client.key\"");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_rejects_unsupported_connect_timeout() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        fs::write(config_dir.join("authorized_keys"), "").expect("write auth keys");
+
+        let config = sample_config(&config_dir, &state_dir)
+            .replace("connect_timeout_secs = 5", "connect_timeout_secs = 10");
         let config_path = temp_dir.path().join("config.toml");
         fs::write(&config_path, config).expect("write config");
         assert!(AppConfig::load_from_file(&config_path).is_err());

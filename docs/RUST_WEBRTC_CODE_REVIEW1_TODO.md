@@ -25,12 +25,12 @@ The idle answer loop recreates `ReplayCache` per message instead of keeping one 
 - `crates/p2p-daemon/src/lib.rs`
 
 ### Tasks
-- [ ] Move replay cache allocation out of the idle answer message loop.
-- [ ] Create one long-lived replay cache for the idle answer daemon.
-- [ ] Reuse that replay cache for every inbound idle-loop signaling payload.
-- [ ] Verify replay cache size comes from `config.security.replay_cache_size`.
-- [ ] Add a test covering replay of the same offer during idle state.
-- [ ] Add a test covering replay of the same ack-required message during idle state.
+- [x] Move replay cache allocation out of the idle answer message loop.
+- [x] Create one long-lived replay cache for the idle answer daemon.
+- [x] Reuse that replay cache for every inbound idle-loop signaling payload.
+- [x] Verify replay cache size comes from `config.security.replay_cache_size`.
+- [x] Add a test covering replay of the same offer during idle state.
+- [x] Add a test covering replay of the same ack-required message during idle state.
 
 ### Acceptance criteria
 - Replaying the same MQTT payload while the answer daemon is idle is rejected.
@@ -48,13 +48,13 @@ The answer daemon currently blocks its own session loop by awaiting `bridge.run_
 - possibly `crates/p2p-tunnel/src/bridge.rs`
 
 ### Tasks
-- [ ] Mirror the offer-side bridge execution model on the answer side.
-- [ ] Spawn the answer bridge in a Tokio task.
-- [ ] Track the task via a join handle.
-- [ ] Continue processing signaling, ICE candidates, and ICE state while the answer bridge is active.
-- [ ] Handle bridge task completion cleanly.
-- [ ] Abort the bridge task on session teardown or fatal ICE failure.
-- [ ] Add a regression test or integration-style harness for active tunnel + concurrent signaling processing.
+- [x] Mirror the offer-side bridge execution model on the answer side.
+- [x] Spawn the answer bridge in a Tokio task.
+- [x] Track the task via a join handle.
+- [x] Continue processing signaling, ICE candidates, and ICE state while the answer bridge is active.
+- [x] Handle bridge task completion cleanly.
+- [x] Abort the bridge task on session teardown or fatal ICE failure.
+- [x] Add a regression test or integration-style harness for active tunnel + concurrent signaling processing.
 
 ### Acceptance criteria
 - While the answer bridge is running, the daemon still processes MQTT signaling and ICE updates.
@@ -73,18 +73,18 @@ Reconnect currently depends on `pending_stream.is_some()`, which is no longer tr
 - possibly `crates/p2p-tunnel/src/bridge.rs`
 
 ### Tasks
-- [ ] Audit current reconnect assumptions on the offer side.
-- [ ] Introduce explicit session/bridge state that distinguishes:
-  - [ ] local client accepted, not yet bridged
-  - [ ] bridge active
-  - [ ] reconnect in progress
-  - [ ] bridge closed
-- [ ] Decide and implement the intended v1 behavior when a live bridge drops:
-  - [ ] either fail the local client immediately and end the session, or
+- [x] Audit current reconnect assumptions on the offer side.
+- [x] Introduce explicit session/bridge state that distinguishes:
+  - [x] local client accepted, not yet bridged
+  - [x] bridge active
+  - [x] reconnect in progress
+  - [x] bridge closed
+- [x] Decide and implement the intended v1 behavior when a live bridge drops:
+  - [x] either fail the local client immediately and end the session, or
   - [ ] hold and reconnect for a short window if that behavior is truly implemented
-- [ ] Remove reconnect gating based solely on `pending_stream.is_some()`.
-- [ ] Ensure reconnect logic is triggered for the normal active-session ICE failure path.
-- [ ] Add tests for a live tunnel entering ICE failed/disconnected state.
+- [x] Remove reconnect gating based solely on `pending_stream.is_some()`.
+- [x] Ensure reconnect logic is triggered for the normal active-session ICE failure path.
+- [x] Add tests for a live tunnel entering ICE failed/disconnected state.
 
 ### Acceptance criteria
 - A live tunnel drop enters the reconnect path or cleanly fails according to explicit policy.
@@ -102,17 +102,17 @@ Broker TLS config is declared but mostly ignored; the transport uses default TLS
 - `crates/p2p-core/src/config.rs`
 
 ### Tasks
-- [ ] Decide whether v1 fully supports custom TLS config.
-- [ ] If yes, implement:
-  - [ ] `ca_file`
-  - [ ] `client_cert_file`
-  - [ ] `client_key_file`
-  - [ ] `server_name`
-  - [ ] `insecure_skip_verify` behavior
-- [ ] If full support is not practical now, remove or disable misleading config fields and fail clearly on unsupported settings.
-- [ ] Implement `connect_timeout_secs` if the MQTT client library supports it cleanly.
-- [ ] Audit whether `session_expiry_secs` is actually supported; implement or remove.
-- [ ] Add tests or smoke-level validation for TLS config parsing and startup validation.
+- [x] Decide whether v1 fully supports custom TLS config.
+- [x] If yes, implement:
+  - [x] `ca_file`
+  - [x] `client_cert_file`
+  - [x] `client_key_file`
+  - [x] `server_name`
+  - [x] `insecure_skip_verify` behavior
+- [x] If full support is not practical now, remove or disable misleading config fields and fail clearly on unsupported settings.
+- [x] Reject unsupported `connect_timeout_secs` clearly because the current MQTT client does not expose it cleanly.
+- [x] Audit whether `session_expiry_secs` is actually supported; implement or remove.
+- [x] Add tests or smoke-level validation for TLS config parsing and startup validation.
 
 ### Acceptance criteria
 - The transport behavior matches the TLS config surface.
@@ -363,10 +363,10 @@ The code already has decent structure, but sensitive paths should be extra cauti
 # Suggested implementation order
 
 ## Phase 1 — Security/correctness blockers
-- [ ] Fix idle replay cache lifetime
-- [ ] Spawn answer bridge in a task
-- [ ] Fix live-session reconnect logic
-- [ ] Resolve MQTT TLS config drift
+- [x] Fix idle replay cache lifetime
+- [x] Spawn answer bridge in a task
+- [x] Fix live-session reconnect logic
+- [x] Resolve MQTT TLS config drift
 
 ## Phase 2 — Protocol cleanup
 - [ ] Enforce expected session on answer decode

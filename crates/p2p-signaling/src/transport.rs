@@ -179,26 +179,7 @@ pub struct MqttSignalingTransport {
 
 impl MqttSignalingTransport {
     pub fn connect(config: &AppConfig) -> Result<Self, SignalingError> {
-        if config.security.require_mqtt_tls && !config.broker.url.starts_with("mqtts://") {
-            return Err(SignalingError::Protocol(
-                "broker.url must use mqtts:// when TLS is required".to_owned(),
-            ));
-        }
-
-        let password = fs::read_to_string(&config.broker.password_file)?.trim().to_owned();
-        let separator = if config.broker.url.contains('?') { '&' } else { '?' };
-        let url =
-            format!("{}{}client_id={}", config.broker.url, separator, config.broker.client_id);
-        let mut options = MqttOptions::parse_url(url)?;
-        options.set_keep_alive(Duration::from_secs(u64::from(config.broker.keepalive_secs)));
-        options.set_clean_session(config.broker.clean_session);
-        options.set_credentials(config.broker.username.clone(), password);
-        if config.broker.url.starts_with("mqtts://") {
-            options.set_transport(Transport::tls_with_default_config());
-        }
-
-        let qos = qos_from_u8(config.broker.qos)?;
-        let own_topic = signal_topic(&config.broker.topic_prefix, &config.node.peer_id);
+        let (options, qos, own_topic) = build_mqtt_options(config)?;
         let (client, event_loop) = AsyncClient::new(options, 10);
 
         Ok(Self { client, event_loop, own_topic, qos })
@@ -234,6 +215,72 @@ impl MqttSignalingTransport {
     }
 }
 
+fn build_mqtt_options(config: &AppConfig) -> Result<(MqttOptions, QoS, String), SignalingError> {
+    if config.security.require_mqtt_tls && !config.broker.url.starts_with("mqtts://") {
+        return Err(SignalingError::Protocol(
+            "broker.url must use mqtts:// when TLS is required".to_owned(),
+        ));
+    }
+    if config.broker.connect_timeout_secs != 5 {
+        return Err(SignalingError::Protocol(
+            "broker.connect_timeout_secs is unsupported by the current MQTT transport".to_owned(),
+        ));
+    }
+    if config.broker.session_expiry_secs != 0 {
+        return Err(SignalingError::Protocol(
+            "broker.session_expiry_secs is unsupported with the MQTT v4 transport".to_owned(),
+        ));
+    }
+
+    let password = fs::read_to_string(&config.broker.password_file)?.trim().to_owned();
+    let separator = if config.broker.url.contains('?') { '&' } else { '?' };
+    let url = format!("{}{}client_id={}", config.broker.url, separator, config.broker.client_id);
+    let mut options = MqttOptions::parse_url(url)?;
+    options.set_keep_alive(Duration::from_secs(u64::from(config.broker.keepalive_secs)));
+    options.set_clean_session(config.broker.clean_session);
+    options.set_credentials(config.broker.username.clone(), password);
+
+    if config.broker.url.starts_with("mqtts://") {
+        let (broker_host, _port) = options.broker_address();
+        options.set_transport(build_tls_transport(config, &broker_host)?);
+    }
+
+    let qos = qos_from_u8(config.broker.qos)?;
+    let own_topic = signal_topic(&config.broker.topic_prefix, &config.node.peer_id);
+    Ok((options, qos, own_topic))
+}
+
+fn build_tls_transport(config: &AppConfig, broker_host: &str) -> Result<Transport, SignalingError> {
+    if config.broker.tls.insecure_skip_verify {
+        return Err(SignalingError::Protocol(
+            "broker.tls.insecure_skip_verify is unsupported in v1".to_owned(),
+        ));
+    }
+    if !config.broker.tls.server_name.is_empty() && config.broker.tls.server_name != broker_host {
+        return Err(SignalingError::Protocol(
+            "broker.tls.server_name must match the broker URL host in v1".to_owned(),
+        ));
+    }
+
+    let ca = fs::read(&config.broker.tls.ca_file)?;
+    let client_cert_set = !config.broker.tls.client_cert_file.as_os_str().is_empty();
+    let client_key_set = !config.broker.tls.client_key_file.as_os_str().is_empty();
+    let client_auth = match (client_cert_set, client_key_set) {
+        (false, false) => None,
+        (true, true) => Some((
+            fs::read(&config.broker.tls.client_cert_file)?,
+            fs::read(&config.broker.tls.client_key_file)?,
+        )),
+        _ => {
+            return Err(SignalingError::Protocol(
+                "broker TLS client certificate and key must be configured together".to_owned(),
+            ));
+        }
+    };
+
+    Ok(Transport::tls(ca, client_auth, None))
+}
+
 #[derive(Debug)]
 pub struct SignalingSession {
     pub replay_cache: ReplayCache,
@@ -267,14 +314,22 @@ fn current_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use p2p_core::{
+        AppConfig, BrokerConfig, BrokerTlsConfig, HealthConfig, LoggingConfig, NodeConfig,
+        NodeRole, ReconnectConfig, SecurityConfig, TunnelAnswerConfig, TunnelConfig,
+        TunnelOfferConfig, WebRtcConfig,
+    };
     use p2p_core::{MessageType, SessionId};
     use p2p_crypto::{AuthorizedKeys, generate_identity};
+    use rumqttc::Transport;
 
     use super::{
         EnvelopeFlags, InnerMessageBuilder, MqttSignalingTransport, OuterEnvelope, ReplayCache,
-        SignalCodec, signal_topic,
+        SignalCodec, build_mqtt_options, signal_topic,
     };
-    use crate::{ErrorBody, MessageBody, OfferBody};
+    use crate::{ErrorBody, MessageBody, OfferBody, SignalingError};
 
     fn codecs() -> (
         p2p_crypto::GeneratedIdentity,
@@ -455,5 +510,185 @@ mod tests {
     #[test]
     fn transport_type_exists() {
         let _ = std::mem::size_of::<MqttSignalingTransport>();
+    }
+
+    fn sample_config(base: &std::path::Path) -> AppConfig {
+        AppConfig {
+            format: "p2ptunnel-config-v1".to_owned(),
+            node: NodeConfig {
+                peer_id: "answer-office".parse().expect("peer id"),
+                role: NodeRole::Answer,
+            },
+            paths: p2p_core::PathConfig {
+                identity: base.join("identity"),
+                authorized_keys: base.join("authorized_keys"),
+                state_dir: base.join("state"),
+                log_dir: base.join("state/log"),
+            },
+            broker: BrokerConfig {
+                url: "mqtts://broker.example:8883".to_owned(),
+                client_id: "answer-office".to_owned(),
+                topic_prefix: "p2ptunnel".to_owned(),
+                username: "answer-office".to_owned(),
+                password_file: base.join("password"),
+                qos: 1,
+                keepalive_secs: 30,
+                clean_session: true,
+                connect_timeout_secs: 5,
+                session_expiry_secs: 0,
+                tls: BrokerTlsConfig {
+                    ca_file: base.join("ca.pem"),
+                    client_cert_file: PathBuf::new(),
+                    client_key_file: PathBuf::new(),
+                    server_name: "broker.example".to_owned(),
+                    insecure_skip_verify: false,
+                },
+            },
+            webrtc: WebRtcConfig {
+                stun_urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+                ice_gather_timeout_secs: 10,
+                ice_connection_timeout_secs: 10,
+                enable_trickle_ice: true,
+                enable_ice_restart: true,
+                data_channel_label: "tunnel".to_owned(),
+                max_message_size: 262_144,
+            },
+            tunnel: TunnelConfig {
+                stream_id: 1,
+                frame_version: 1,
+                read_chunk_size: 1024,
+                write_buffer_limit: 262_144,
+                local_eof_grace_ms: 250,
+                remote_eof_grace_ms: 250,
+                offer: TunnelOfferConfig {
+                    listen_host: "127.0.0.1".to_owned(),
+                    listen_port: 2222,
+                    remote_peer_id: "offer-home".parse().expect("peer id"),
+                    auto_open: true,
+                    max_concurrent_clients: 1,
+                    deny_when_busy: true,
+                },
+                answer: TunnelAnswerConfig {
+                    target_host: "127.0.0.1".to_owned(),
+                    target_port: 22,
+                    allow_remote_peers: vec!["offer-home".parse().expect("peer id")],
+                },
+            },
+            reconnect: ReconnectConfig {
+                enable_auto_reconnect: true,
+                strategy: "ice_then_renegotiate".to_owned(),
+                ice_restart_timeout_secs: 8,
+                renegotiate_timeout_secs: 20,
+                backoff_initial_ms: 1000,
+                backoff_max_ms: 30_000,
+                backoff_multiplier: 2.0,
+                jitter_ratio: 0.2,
+                max_attempts: 0,
+                hold_local_client_during_reconnect: false,
+                local_client_hold_secs: 0,
+            },
+            security: SecurityConfig {
+                require_mqtt_tls: true,
+                require_message_encryption: true,
+                require_message_signatures: true,
+                require_authorized_keys: true,
+                max_clock_skew_secs: 120,
+                max_message_age_secs: 300,
+                replay_cache_size: 64,
+                reject_unknown_config_keys: true,
+                refuse_world_readable_identity: true,
+                refuse_world_writable_paths: true,
+            },
+            logging: LoggingConfig {
+                level: "info".to_owned(),
+                format: "text".to_owned(),
+                file_logging: false,
+                stdout_logging: true,
+                log_file: base.join("state/p2ptunnel.log"),
+                redact_secrets: true,
+                redact_sdp: true,
+                redact_candidates: true,
+                log_rotation: "daily".to_owned(),
+            },
+            health: HealthConfig {
+                heartbeat_interval_secs: 10,
+                ping_timeout_secs: 30,
+                status_socket: PathBuf::new(),
+                write_status_file: true,
+                status_file: base.join("state/status.json"),
+            },
+        }
+    }
+
+    #[test]
+    fn build_mqtt_options_uses_custom_tls_transport() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(temp_dir.path().join("password"), "secret\n").expect("password");
+        std::fs::write(
+            temp_dir.path().join("ca.pem"),
+            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+        )
+        .expect("ca");
+        let config = sample_config(temp_dir.path());
+
+        let (options, _qos, _topic) = build_mqtt_options(&config).expect("options build");
+        assert!(matches!(options.transport(), Transport::Tls(_)));
+    }
+
+    #[test]
+    fn build_mqtt_options_rejects_unsupported_connect_timeout() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(temp_dir.path().join("password"), "secret\n").expect("password");
+        std::fs::write(
+            temp_dir.path().join("ca.pem"),
+            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+        )
+        .expect("ca");
+        let mut config = sample_config(temp_dir.path());
+        config.broker.connect_timeout_secs = 10;
+
+        assert!(matches!(
+            build_mqtt_options(&config),
+            Err(SignalingError::Protocol(message))
+                if message.contains("connect_timeout_secs")
+        ));
+    }
+
+    #[test]
+    fn build_mqtt_options_rejects_server_name_mismatch() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(temp_dir.path().join("password"), "secret\n").expect("password");
+        std::fs::write(
+            temp_dir.path().join("ca.pem"),
+            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+        )
+        .expect("ca");
+        let mut config = sample_config(temp_dir.path());
+        config.broker.tls.server_name = "other.example".to_owned();
+
+        assert!(matches!(
+            build_mqtt_options(&config),
+            Err(SignalingError::Protocol(message))
+                if message.contains("server_name must match")
+        ));
+    }
+
+    #[test]
+    fn build_mqtt_options_rejects_unsupported_session_expiry() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(temp_dir.path().join("password"), "secret\n").expect("password");
+        std::fs::write(
+            temp_dir.path().join("ca.pem"),
+            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+        )
+        .expect("ca");
+        let mut config = sample_config(temp_dir.path());
+        config.broker.session_expiry_secs = 30;
+
+        assert!(matches!(
+            build_mqtt_options(&config),
+            Err(SignalingError::Protocol(message))
+                if message.contains("session_expiry_secs")
+        ));
     }
 }
