@@ -185,7 +185,7 @@ impl WebRtcPeer {
         peer_connection.on_data_channel(Box::new(move |channel| {
             let incoming_dc_tx = incoming_dc_tx.clone();
             Box::pin(async move {
-                if channel.label() != DATA_CHANNEL_LABEL {
+                if channel.label() != expected_data_channel_label() {
                     let _ = incoming_dc_tx
                         .send(Err(WebRtcError::UnexpectedDataChannel(channel.label().to_owned())))
                         .await;
@@ -282,9 +282,9 @@ impl WebRtcPeer {
         };
         let channel = self
             .peer_connection
-            .create_data_channel(&self.config.data_channel_label, Some(options))
+            .create_data_channel(expected_data_channel_label(), Some(options))
             .await?;
-        if channel.label() != DATA_CHANNEL_LABEL {
+        if channel.label() != expected_data_channel_label() {
             return Err(WebRtcError::UnexpectedDataChannel(channel.label().to_owned()));
         }
         Ok(DataChannelHandle::observe(channel))
@@ -365,9 +365,14 @@ impl From<RTCIceConnectionState> for IceConnectionState {
     }
 }
 
+fn expected_data_channel_label() -> &'static str {
+    DATA_CHANNEL_LABEL
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{IceConnectionState, build_rtc_configuration};
+    use super::{IceConnectionState, build_rtc_configuration, expected_data_channel_label};
+    use p2p_core::DATA_CHANNEL_LABEL;
     use p2p_core::WebRtcConfig;
 
     fn sample_config() -> WebRtcConfig {
@@ -377,7 +382,6 @@ mod tests {
             ice_connection_timeout_secs: 20,
             enable_trickle_ice: true,
             enable_ice_restart: true,
-            data_channel_label: "tunnel".to_owned(),
             max_message_size: 262_144,
         }
     }
@@ -402,5 +406,10 @@ mod tests {
             webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Failed,
         );
         assert_eq!(state, IceConnectionState::Failed);
+    }
+
+    #[test]
+    fn data_channel_label_is_fixed_to_protocol_constant() {
+        assert_eq!(expected_data_channel_label(), DATA_CHANNEL_LABEL);
     }
 }

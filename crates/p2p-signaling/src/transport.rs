@@ -550,7 +550,6 @@ mod tests {
                 ice_connection_timeout_secs: 10,
                 enable_trickle_ice: true,
                 enable_ice_restart: true,
-                data_channel_label: "tunnel".to_owned(),
                 max_message_size: 262_144,
             },
             tunnel: TunnelConfig {

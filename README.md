@@ -133,7 +133,7 @@ password_file = "~/.config/p2ptunnel/broker-password"
 qos = 1
 keepalive_secs = 30
 clean_session = true
-connect_timeout_secs = 10
+connect_timeout_secs = 5
 session_expiry_secs = 0
 
 [broker.tls]

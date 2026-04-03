@@ -225,7 +225,6 @@ pub struct WebRtcConfig {
     pub ice_connection_timeout_secs: u16,
     pub enable_trickle_ice: bool,
     pub enable_ice_restart: bool,
-    pub data_channel_label: String,
     pub max_message_size: usize,
 }
 
@@ -386,7 +385,6 @@ ice_gather_timeout_secs = 15
 ice_connection_timeout_secs = 20
 enable_trickle_ice = true
 enable_ice_restart = true
-data_channel_label = "tunnel"
 max_message_size = 262144
 
 [tunnel]

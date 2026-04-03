@@ -88,6 +88,7 @@ Do not collapse unrelated responsibilities into a single crate unless the user e
 ### Data channel and tunnel behavior
 
 - WebRTC data channel must be **ordered = true** and **reliable = true** in v1.
+- The v1 data channel label is fixed to **`tunnel`**; do not make it configurable unless the user explicitly expands scope.
 - Data channel open means transport is available; it does **not** by itself mean the target TCP connection is established.
 - Keep tunnel `OPEN` in v1.
 - Tunnel `OPEN` payload is empty in v1.

@@ -546,8 +546,8 @@ password_file = "~/.config/p2ptunnel/mqtt_password"
 qos = 1
 keepalive_secs = 30
 clean_session = false
-connect_timeout_secs = 10
-session_expiry_secs = 86400
+connect_timeout_secs = 5
+session_expiry_secs = 0
 
 [broker.tls]
 ca_file = "~/.config/p2ptunnel/ca.crt"
@@ -562,7 +562,6 @@ ice_gather_timeout_secs = 15
 ice_connection_timeout_secs = 20
 enable_trickle_ice = true
 enable_ice_restart = true
-data_channel_label = "tunnel"
 max_message_size = 262144
 
 [tunnel]
@@ -765,4 +764,3 @@ Subcommands:
 - On ICE failure, send encrypted MQTT error and fail cleanly
 - One active tunnel session at a time
 - Always-on answer daemon supported and expected
-

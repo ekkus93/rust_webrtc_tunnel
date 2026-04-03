@@ -132,10 +132,10 @@ The active answer loop decodes with `expected_session = None` and then checks se
 - `crates/p2p-signaling/src/transport.rs` or signaling decode helpers if needed
 
 ### Tasks
-- [ ] Pass `Some(session.session_id)` to active answer-session decode.
-- [ ] Ensure stale/foreign-session messages are rejected during decode.
-- [ ] Confirm ACK behavior does not run before session validation.
-- [ ] Add tests for stale-session and foreign-session payloads during an active answer session.
+- [x] Pass `Some(session.session_id)` to active answer-session decode.
+- [x] Ensure stale/foreign-session messages are rejected during decode.
+- [x] Confirm ACK behavior does not run before session validation.
+- [x] Add tests for stale-session and foreign-session payloads during an active answer session.
 
 ### Acceptance criteria
 - Active answer sessions reject foreign-session messages before ACK or processing.
@@ -151,11 +151,11 @@ The idle answer daemon ACKs ack-required messages before final `allow_remote_pee
 - `crates/p2p-daemon/src/lib.rs`
 
 ### Tasks
-- [ ] Audit all ACK call sites.
-- [ ] For `Offer`, ensure policy checks occur before ACK.
-- [ ] Decide whether other message types should also defer ACK until sender/policy checks are complete.
-- [ ] Keep ACK behavior protocol-consistent across idle and active loops.
-- [ ] Add tests verifying unauthorized but authorized-key-listed peers do not receive misleading ACKs.
+- [x] Audit all ACK call sites.
+- [x] For `Offer`, ensure policy checks occur before ACK.
+- [x] Decide whether other message types should also defer ACK until sender/policy checks are complete.
+- [x] Keep ACK behavior protocol-consistent across idle and active loops.
+- [x] Add tests verifying unauthorized but authorized-key-listed peers do not receive misleading ACKs.
 
 ### Acceptance criteria
 - Policy-rejected offers do not receive a success-looking ACK.
@@ -171,9 +171,9 @@ Current code converts `0` to `3`.
 - `crates/p2p-daemon/src/lib.rs`
 
 ### Tasks
-- [ ] Replace current reconnect attempt loop with logic that supports true unlimited retries when `max_attempts == 0`.
-- [ ] Preserve bounded retry behavior for nonzero values.
-- [ ] Update any related tests or add new ones.
+- [x] Replace current reconnect attempt loop with logic that supports true unlimited retries when `max_attempts == 0`.
+- [x] Preserve bounded retry behavior for nonzero values.
+- [x] Update any related tests or add new ones.
 
 ### Acceptance criteria
 - `max_attempts = 0` behaves as documented.
@@ -190,14 +190,14 @@ The data channel is created using a config label, then validated against a hardc
 - `crates/p2p-core/src/config.rs`
 
 ### Tasks
-- [ ] Decide whether data channel label is truly configurable in v1.
+- [x] Decide whether data channel label is truly configurable in v1.
 - [ ] If configurable:
   - [ ] remove hardcoded validation against a different constant
   - [ ] use config consistently on both create and receive paths
-- [ ] If not configurable:
-  - [ ] remove the config field
-  - [ ] hardcode one label everywhere
-- [ ] Add tests for expected label behavior.
+- [x] If not configurable:
+  - [x] remove the config field
+  - [x] hardcode one label everywhere
+- [x] Add tests for expected label behavior.
 
 ### Acceptance criteria
 - There is exactly one source of truth for the data channel label.
@@ -369,10 +369,10 @@ The code already has decent structure, but sensitive paths should be extra cauti
 - [x] Resolve MQTT TLS config drift
 
 ## Phase 2 — Protocol cleanup
-- [ ] Enforce expected session on answer decode
-- [ ] Fix ACK ordering vs authorization/session validation
-- [ ] Fix unlimited reconnect semantics
-- [ ] Resolve data-channel-label mismatch
+- [x] Enforce expected session on answer decode
+- [x] Fix ACK ordering vs authorization/session validation
+- [x] Fix unlimited reconnect semantics
+- [x] Resolve data-channel-label mismatch
 
 ## Phase 3 — Config/UX cleanup
 - [ ] Harden config validation

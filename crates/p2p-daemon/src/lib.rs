@@ -162,11 +162,13 @@ pub async fn run_answer_daemon(
                 tracing::info!("received optional hello from {}", sender.peer_id);
             }
             MessageBody::Offer(offer) => {
-                if !config.tunnel.answer.allow_remote_peers.contains(&sender.peer_id) {
+                let peer_allowed =
+                    config.tunnel.answer.allow_remote_peers.contains(&sender.peer_id);
+                if !peer_allowed {
                     tracing::warn!("rejecting unauthorized peer {}", sender.peer_id);
                     continue;
                 }
-                if message.message_type.requires_ack() {
+                if should_ack_idle_offer(peer_allowed, message.message_type.requires_ack()) {
                     publish_message(
                         &config,
                         &codec,
@@ -566,11 +568,36 @@ async fn run_answer_session(
             }
             payload = transport.poll_signal_payload() => {
                 if let Some(payload) = payload? {
-                    let (envelope, message, sender) = codec.decode(
+                    let decoded = match codec.decode(
                         &payload,
                         &mut session.signaling.replay_cache,
-                        None,
-                    )?;
+                        Some(session.session_id),
+                    ) {
+                        Ok(decoded) => decoded,
+                        Err(error) => {
+                            if maybe_reject_busy_offer(
+                                config,
+                                codec,
+                                transport,
+                                &payload,
+                                session.session_id,
+                                config.security.replay_cache_size,
+                            )
+                            .await?
+                            {
+                                continue;
+                            }
+                            tracing::warn!(
+                                "rejecting signaling message during active answer session: {error}"
+                            );
+                            continue;
+                        }
+                    };
+                    let (envelope, message, sender) = decoded;
+                    if sender.peer_id != session.remote_peer_id {
+                        tracing::warn!("ignoring message from unexpected peer {}", sender.peer_id);
+                        continue;
+                    }
                     if message.message_type.requires_ack() {
                         publish_message(
                             config,
@@ -581,31 +608,6 @@ async fn run_answer_session(
                             codec.build_ack(sender.peer_id.clone(), message.session_id, envelope.msg_id),
                             true,
                         ).await?;
-                    }
-                    if message.session_id != session.session_id {
-                        if matches!(message.body, MessageBody::Offer(_)) {
-                            publish_message(
-                                config,
-                                codec,
-                                transport,
-                                None,
-                                &sender,
-                                build_error_message(
-                                    &config.node.peer_id,
-                                    &sender.peer_id,
-                                    message.session_id,
-                                    FailureCode::Busy,
-                                    "answer daemon already has an active session",
-                                ),
-                                true,
-                            ).await?;
-                        }
-                        tracing::warn!(
-                            "ignoring message for stale or foreign session {} while active session is {}",
-                            message.session_id,
-                            session.session_id
-                        );
-                        continue;
                     }
                     handle_answer_session_message(&message, &mut session).await?;
                 }
@@ -807,6 +809,40 @@ async fn retry_pending_acks(
     Ok(())
 }
 
+async fn maybe_reject_busy_offer(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    transport: &mut MqttSignalingTransport,
+    payload: &[u8],
+    active_session_id: SessionId,
+    replay_cache_size: usize,
+) -> Result<bool, DaemonError> {
+    let mut replay_cache = p2p_signaling::ReplayCache::new(replay_cache_size);
+    let Ok((_envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+        return Ok(false);
+    };
+    if !matches!(message.body, MessageBody::Offer(_)) || message.session_id == active_session_id {
+        return Ok(false);
+    }
+    publish_message(
+        config,
+        codec,
+        transport,
+        None,
+        &sender,
+        build_error_message(
+            &config.node.peer_id,
+            &sender.peer_id,
+            message.session_id,
+            FailureCode::Busy,
+            "answer daemon already has an active session",
+        ),
+        true,
+    )
+    .await?;
+    Ok(true)
+}
+
 fn decode_idle_signaling_message<'a>(
     codec: &SignalCodec<'a>,
     payload: &[u8],
@@ -825,11 +861,16 @@ fn should_attempt_offer_reconnect(
         && matches!(bridge_state, BridgeSessionState::Pending | BridgeSessionState::Reconnecting)
 }
 
-fn should_poll_answer_data_events(
-    data_channel_present: bool,
-    bridge_handle_present: bool,
-) -> bool {
+fn should_poll_answer_data_events(data_channel_present: bool, bridge_handle_present: bool) -> bool {
     data_channel_present && !bridge_handle_present
+}
+
+fn should_ack_idle_offer(peer_allowed: bool, requires_ack: bool) -> bool {
+    peer_allowed && requires_ack
+}
+
+fn should_continue_reconnect_attempt(max_attempts: u32, attempt: u32) -> bool {
+    max_attempts == 0 || attempt < max_attempts
 }
 
 fn apply_override_pairs(
@@ -877,10 +918,9 @@ async fn attempt_offer_reconnect(
         return Ok(false);
     }
 
-    let max_attempts =
-        if config.reconnect.max_attempts == 0 { 3 } else { config.reconnect.max_attempts };
-
-    for attempt in 0..max_attempts {
+    let max_attempts = config.reconnect.max_attempts;
+    let mut attempt = 0;
+    while should_continue_reconnect_attempt(max_attempts, attempt) {
         session.state = DaemonState::Backoff;
         status
             .write(DaemonStatus::new(
@@ -924,6 +964,7 @@ async fn attempt_offer_reconnect(
             session.state = DaemonState::ConnectingDataChannel;
             return Ok(true);
         }
+        attempt = attempt.saturating_add(1);
     }
 
     Ok(false)
@@ -1127,7 +1168,8 @@ mod tests {
     use super::{
         BridgeSessionState, DaemonError, apply_answer_overrides, apply_offer_overrides,
         apply_override_pairs, compute_backoff_delay, decode_idle_signaling_message,
-        should_attempt_offer_reconnect, should_poll_answer_data_events,
+        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
+        should_poll_answer_data_events,
     };
 
     fn sample_config() -> AppConfig {
@@ -1168,7 +1210,6 @@ mod tests {
                 ice_connection_timeout_secs: 10,
                 enable_trickle_ice: true,
                 enable_ice_restart: true,
-                data_channel_label: "tunnel".to_owned(),
                 max_message_size: 262_144,
             },
             tunnel: TunnelConfig {
@@ -1369,5 +1410,54 @@ mod tests {
         assert!(should_poll_answer_data_events(true, false));
         assert!(!should_poll_answer_data_events(true, true));
         assert!(!should_poll_answer_data_events(false, false));
+    }
+
+    #[test]
+    fn unauthorized_idle_offer_does_not_ack() {
+        assert!(!should_ack_idle_offer(false, true));
+        assert!(!should_ack_idle_offer(false, false));
+        assert!(should_ack_idle_offer(true, true));
+    }
+
+    #[test]
+    fn max_attempts_zero_means_unlimited() {
+        assert!(should_continue_reconnect_attempt(0, 0));
+        assert!(should_continue_reconnect_attempt(0, 25));
+        assert!(should_continue_reconnect_attempt(3, 2));
+        assert!(!should_continue_reconnect_attempt(3, 3));
+    }
+
+    #[test]
+    fn strict_active_session_decode_rejects_foreign_offer() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let active_session = SessionId::random();
+        let foreign_session = SessionId::random();
+        let message = InnerMessageBuilder::new(
+            foreign_session,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "offer-sdp".to_owned() }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("offer encodes");
+
+        let mut replay_cache = ReplayCache::new(64);
+        assert!(matches!(
+            answer_codec.decode(&payload, &mut replay_cache, Some(active_session)),
+            Err(SignalingError::Protocol(message))
+                if message.contains("active session")
+        ));
     }
 }
