@@ -15,56 +15,58 @@ This TODO is written to be explicit and implementation-oriented for GitHub Copil
 
 ## P0 — Fix inaccurate `mqtt_connected` status reporting
 
+- [x] Status: complete
+
 ### Task P0.1 — Identify all status write sites
 
-- Find every place where `DaemonStatus` is constructed or written.
-- Enumerate where `mqtt_connected` is currently set.
-- Document which of those writes happen:
-  - at startup
-  - during idle steady state
-  - during session startup
-  - during session teardown
-  - during transport failure/recovery
+- [x] Find every place where `DaemonStatus` is constructed or written.
+- [x] Enumerate where `mqtt_connected` is currently set.
+- [x] Document which of those writes happen:
+  - [x] at startup
+  - [x] during idle steady state
+  - [x] during session startup
+  - [x] during session teardown
+  - [x] during transport failure/recovery
 
 ### Task P0.2 — Add explicit daemon MQTT connectivity state
 
 Implement explicit runtime state for MQTT connectivity instead of inferring it ad hoc.
 
 Requirements:
-- Add a small connectivity-state variable/field owned by the daemon runtime.
-- It must represent real current transport state, not a guessed value.
-- It must be updateable from:
-  - successful connection/setup
-  - transport poll failure/disconnect
-  - successful reconnect/recovery
-  - permanent fatal shutdown paths
+- [x] Add a small connectivity-state variable/field owned by the daemon runtime.
+- [x] It must represent real current transport state, not a guessed value.
+- [x] It must be updateable from:
+  - [x] successful connection/setup
+  - [x] transport poll failure/disconnect
+  - [x] successful reconnect/recovery
+  - [x] permanent fatal shutdown paths that still reach status-writing code paths
 
 ### Task P0.3 — Use real connectivity state in `DaemonStatus`
 
-- Stop hardcoding or defaulting `mqtt_connected = true` in status writes.
-- Make all status writes use the tracked runtime connectivity state.
-- Ensure session-state updates do not accidentally overwrite connectivity state with a stale optimistic value.
+- [x] Stop hardcoding or defaulting `mqtt_connected = true` in status writes.
+- [x] Make all status writes use the tracked runtime connectivity state.
+- [x] Ensure session-state updates do not accidentally overwrite connectivity state with a stale optimistic value.
 
 ### Task P0.4 — Update status on recoverable transport errors
 
 On recoverable MQTT/signaling transport errors:
-- mark `mqtt_connected = false`
-- write updated status if possible
-- log the transition
-- then proceed with recovery/backoff behavior
+- [x] mark `mqtt_connected = false`
+- [x] write updated status if possible
+- [x] log the transition
+- [x] then proceed with recovery/backoff behavior
 
 On successful recovery/reconnect:
-- mark `mqtt_connected = true`
-- write updated status
-- log recovery
+- [x] mark `mqtt_connected = true`
+- [x] write updated status
+- [x] log recovery
 
 ### Task P0.5 — Add tests for status accuracy
 
 Add tests that validate:
-- startup/healthy state writes `mqtt_connected = true`
-- recoverable transport failure updates status to `false`
-- recovery updates status back to `true`
-- status-write failures remain recoverable and do not kill the daemon
+- [x] startup/healthy state writes `mqtt_connected = true`
+- [x] recoverable transport failure updates status to `false`
+- [x] recovery updates status back to `true`
+- [x] status-write failures remain recoverable and do not kill the daemon
 
 ---
 

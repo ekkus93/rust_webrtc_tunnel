@@ -51,3 +51,10 @@
 
 ## 2026-04-30T09:30:26Z - GPT-5.4 - Added review 4 response file
 - Wrote `docs/responses4.md` summarizing which round-4 review findings look real and listing the three clarification questions to freeze with ChatGPT before starting another hardening pass.
+
+## 2026-04-30T09:33:10Z - GPT-5.4 - Review 4 decisions frozen
+- ChatGPT confirmed that `mqtt_connected` should mean latest-known signaling transport usability, flipping false immediately on recoverable poll/publish failure and true again after successful transport activity/recovery, with status updated before retry/backoff sleeps.
+- ChatGPT also froze active busy-offer dedupe as a per-active-answer-session cache keyed by at least `(sender_kid, msg_id)`, and kept round 4 narrowly scoped to those two concrete bugs plus focused tests rather than a broad runtime-policy rewrite.
+
+## 2026-04-30T09:46:29Z - GPT-5.4 - Review 4 phase 1 landed
+- Round-4 phase 1 added explicit daemon-side transport usability tracking for `mqtt_connected`, routed daemon status writes through that tracked runtime state, flipped status false before idle/session transport backoff on recoverable poll/publish failures, restored it after successful transport activity, and added focused tests for healthy, disconnected, and recovered status transitions.

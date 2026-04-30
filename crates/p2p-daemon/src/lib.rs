@@ -17,7 +17,7 @@ use p2p_crypto::{AuthorizedKey, AuthorizedKeys, IdentityFile};
 use p2p_signaling::{
     AckBody, AnswerBody, CloseBody, EndOfCandidatesBody, ErrorBody, IceCandidateBody, InnerMessage,
     InnerMessageBuilder, MessageBody, MqttSignalingTransport, OfferBody, SignalCodec,
-    SignalingSession,
+    SignalingError, SignalingSession,
 };
 use p2p_tunnel::{AnswerTargetConnector, OfferClient, OfferListener, TunnelBridge};
 use p2p_webrtc::{
@@ -45,6 +45,34 @@ enum BridgeSessionState {
 enum ActiveBusyOfferAction {
     Ignore,
     ReplyBusy { session_id: SessionId, sender: Box<AuthorizedKey> },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DaemonRuntimeState {
+    mqtt_connected: bool,
+}
+
+impl DaemonRuntimeState {
+    fn new_connected() -> Self {
+        Self { mqtt_connected: true }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StatusSnapshot {
+    active_session_id: Option<SessionId>,
+    current_state: DaemonState,
+}
+
+struct RuntimeContext<'a> {
+    config: &'a AppConfig,
+    status: &'a StatusWriter,
+    runtime: &'a mut DaemonRuntimeState,
+}
+
+struct OutgoingSignal {
+    message: InnerMessage,
+    response: bool,
 }
 
 pub struct ActiveSession {
@@ -95,7 +123,9 @@ pub async fn run_offer_daemon(
     transport.subscribe_own_topic().await?;
 
     let status = StatusWriter::new(&config);
-    write_steady_state_status(&config, &status).await;
+    let mut runtime = DaemonRuntimeState::new_connected();
+    let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
+    write_steady_state_status(&ctx).await;
 
     let listener = OfferListener::bind(&config.tunnel.offer).await?;
     tracing::info!("listening for local clients on {}", listener.local_addr()?);
@@ -109,7 +139,7 @@ pub async fn run_offer_daemon(
         )?;
 
     loop {
-        write_steady_state_status(&config, &status).await;
+        write_steady_state_status(&ctx).await;
 
         let client = accepted_clients
             .recv()
@@ -117,8 +147,8 @@ pub async fn run_offer_daemon(
             .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
         tracing::info!("accepted local client and entering busy offer session state");
         let result =
-            run_offer_session(&config, &codec, &mut transport, &status, client, &remote).await;
-        recover_daemon_after_session(&config, &status, result).await;
+            run_offer_session(&config, &codec, &mut transport, &mut ctx, client, &remote).await;
+        recover_daemon_after_session(&ctx, result).await;
         tracing::info!("offer daemon returned to waiting state");
     }
 }
@@ -137,14 +167,15 @@ pub async fn run_answer_daemon(
     let mut transport = MqttSignalingTransport::connect(&config)?;
     transport.subscribe_own_topic().await?;
     let status = StatusWriter::new(&config);
-    write_steady_state_status(&config, &status).await;
+    let mut runtime = DaemonRuntimeState::new_connected();
+    let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
+    write_steady_state_status(&ctx).await;
 
     let connector = AnswerTargetConnector::new(&config.tunnel.answer);
     let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
 
     loop {
-        let Some(payload) = poll_idle_signal_payload(&config.node.role, &mut transport).await
-        else {
+        let Some(payload) = poll_idle_signal_payload(&mut ctx, &mut transport).await else {
             continue;
         };
 
@@ -172,17 +203,23 @@ pub async fn run_answer_daemon(
                 let session_result = async {
                     if should_ack_idle_offer(peer_allowed, message.message_type.requires_ack()) {
                         publish_message(
-                            &config,
+                            &mut ctx,
                             &codec,
                             &mut transport,
+                            StatusSnapshot {
+                                active_session_id: Some(message.session_id),
+                                current_state: DaemonState::Negotiating,
+                            },
                             None,
                             &sender,
-                            codec.build_ack(
-                                sender.peer_id.clone(),
-                                message.session_id,
-                                envelope.msg_id,
-                            ),
-                            true,
+                            OutgoingSignal {
+                                message: codec.build_ack(
+                                    sender.peer_id.clone(),
+                                    message.session_id,
+                                    envelope.msg_id,
+                                ),
+                                response: true,
+                            },
                         )
                         .await?;
                     }
@@ -196,18 +233,24 @@ pub async fn run_answer_daemon(
                     );
                     let answer_sdp = session.peer.create_answer().await?;
                     publish_message(
-                        &config,
+                        &mut ctx,
                         &codec,
                         &mut transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: DaemonState::Negotiating,
+                        },
                         Some(&mut session.signaling),
                         &session.remote_authorized,
-                        InnerMessageBuilder::new(
-                            session.session_id,
-                            config.node.peer_id.clone(),
-                            session.remote_peer_id.clone(),
-                        )
-                        .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
-                        false,
+                        OutgoingSignal {
+                            message: InnerMessageBuilder::new(
+                                session.session_id,
+                                config.node.peer_id.clone(),
+                                session.remote_peer_id.clone(),
+                            )
+                            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+                            response: false,
+                        },
                     )
                     .await?;
 
@@ -217,13 +260,13 @@ pub async fn run_answer_daemon(
                         &codec,
                         &mut transport,
                         &connector,
-                        &status,
+                        &mut ctx,
                         session,
                     )
                     .await
                 }
                 .await;
-                recover_daemon_after_session(&config, &status, session_result).await;
+                recover_daemon_after_session(&ctx, session_result).await;
                 tracing::info!("answer daemon returned to idle state");
             }
             _ => {
@@ -292,7 +335,7 @@ async fn run_offer_session(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
-    status: &StatusWriter,
+    ctx: &mut RuntimeContext<'_>,
     mut client: OfferClient,
     remote: &AuthorizedKey,
 ) -> Result<(), DaemonError> {
@@ -301,26 +344,34 @@ async fn run_offer_session(
     let mut session =
         ActiveSession::new(session_id, remote.clone(), peer, config.security.replay_cache_size);
 
-    write_status_or_log(
-        status,
-        DaemonStatus::new(
-            config.node.peer_id.clone(),
-            config.node.role.clone(),
-            true,
-            Some(session.session_id),
-            DaemonState::Negotiating,
-        ),
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: DaemonState::Negotiating,
+        },
     )
     .await;
 
     publish_message(
-        config,
+        ctx,
         codec,
         transport,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: DaemonState::Negotiating,
+        },
         None,
         remote,
-        build_hello_message(&config.node.peer_id, &remote.peer_id, session.session_id, "offer"),
-        false,
+        OutgoingSignal {
+            message: build_hello_message(
+                &config.node.peer_id,
+                &remote.peer_id,
+                session.session_id,
+                "offer",
+            ),
+            response: false,
+        },
     )
     .await?;
 
@@ -328,18 +379,24 @@ async fn run_offer_session(
     session.data_channel = Some(data_channel.clone());
     let offer_sdp = session.peer.create_offer().await?;
     publish_message(
-        config,
+        ctx,
         codec,
         transport,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: DaemonState::Negotiating,
+        },
         Some(&mut session.signaling),
         remote,
-        InnerMessageBuilder::new(
-            session.session_id,
-            config.node.peer_id.clone(),
-            session.remote_peer_id.clone(),
-        )
-        .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
-        false,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
+            response: false,
+        },
     )
     .await?;
 
@@ -350,12 +407,28 @@ async fn run_offer_session(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    retry_pending_acks(config, transport, &mut session).await?;
+                    retry_pending_acks(
+                        ctx,
+                        transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: session.state,
+                        },
+                        &mut session,
+                    )
+                    .await?;
                     if !session.signaling.ack_tracker.expired().is_empty() {
                         return Err(DaemonError::AckTimeout);
                     }
                 }
-                payload = transport.poll_signal_payload() => {
+                payload = poll_session_signal_payload(
+                    ctx,
+                    transport,
+                    StatusSnapshot {
+                        active_session_id: Some(session.session_id),
+                        current_state: session.state,
+                    },
+                ) => {
                     if let Some(payload) = payload? {
                         let (envelope, message, sender) = codec.decode(
                             &payload,
@@ -372,13 +445,23 @@ async fn run_offer_session(
                         }
                         if message.message_type.requires_ack() {
                             publish_message(
-                                config,
+                                ctx,
                                 codec,
                                 transport,
+                                StatusSnapshot {
+                                    active_session_id: Some(session.session_id),
+                                    current_state: session.state,
+                                },
                                 None,
                                 remote,
-                                codec.build_ack(remote.peer_id.clone(), session.session_id, envelope.msg_id),
-                                true,
+                                OutgoingSignal {
+                                    message: codec.build_ack(
+                                        remote.peer_id.clone(),
+                                        session.session_id,
+                                        envelope.msg_id,
+                                    ),
+                                    response: true,
+                                },
                             ).await?;
                         }
                         handle_offer_session_message(&message, &mut session).await?;
@@ -386,26 +469,40 @@ async fn run_offer_session(
                 }
                 candidate = session.peer.next_local_candidate() => {
                     if let Some(candidate) = candidate {
-                        send_local_candidate(config, codec, transport, &mut session, remote, candidate).await?;
+                        send_local_candidate(
+                            ctx,
+                            codec,
+                            transport,
+                            &mut session,
+                            remote,
+                            candidate,
+                        )
+                        .await?;
                     }
                 }
                 ice_state = session.peer.next_ice_state() => {
                     if let Some(ice_state) = ice_state {
                         if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
                             publish_message(
-                                config,
+                                ctx,
                                 codec,
                                 transport,
+                                StatusSnapshot {
+                                    active_session_id: Some(session.session_id),
+                                    current_state: session.state,
+                                },
                                 Some(&mut session.signaling),
                                 remote,
-                                build_error_message(
-                                    &config.node.peer_id,
-                                    &session.remote_peer_id,
-                                    session.session_id,
-                                    FailureCode::IceFailed,
-                                    "ice connection failed",
-                                ),
-                                false,
+                                OutgoingSignal {
+                                    message: build_error_message(
+                                        &config.node.peer_id,
+                                        &session.remote_peer_id,
+                                        session.session_id,
+                                        FailureCode::IceFailed,
+                                        "ice connection failed",
+                                    ),
+                                    response: false,
+                                },
                             ).await?;
                             if let Some(handle) = session.bridge_handle.take() {
                                 handle.abort();
@@ -418,10 +515,9 @@ async fn run_offer_session(
                             session.bridge_state = BridgeSessionState::Reconnecting;
                             if should_attempt_offer_reconnect(config, pending_stream.is_some(), session.bridge_state)
                                 && attempt_offer_reconnect(
-                                    config,
+                                    ctx,
                                     codec,
                                     transport,
-                                    status,
                                     &mut session,
                                     remote,
                                 )
@@ -443,15 +539,12 @@ async fn run_offer_session(
                     }
                 }, if session.bridge_handle.is_none() => {
                     if let Some(DataChannelEvent::Open) = data_event {
-                        write_status_or_log(
-                            status,
-                            DaemonStatus::new(
-                                config.node.peer_id.clone(),
-                                config.node.role.clone(),
-                                true,
-                                Some(session.session_id),
-                                DaemonState::TunnelOpen,
-                            ),
+                        write_daemon_status(
+                            ctx,
+                            StatusSnapshot {
+                                active_session_id: Some(session.session_id),
+                                current_state: DaemonState::TunnelOpen,
+                            },
                         )
                         .await;
                         let bridge = TunnelBridge::new(
@@ -474,21 +567,27 @@ async fn run_offer_session(
                     session.bridge_handle = None;
                     session.bridge_state = BridgeSessionState::Closed;
                     let _ = publish_message(
-                        config,
+                        ctx,
                         codec,
                         transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: session.state,
+                        },
                         Some(&mut session.signaling),
                         remote,
-                        InnerMessageBuilder::new(
-                            session.session_id,
-                            config.node.peer_id.clone(),
-                            session.remote_peer_id.clone(),
-                        )
-                        .build(MessageBody::Close(CloseBody {
-                            reason_code: "session_closed".to_owned(),
-                            message: None,
-                        })),
-                        false,
+                        OutgoingSignal {
+                            message: InnerMessageBuilder::new(
+                                session.session_id,
+                                config.node.peer_id.clone(),
+                                session.remote_peer_id.clone(),
+                            )
+                            .build(MessageBody::Close(CloseBody {
+                                reason_code: "session_closed".to_owned(),
+                                message: None,
+                            })),
+                            response: false,
+                        },
                     )
                     .await;
                     result?;
@@ -564,18 +663,15 @@ async fn run_answer_session(
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     connector: &AnswerTargetConnector,
-    status: &StatusWriter,
+    ctx: &mut RuntimeContext<'_>,
     mut session: ActiveSession,
 ) -> Result<(), DaemonError> {
-    write_status_or_log(
-        status,
-        DaemonStatus::new(
-            config.node.peer_id.clone(),
-            config.node.role.clone(),
-            true,
-            Some(session.session_id),
-            session.state,
-        ),
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: session.state,
+        },
     )
     .await;
 
@@ -584,12 +680,28 @@ async fn run_answer_session(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    retry_pending_acks(config, transport, &mut session).await?;
+                    retry_pending_acks(
+                        ctx,
+                        transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: session.state,
+                        },
+                        &mut session,
+                    )
+                    .await?;
                     if !session.signaling.ack_tracker.expired().is_empty() {
                         return Err(DaemonError::AckTimeout);
                     }
                 }
-                payload = transport.poll_signal_payload() => {
+                payload = poll_session_signal_payload(
+                    ctx,
+                    transport,
+                    StatusSnapshot {
+                        active_session_id: Some(session.session_id),
+                        current_state: session.state,
+                    },
+                ) => {
                     if let Some(payload) = payload? {
                         let decoded = match codec.decode(
                             &payload,
@@ -599,7 +711,7 @@ async fn run_answer_session(
                             Ok(decoded) => decoded,
                             Err(error) => {
                                 if maybe_handle_active_busy_offer(
-                                    config,
+                                    ctx,
                                     codec,
                                     transport,
                                     &payload,
@@ -629,13 +741,23 @@ async fn run_answer_session(
                         }
                         if message.message_type.requires_ack() {
                             publish_message(
-                                config,
+                                ctx,
                                 codec,
                                 transport,
+                                StatusSnapshot {
+                                    active_session_id: Some(session.session_id),
+                                    current_state: session.state,
+                                },
                                 None,
                                 &sender,
-                                codec.build_ack(sender.peer_id.clone(), message.session_id, envelope.msg_id),
-                                true,
+                                OutgoingSignal {
+                                    message: codec.build_ack(
+                                        sender.peer_id.clone(),
+                                        message.session_id,
+                                        envelope.msg_id,
+                                    ),
+                                    response: true,
+                                },
                             ).await?;
                         }
                         handle_answer_session_message(&message, &mut session).await?;
@@ -645,7 +767,7 @@ async fn run_answer_session(
                     if let Some(candidate) = candidate {
                         let remote = session.remote_authorized.clone();
                         send_local_candidate(
-                            config,
+                            ctx,
                             codec,
                             transport,
                             &mut session,
@@ -663,19 +785,25 @@ async fn run_answer_session(
                     if let Some(ice_state) = ice_state {
                         if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
                             publish_message(
-                                config,
+                                ctx,
                                 codec,
                                 transport,
+                                StatusSnapshot {
+                                    active_session_id: Some(session.session_id),
+                                    current_state: session.state,
+                                },
                                 Some(&mut session.signaling),
                                 &session.remote_authorized,
-                                build_error_message(
-                                    &config.node.peer_id,
-                                    &session.remote_peer_id,
-                                    session.session_id,
-                                    FailureCode::IceFailed,
-                                    "ice connection failed",
-                                ),
-                                false,
+                                OutgoingSignal {
+                                    message: build_error_message(
+                                        &config.node.peer_id,
+                                        &session.remote_peer_id,
+                                        session.session_id,
+                                        FailureCode::IceFailed,
+                                        "ice connection failed",
+                                    ),
+                                    response: false,
+                                },
                             ).await?;
                             if let Some(handle) = session.bridge_handle.take() {
                                 handle.abort();
@@ -693,15 +821,12 @@ async fn run_answer_session(
                     }
                 }, if should_poll_answer_data_events(session.data_channel.is_some(), session.bridge_handle.is_some()) => {
                     if let Some(DataChannelEvent::Open) = data_event {
-                        write_status_or_log(
-                            status,
-                            DaemonStatus::new(
-                                config.node.peer_id.clone(),
-                                config.node.role.clone(),
-                                true,
-                                Some(session.session_id),
-                                DaemonState::TunnelOpen,
-                            ),
+                        write_daemon_status(
+                            ctx,
+                            StatusSnapshot {
+                                active_session_id: Some(session.session_id),
+                                current_state: DaemonState::TunnelOpen,
+                            },
                         )
                         .await;
                         let bridge = TunnelBridge::new(
@@ -725,38 +850,50 @@ async fn run_answer_session(
                     session.bridge_state = BridgeSessionState::Closed;
                     if let Err(p2p_tunnel::TunnelError::TargetConnectFailed(message)) = &result {
                         let _ = publish_message(
-                            config,
+                            ctx,
                             codec,
                             transport,
+                            StatusSnapshot {
+                                active_session_id: Some(session.session_id),
+                                current_state: session.state,
+                            },
                             Some(&mut session.signaling),
                             &session.remote_authorized,
-                            build_error_message(
-                                &config.node.peer_id,
-                                &session.remote_peer_id,
-                                session.session_id,
-                                FailureCode::TargetConnectFailed,
-                                message,
-                            ),
-                            false,
+                            OutgoingSignal {
+                                message: build_error_message(
+                                    &config.node.peer_id,
+                                    &session.remote_peer_id,
+                                    session.session_id,
+                                    FailureCode::TargetConnectFailed,
+                                    message,
+                                ),
+                                response: false,
+                            },
                         )
                         .await;
                     }
                     let _ = publish_message(
-                        config,
+                        ctx,
                         codec,
                         transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: session.state,
+                        },
                         Some(&mut session.signaling),
                         &session.remote_authorized,
-                        InnerMessageBuilder::new(
-                            session.session_id,
-                            config.node.peer_id.clone(),
-                            session.remote_peer_id.clone(),
-                        )
-                        .build(MessageBody::Close(CloseBody {
-                            reason_code: "session_closed".to_owned(),
-                            message: None,
-                        })),
-                        false,
+                        OutgoingSignal {
+                            message: InnerMessageBuilder::new(
+                                session.session_id,
+                                config.node.peer_id.clone(),
+                                session.remote_peer_id.clone(),
+                            )
+                            .build(MessageBody::Close(CloseBody {
+                                reason_code: "session_closed".to_owned(),
+                                message: None,
+                            })),
+                            response: false,
+                        },
                     )
                     .await;
                     result?;
@@ -819,30 +956,37 @@ fn steady_state_for_role(role: &NodeRole) -> DaemonState {
     }
 }
 
-async fn write_steady_state_status(config: &AppConfig, status: &StatusWriter) {
+async fn write_daemon_status(ctx: &RuntimeContext<'_>, snapshot: StatusSnapshot) {
     write_status_or_log(
-        status,
+        ctx.status,
         DaemonStatus::new(
-            config.node.peer_id.clone(),
-            config.node.role.clone(),
-            true,
-            None,
-            steady_state_for_role(&config.node.role),
+            ctx.config.node.peer_id.clone(),
+            ctx.config.node.role.clone(),
+            ctx.runtime.mqtt_connected,
+            snapshot.active_session_id,
+            snapshot.current_state,
         ),
     )
     .await;
 }
 
-async fn recover_daemon_after_session(
-    config: &AppConfig,
-    status: &StatusWriter,
-    result: Result<(), DaemonError>,
-) {
-    write_steady_state_status(config, status).await;
+async fn write_steady_state_status(ctx: &RuntimeContext<'_>) {
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: None,
+            current_state: steady_state_for_role(&ctx.config.node.role),
+        },
+    )
+    .await;
+}
+
+async fn recover_daemon_after_session(ctx: &RuntimeContext<'_>, result: Result<(), DaemonError>) {
+    write_steady_state_status(ctx).await;
     if let Err(error) = result {
         tracing::warn!(
             reason = %error,
-            role = ?config.node.role,
+            role = ?ctx.config.node.role,
             "daemon recovered from session failure"
         );
     }
@@ -854,16 +998,72 @@ async fn write_status_or_log(status: &StatusWriter, daemon_status: DaemonStatus)
     }
 }
 
+async fn mark_transport_unusable(
+    ctx: &mut RuntimeContext<'_>,
+    snapshot: StatusSnapshot,
+    error: &SignalingError,
+) {
+    ctx.runtime.mqtt_connected = false;
+    write_daemon_status(ctx, snapshot).await;
+    tracing::warn!(
+        reason = %error,
+        role = ?ctx.config.node.role,
+        state = ?snapshot.current_state,
+        session_id = snapshot.active_session_id.as_ref().map(ToString::to_string),
+        "signaling transport is currently unusable"
+    );
+}
+
+async fn mark_transport_usable(ctx: &mut RuntimeContext<'_>, snapshot: StatusSnapshot) {
+    if ctx.runtime.mqtt_connected {
+        return;
+    }
+    ctx.runtime.mqtt_connected = true;
+    write_daemon_status(ctx, snapshot).await;
+    tracing::info!(
+        role = ?ctx.config.node.role,
+        state = ?snapshot.current_state,
+        session_id = snapshot.active_session_id.as_ref().map(ToString::to_string),
+        "signaling transport recovered"
+    );
+}
+
+async fn poll_session_signal_payload(
+    ctx: &mut RuntimeContext<'_>,
+    transport: &mut MqttSignalingTransport,
+    snapshot: StatusSnapshot,
+) -> Result<Option<Vec<u8>>, DaemonError> {
+    match transport.poll_signal_payload().await {
+        Ok(payload) => {
+            mark_transport_usable(ctx, snapshot).await;
+            Ok(payload)
+        }
+        Err(error) => {
+            mark_transport_unusable(ctx, snapshot, &error).await;
+            Err(error.into())
+        }
+    }
+}
+
 async fn poll_idle_signal_payload(
-    role: &NodeRole,
+    ctx: &mut RuntimeContext<'_>,
     transport: &mut MqttSignalingTransport,
 ) -> Option<Vec<u8>> {
-    match transport.poll_signal_payload().await {
+    match poll_session_signal_payload(
+        ctx,
+        transport,
+        StatusSnapshot {
+            active_session_id: None,
+            current_state: steady_state_for_role(&ctx.config.node.role),
+        },
+    )
+    .await
+    {
         Ok(payload) => payload,
         Err(error) => {
             tracing::warn!(
                 reason = %error,
-                role = ?role,
+                role = ?ctx.config.node.role,
                 "recoverable signaling transport error while idle; backing off before retry"
             );
             sleep(DAEMON_RUNTIME_RETRY_DELAY).await;
@@ -873,7 +1073,7 @@ async fn poll_idle_signal_payload(
 }
 
 async fn send_local_candidate(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     session: &mut ActiveSession,
@@ -891,39 +1091,55 @@ async fn send_local_candidate(
     };
 
     publish_message(
-        config,
+        ctx,
         codec,
         transport,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: session.state,
+        },
         Some(&mut session.signaling),
         remote,
-        InnerMessageBuilder::new(
-            session.session_id,
-            config.node.peer_id.clone(),
-            session.remote_peer_id.clone(),
-        )
-        .build(body),
-        false,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                ctx.config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(body),
+            response: false,
+        },
     )
     .await
 }
 
 async fn publish_message(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
+    snapshot: StatusSnapshot,
     signaling: Option<&mut SignalingSession>,
     recipient: &AuthorizedKey,
-    message: InnerMessage,
-    response: bool,
+    outgoing: OutgoingSignal,
 ) -> Result<(), DaemonError> {
-    let (envelope, payload) = codec.encode_for_peer(recipient, &message, response)?;
-    transport
-        .publish_signal(&recipient.peer_id, &config.broker.topic_prefix, payload.clone())
-        .await?;
+    let (envelope, payload) =
+        codec.encode_for_peer(recipient, &outgoing.message, outgoing.response)?;
+    match transport
+        .publish_signal(&recipient.peer_id, &ctx.config.broker.topic_prefix, payload.clone())
+        .await
+    {
+        Ok(()) => {
+            mark_transport_usable(ctx, snapshot).await;
+        }
+        Err(error) => {
+            mark_transport_unusable(ctx, snapshot, &error).await;
+            return Err(error.into());
+        }
+    }
     if let Some(signaling) = signaling {
         signaling.ack_tracker.register(
             envelope.msg_id,
-            message.message_type,
+            outgoing.message.message_type,
             payload,
             current_time_ms(),
         );
@@ -932,30 +1148,42 @@ async fn publish_message(
 }
 
 async fn retry_pending_acks(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     transport: &mut MqttSignalingTransport,
+    snapshot: StatusSnapshot,
     session: &mut ActiveSession,
 ) -> Result<(), DaemonError> {
     let mut retries = session.signaling.ack_tracker.retry_due(current_time_ms());
     while let Some((_msg_id, payload)) = retries.pop() {
-        transport
-            .publish_signal(&session.remote_peer_id, &config.broker.topic_prefix, payload)
-            .await?;
+        match transport
+            .publish_signal(&session.remote_peer_id, &ctx.config.broker.topic_prefix, payload)
+            .await
+        {
+            Ok(()) => mark_transport_usable(ctx, snapshot).await,
+            Err(error) => {
+                mark_transport_unusable(ctx, snapshot, &error).await;
+                return Err(error.into());
+            }
+        }
     }
     Ok(())
 }
 
 async fn maybe_handle_active_busy_offer(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     payload: &[u8],
     active_session_id: SessionId,
     replay_cache_size: usize,
 ) -> Result<bool, DaemonError> {
-    let Some(action) =
-        classify_active_busy_offer(config, codec, payload, active_session_id, replay_cache_size)
-    else {
+    let Some(action) = classify_active_busy_offer(
+        ctx.config,
+        codec,
+        payload,
+        active_session_id,
+        replay_cache_size,
+    ) else {
         return Ok(false);
     };
     match action {
@@ -968,19 +1196,25 @@ async fn maybe_handle_active_busy_offer(
                 "rejecting new offer with busy because answer daemon already has an active allowed session"
             );
             publish_message(
-                config,
+                ctx,
                 codec,
                 transport,
+                StatusSnapshot {
+                    active_session_id: Some(active_session_id),
+                    current_state: DaemonState::ConnectingDataChannel,
+                },
                 None,
                 &sender,
-                build_error_message(
-                    &config.node.peer_id,
-                    &sender.peer_id,
-                    session_id,
-                    FailureCode::Busy,
-                    "answer daemon already has an active session",
-                ),
-                true,
+                OutgoingSignal {
+                    message: build_error_message(
+                        &ctx.config.node.peer_id,
+                        &sender.peer_id,
+                        session_id,
+                        FailureCode::Busy,
+                        "answer daemon already has an active session",
+                    ),
+                    response: true,
+                },
             )
             .await?;
         }
@@ -1084,66 +1318,56 @@ fn candidate_from_body(body: &IceCandidateBody) -> IceCandidateSignal {
 }
 
 async fn attempt_offer_reconnect(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
-    status: &StatusWriter,
     session: &mut ActiveSession,
     remote: &AuthorizedKey,
 ) -> Result<bool, DaemonError> {
-    if !config.reconnect.enable_auto_reconnect {
+    if !ctx.config.reconnect.enable_auto_reconnect {
         return Ok(false);
     }
 
-    let max_attempts = config.reconnect.max_attempts;
+    let max_attempts = ctx.config.reconnect.max_attempts;
     let mut attempt = 0;
     while should_continue_reconnect_attempt(max_attempts, attempt) {
         session.state = DaemonState::Backoff;
-        write_status_or_log(
-            status,
-            DaemonStatus::new(
-                config.node.peer_id.clone(),
-                config.node.role.clone(),
-                true,
-                Some(session.session_id),
-                session.state,
-            ),
+        write_daemon_status(
+            ctx,
+            StatusSnapshot {
+                active_session_id: Some(session.session_id),
+                current_state: session.state,
+            },
         )
         .await;
-        tokio::time::sleep(compute_backoff_delay(config, attempt)).await;
+        tokio::time::sleep(compute_backoff_delay(ctx.config, attempt)).await;
 
-        if config.webrtc.enable_ice_restart {
+        if ctx.config.webrtc.enable_ice_restart {
             session.state = DaemonState::IceRestarting;
-            write_status_or_log(
-                status,
-                DaemonStatus::new(
-                    config.node.peer_id.clone(),
-                    config.node.role.clone(),
-                    true,
-                    Some(session.session_id),
-                    session.state,
-                ),
+            write_daemon_status(
+                ctx,
+                StatusSnapshot {
+                    active_session_id: Some(session.session_id),
+                    current_state: session.state,
+                },
             )
             .await;
-            if reconnect_with_offer(config, codec, transport, session, remote, true).await? {
+            if reconnect_with_offer(ctx, codec, transport, session, remote, true).await? {
                 session.state = DaemonState::ConnectingDataChannel;
                 return Ok(true);
             }
         }
 
         session.state = DaemonState::Renegotiating;
-        write_status_or_log(
-            status,
-            DaemonStatus::new(
-                config.node.peer_id.clone(),
-                config.node.role.clone(),
-                true,
-                Some(session.session_id),
-                session.state,
-            ),
+        write_daemon_status(
+            ctx,
+            StatusSnapshot {
+                active_session_id: Some(session.session_id),
+                current_state: session.state,
+            },
         )
         .await;
-        if reconnect_with_offer(config, codec, transport, session, remote, false).await? {
+        if reconnect_with_offer(ctx, codec, transport, session, remote, false).await? {
             session.state = DaemonState::ConnectingDataChannel;
             return Ok(true);
         }
@@ -1154,7 +1378,7 @@ async fn attempt_offer_reconnect(
 }
 
 async fn reconnect_with_offer(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     session: &mut ActiveSession,
@@ -1164,63 +1388,75 @@ async fn reconnect_with_offer(
     if ice_restart {
         let offer_sdp = session.peer.create_offer_with_restart(true).await?;
         publish_message(
-            config,
+            ctx,
             codec,
             transport,
+            StatusSnapshot {
+                active_session_id: Some(session.session_id),
+                current_state: session.state,
+            },
             Some(&mut session.signaling),
             remote,
-            InnerMessageBuilder::new(
-                session.session_id,
-                config.node.peer_id.clone(),
-                session.remote_peer_id.clone(),
-            )
-            .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
-            false,
+            OutgoingSignal {
+                message: InnerMessageBuilder::new(
+                    session.session_id,
+                    ctx.config.node.peer_id.clone(),
+                    session.remote_peer_id.clone(),
+                )
+                .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
+                response: false,
+            },
         )
         .await?;
         wait_for_offer_reconnect_response(
-            config,
+            ctx,
             codec,
             transport,
             session,
             remote,
-            Duration::from_secs(u64::from(config.reconnect.ice_restart_timeout_secs)),
+            Duration::from_secs(u64::from(ctx.config.reconnect.ice_restart_timeout_secs)),
         )
         .await
     } else {
-        let peer = WebRtcPeer::new(&config.webrtc).await?;
+        let peer = WebRtcPeer::new(&ctx.config.webrtc).await?;
         let data_channel = peer.create_data_channel().await?;
         let new_session_id = SessionId::random();
         let mut replacement = ActiveSession::new(
             new_session_id,
             remote.clone(),
             peer,
-            config.security.replay_cache_size,
+            ctx.config.security.replay_cache_size,
         );
         replacement.data_channel = Some(data_channel);
         let offer_sdp = replacement.peer.create_offer().await?;
         publish_message(
-            config,
+            ctx,
             codec,
             transport,
+            StatusSnapshot {
+                active_session_id: Some(replacement.session_id),
+                current_state: session.state,
+            },
             Some(&mut replacement.signaling),
             remote,
-            InnerMessageBuilder::new(
-                replacement.session_id,
-                config.node.peer_id.clone(),
-                replacement.remote_peer_id.clone(),
-            )
-            .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
-            false,
+            OutgoingSignal {
+                message: InnerMessageBuilder::new(
+                    replacement.session_id,
+                    ctx.config.node.peer_id.clone(),
+                    replacement.remote_peer_id.clone(),
+                )
+                .build(MessageBody::Offer(OfferBody { sdp: offer_sdp })),
+                response: false,
+            },
         )
         .await?;
         if wait_for_offer_reconnect_response(
-            config,
+            ctx,
             codec,
             transport,
             &mut replacement,
             remote,
-            Duration::from_secs(u64::from(config.reconnect.renegotiate_timeout_secs)),
+            Duration::from_secs(u64::from(ctx.config.reconnect.renegotiate_timeout_secs)),
         )
         .await?
         {
@@ -1233,7 +1469,7 @@ async fn reconnect_with_offer(
 }
 
 async fn wait_for_offer_reconnect_response(
-    config: &AppConfig,
+    ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     session: &mut ActiveSession,
@@ -1248,12 +1484,28 @@ async fn wait_for_offer_reconnect_response(
         }
         tokio::select! {
             _ = tick.tick() => {
-                retry_pending_acks(config, transport, session).await?;
+                retry_pending_acks(
+                    ctx,
+                    transport,
+                    StatusSnapshot {
+                        active_session_id: Some(session.session_id),
+                        current_state: session.state,
+                    },
+                    session,
+                )
+                .await?;
                 if !session.signaling.ack_tracker.expired().is_empty() {
                     return Ok(false);
                 }
             }
-            payload = transport.poll_signal_payload() => {
+            payload = poll_session_signal_payload(
+                ctx,
+                transport,
+                StatusSnapshot {
+                    active_session_id: Some(session.session_id),
+                    current_state: session.state,
+                },
+            ) => {
                 if let Some(payload) = payload? {
                     let (envelope, message, sender) = codec.decode(
                         &payload,
@@ -1265,13 +1517,23 @@ async fn wait_for_offer_reconnect_response(
                     }
                     if message.message_type.requires_ack() {
                         publish_message(
-                            config,
+                            ctx,
                             codec,
                             transport,
+                            StatusSnapshot {
+                                active_session_id: Some(session.session_id),
+                                current_state: session.state,
+                            },
                             None,
                             remote,
-                            codec.build_ack(remote.peer_id.clone(), session.session_id, envelope.msg_id),
-                            true,
+                            OutgoingSignal {
+                                message: codec.build_ack(
+                                    remote.peer_id.clone(),
+                                    session.session_id,
+                                    envelope.msg_id,
+                                ),
+                                response: true,
+                            },
                         ).await?;
                     }
                     handle_offer_session_message(&message, session).await?;
@@ -1279,7 +1541,7 @@ async fn wait_for_offer_reconnect_response(
             }
             candidate = session.peer.next_local_candidate() => {
                 if let Some(candidate) = candidate {
-                    send_local_candidate(config, codec, transport, session, remote, candidate).await?;
+                    send_local_candidate(ctx, codec, transport, session, remote, candidate).await?;
                 }
             }
             ice_state = session.peer.next_ice_state() => {
@@ -1354,11 +1616,12 @@ mod tests {
     use tokio::time::timeout;
 
     use super::{
-        ActiveBusyOfferAction, BridgeSessionState, DaemonError, DaemonState, IceConnectionState,
-        OfferListener, StatusWriter, apply_answer_overrides, apply_offer_overrides,
-        apply_override_pairs, classify_active_busy_offer, compute_backoff_delay,
-        decode_idle_signaling_message, recover_daemon_after_session, should_ack_idle_offer,
-        should_attempt_offer_reconnect, should_continue_reconnect_attempt,
+        ActiveBusyOfferAction, BridgeSessionState, DaemonError, DaemonRuntimeState, DaemonState,
+        IceConnectionState, OfferListener, RuntimeContext, StatusSnapshot, StatusWriter,
+        apply_answer_overrides, apply_offer_overrides, apply_override_pairs,
+        classify_active_busy_offer, compute_backoff_delay, decode_idle_signaling_message,
+        mark_transport_unusable, mark_transport_usable, recover_daemon_after_session,
+        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
         should_poll_answer_data_events, spawn_offer_accept_loop, steady_state_for_role,
         write_steady_state_status,
     };
@@ -1472,6 +1735,10 @@ mod tests {
     async fn read_status_file(path: &Path) -> Value {
         let content = tokio::fs::read_to_string(path).await.expect("status file should exist");
         serde_json::from_str(&content).expect("valid status json")
+    }
+
+    fn connected_runtime() -> DaemonRuntimeState {
+        DaemonRuntimeState::new_connected()
     }
 
     #[test]
@@ -1666,10 +1933,11 @@ mod tests {
     async fn offer_recovery_returns_to_waiting_after_remote_error() {
         let mut config = sample_config();
         let (path, writer) = status_writer_for_test(&mut config, "offer-recovery");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
         recover_daemon_after_session(
-            &config,
-            &writer,
+            &ctx,
             Err(DaemonError::RemoteError(
                 FailureCode::ProtocolError.as_str().to_owned(),
                 "remote rejected session".to_owned(),
@@ -1688,10 +1956,11 @@ mod tests {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-target-connect");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
         recover_daemon_after_session(
-            &config,
-            &writer,
+            &ctx,
             Err(DaemonError::Tunnel(p2p_tunnel::TunnelError::TargetConnectFailed(
                 "connection refused".to_owned(),
             ))),
@@ -1709,10 +1978,11 @@ mod tests {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-bridge-failure");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
         recover_daemon_after_session(
-            &config,
-            &writer,
+            &ctx,
             Err(DaemonError::Logging("bridge task join error: task 7 panicked".to_owned())),
         )
         .await;
@@ -1728,13 +1998,11 @@ mod tests {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-ice-failure");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
-        recover_daemon_after_session(
-            &config,
-            &writer,
-            Err(DaemonError::IceFailed(IceConnectionState::Failed)),
-        )
-        .await;
+        recover_daemon_after_session(&ctx, Err(DaemonError::IceFailed(IceConnectionState::Failed)))
+            .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
@@ -1747,12 +2015,15 @@ mod tests {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "steady-state");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
-        write_steady_state_status(&config, &writer).await;
+        write_steady_state_status(&ctx).await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
         assert_eq!(status["role"], "answer");
+        assert_eq!(status["mqtt_connected"], true);
         let _ = tokio::fs::remove_file(&path).await;
     }
 
@@ -1768,11 +2039,57 @@ mod tests {
         config.health.write_status_file = true;
         config.health.status_file = blocking_file.join("status.json");
         let writer = StatusWriter::new(&config);
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
 
-        write_steady_state_status(&config, &writer).await;
+        write_steady_state_status(&ctx).await;
 
         assert!(!config.health.status_file.exists(), "status write failure should be ignored");
         let _ = tokio::fs::remove_file(&blocking_file).await;
+    }
+
+    #[tokio::test]
+    async fn transport_failure_updates_status_to_disconnected_before_retry() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "transport-disconnected");
+        let mut runtime = connected_runtime();
+        let mut ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+
+        mark_transport_unusable(
+            &mut ctx,
+            StatusSnapshot { active_session_id: None, current_state: DaemonState::Idle },
+            &SignalingError::Protocol("poll failed".to_owned()),
+        )
+        .await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["mqtt_connected"], false);
+        assert_eq!(status["current_state"], "idle");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn transport_recovery_updates_status_back_to_connected() {
+        let mut config = sample_config();
+        let (path, writer) = status_writer_for_test(&mut config, "transport-recovered");
+        let mut runtime = connected_runtime();
+        runtime.mqtt_connected = false;
+        let mut ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+
+        mark_transport_usable(
+            &mut ctx,
+            StatusSnapshot {
+                active_session_id: Some(SessionId::random()),
+                current_state: DaemonState::Negotiating,
+            },
+        )
+        .await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["mqtt_connected"], true);
+        assert_eq!(status["current_state"], "negotiating");
+        let _ = tokio::fs::remove_file(&path).await;
     }
 
     #[tokio::test]
