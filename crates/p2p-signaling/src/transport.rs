@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -175,6 +176,7 @@ pub struct MqttSignalingTransport {
     event_loop: EventLoop,
     own_topic: String,
     qos: QoS,
+    pending_payloads: VecDeque<Vec<u8>>,
 }
 
 impl MqttSignalingTransport {
@@ -182,7 +184,7 @@ impl MqttSignalingTransport {
         let (options, qos, own_topic) = build_mqtt_options(config)?;
         let (client, event_loop) = AsyncClient::new(options, 10);
 
-        Ok(Self { client, event_loop, own_topic, qos })
+        Ok(Self { client, event_loop, own_topic, qos, pending_payloads: VecDeque::new() })
     }
 
     pub async fn subscribe_own_topic(&self) -> Result<(), SignalingError> {
@@ -190,7 +192,7 @@ impl MqttSignalingTransport {
     }
 
     pub async fn publish_signal(
-        &self,
+        &mut self,
         peer_id: &PeerId,
         topic_prefix: &str,
         payload: Vec<u8>,
@@ -198,7 +200,9 @@ impl MqttSignalingTransport {
         self.client
             .publish(signal_topic(topic_prefix, peer_id), self.qos, false, payload)
             .await
-            .map_err(SignalingError::from)
+            .map_err(SignalingError::from)?;
+        self.pump_once().await?;
+        Ok(())
     }
 
     pub async fn poll(&mut self) -> Result<Event, SignalingError> {
@@ -206,12 +210,26 @@ impl MqttSignalingTransport {
     }
 
     pub async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError> {
+        if let Some(payload) = self.pending_payloads.pop_front() {
+            return Ok(Some(payload));
+        }
+
         match self.poll().await? {
             Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
                 Ok(Some(publish.payload.to_vec()))
             }
             _ => Ok(None),
         }
+    }
+
+    async fn pump_once(&mut self) -> Result<(), SignalingError> {
+        match self.poll().await? {
+            Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
+                self.pending_payloads.push_back(publish.payload.to_vec());
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 

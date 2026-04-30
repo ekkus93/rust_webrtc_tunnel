@@ -222,6 +222,12 @@ pub async fn run_answer_daemon(
             continue;
         };
 
+        tracing::debug!(
+            payload_len = payload.len(),
+            role = ?config.node.role,
+            "received signaling payload while idle"
+        );
+
         let decode_result = decode_idle_signaling_message(&codec, &payload, &mut replay_cache);
 
         let (envelope, message, sender) = match decode_result {
@@ -232,6 +238,15 @@ pub async fn run_answer_daemon(
             }
         };
 
+        tracing::debug!(
+            session_id = %message.session_id,
+            sender_peer_id = %sender.peer_id,
+            sender_kid = %envelope.sender_kid,
+            message_type = ?message.message_type,
+            role = ?config.node.role,
+            "decoded idle signaling message"
+        );
+
         match &message.body {
             MessageBody::Hello(_) => {
                 tracing::info!("received optional hello from {}", sender.peer_id);
@@ -239,6 +254,13 @@ pub async fn run_answer_daemon(
             MessageBody::Offer(offer) => {
                 let peer_allowed =
                     config.tunnel.answer.allow_remote_peers.contains(&sender.peer_id);
+                tracing::debug!(
+                    session_id = %message.session_id,
+                    sender_peer_id = %sender.peer_id,
+                    peer_allowed,
+                    sdp_len = offer.sdp.len(),
+                    "received idle offer"
+                );
                 if !peer_allowed {
                     tracing::warn!(peer_id = %sender.peer_id, "rejecting unauthorized peer");
                     continue;
@@ -396,6 +418,12 @@ async fn run_offer_session(
     )
     .await;
 
+    tracing::debug!(
+        session_id = %session.session_id,
+        remote_peer_id = %remote.peer_id,
+        "starting offer session and publishing hello"
+    );
+
     publish_message(
         ctx,
         codec,
@@ -421,6 +449,12 @@ async fn run_offer_session(
     let data_channel = session.peer.create_data_channel().await?;
     session.data_channel = Some(data_channel.clone());
     let offer_sdp = session.peer.create_offer().await?;
+    tracing::debug!(
+        session_id = %session.session_id,
+        remote_peer_id = %remote.peer_id,
+        sdp_len = offer_sdp.len(),
+        "created local offer and publishing signaling offer"
+    );
     publish_message(
         ctx,
         codec,
@@ -1166,13 +1200,34 @@ async fn publish_message(
     recipient: &AuthorizedKey,
     outgoing: OutgoingSignal,
 ) -> Result<(), DaemonError> {
+    let message_type = outgoing.message.message_type;
+    let session_id = outgoing.message.session_id;
+    let recipient_peer_id = recipient.peer_id.clone();
     let (envelope, payload) =
         codec.encode_for_peer(recipient, &outgoing.message, outgoing.response)?;
+    tracing::debug!(
+        session_id = %session_id,
+        recipient_peer_id = %recipient_peer_id,
+        sender_kid = %envelope.sender_kid,
+        recipient_kid = %envelope.recipient_kid,
+        msg_id = %envelope.msg_id,
+        message_type = ?message_type,
+        payload_len = payload.len(),
+        response = outgoing.response,
+        "publishing signaling message"
+    );
     match transport
         .publish_signal(&recipient.peer_id, &ctx.config.broker.topic_prefix, payload.clone())
         .await
     {
         Ok(()) => {
+            tracing::debug!(
+                session_id = %session_id,
+                recipient_peer_id = %recipient_peer_id,
+                msg_id = %envelope.msg_id,
+                message_type = ?message_type,
+                "published signaling message"
+            );
             mark_transport_usable(ctx, snapshot).await;
         }
         Err(error) => {

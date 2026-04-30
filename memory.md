@@ -89,3 +89,58 @@
 ## 2026-04-30T10:59:16Z - GPT-5.4 - Spec refreshed
 - `docs/RUST_WEBRTC_SPECS.md` had a few stale operator-facing details: it still implied `hello` was part of the required offer lifecycle, documented `p2pctl keygen --peer-id <peer_id>` instead of the real positional CLI syntax, and stated the single-session rule less precisely than the implemented offer/answer busy behavior.
 - The spec now says `hello` is optional in v1, shows `keygen <peer_id>`, and aligns the single-session wording with the actual offer-side immediate-close and answer-side encrypted-`busy` behavior.
+
+## 2026-04-30T11:02:11Z - GPT-5.4 - Project baseline refreshed
+- Re-read `README.md`, `docs/RUST_WEBRTC_SPECS.md`, and `memory.md` to refresh the active project baseline before further work.
+- The current baseline remains: CLI-only Rust secure TCP tunnel over a reliable ordered WebRTC data channel, MQTT treated as untrusted transport, all signaling encrypted and signed, SSH-like identity workflow, STUN-only v1, and one active tunnel session at a time with offer-side immediate local close while busy and answer-side encrypted `busy` only for allowed peers.
+
+## 2026-04-30T11:10:32Z - GPT-5.4 - Workspace validation rerun passed
+- A full `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo test --workspace --all-targets` rerun now passes cleanly.
+- The first attempt failed for environmental reasons only: the filesystem hit `No space left on device` while linking `p2p-daemon`; running `cargo clean` freed about 2.6 GiB and the rerun succeeded without code changes.
+
+## 2026-04-30T11:25:53Z - GPT-5.4 - README public broker example updated
+- Replaced the placeholder `broker.example.com` URLs in `README.md` with the real public test broker `mqtts://test.mosquitto.org:8886`.
+- The README broker example now sets `broker.tls.ca_file = ""` to use the system CA store for that Let's Encrypt-backed listener and explicitly warns that public brokers are test-only and should use a unique `topic_prefix`.
+
+## 2026-04-30T11:29:17Z - GPT-5.4 - README broker password docs clarified
+- Fixed the README broker example so the public `test.mosquitto.org:8886` listener now uses anonymous auth with empty `username` and `password_file` instead of implying a password is required.
+- Added explicit README text that `broker.password_file` should point to a local text file containing only the MQTT broker password or token, usually as a single line, and documented the three supported broker auth modes.
+
+## 2026-04-30T11:30:39Z - GPT-5.4 - README broker term defined
+- Added a plain-language definition to `README.md` explaining that the broker is the MQTT server both peers connect to for signaling and that it is only a relay, not a trusted holder of plaintext signaling or tunnel contents.
+- Also clarified the `[broker]` config-section bullet so readers understand it refers to MQTT server connection settings.
+
+## 2026-04-30T11:33:12Z - GPT-5.4 - README broker TLS client-auth clarified
+- Updated the README broker example so the public `test.mosquitto.org:8886` config leaves `client_cert_file` and `client_key_file` empty instead of implying mutual TLS files are required.
+- Added explicit README text that `client_cert_file` is the certificate presented to a broker that requires mutual TLS, `client_key_file` is the matching private key, and v1 requires both to be set together or left empty together.
+
+## 2026-04-30T11:46:19Z - GPT-5.4 - README config examples rewritten
+- Replaced the README's misleading subsection-only config fragments with complete minimal offer-side and answer-side `config.toml` examples that include `format` and every required section expected by `p2pctl check-config`.
+- Switched the public broker example to `test.mosquitto.org:8883` plus an explicit downloaded `mosquitto.org.crt` CA file because the current validator requires `broker.tls.ca_file` to be a real local file for `mqtts://` brokers.
+- Added README notes that the current schema still requires both `[tunnel.offer]` and `[tunnel.answer]` blocks to be present and that `check-config` validates referenced files like `identity`, `authorized_keys`, and `broker.tls.ca_file`.
+
+## 2026-04-30T12:01:55Z - GPT-5.4 - README state_dir clarified
+- Clarified in `README.md` that `paths.state_dir` is the base directory for local runtime artifacts such as the log and status files under `~/.local/state/p2ptunnel`.
+- Added that the daemons create parent directories for `logging.log_file` and `health.status_file` as needed, while `mkdir -p ~/.local/state/p2ptunnel/log` remains a safe optional setup step.
+- Aligned the README runtime override examples with the config examples by changing the broker URL override from `test.mosquitto.org:8886` to `test.mosquitto.org:8883`.
+
+## 2026-04-30T12:03:35Z - GPT-5.4 - README status_file clarified
+- Added README text that the daemon creates `~/.local/state/p2ptunnel/status.json` when status-file writing is enabled, so users do not normally create it manually.
+- Also clarified that `p2pctl status --config ...` expects the status file to already exist, which usually means starting `p2p-offer run` or `p2p-answer run` first so an initial status snapshot is written.
+
+## 2026-04-30T12:27:45Z - GPT-5.4 - README identity-role matching clarified
+- Added explicit README guidance that the server should use an `answer-office` identity and answer-side config, while the client should use an `offer-home` identity and offer-side config.
+- The keygen section now shows both `p2pctl keygen offer-home` and `p2pctl keygen answer-office`, and the config/operator setup sections now state that the `peer_id` inside `~/.config/p2ptunnel/identity` must match `[node].peer_id` or the daemon will refuse to start.
+
+## 2026-04-30T12:34:10Z - GPT-5.4 - README public broker example switched to EMQX
+- Replaced the public `test.mosquitto.org:8883` example with `broker.emqx.io:8883` after confirming the Mosquitto listener presents an X.509 version 1 leaf certificate that the current Rust TLS stack rejects with `UnsupportedCertVersion`.
+- Updated the README examples to use the system CA bundle path `/etc/ssl/certs/ca-certificates.crt` instead of the downloaded `mosquitto.org.crt` file.
+
+## 2026-04-30T13:06:16Z - GPT-5.4 - Added signaling publish/receive diagnostics
+- Added `debug` logs in `p2p-daemon` around offer-session startup, signaling message publish attempts/successes, and answer-side idle payload decode so stalled signaling runs can distinguish publish failure from receive/decode failure.
+- Validated the change with `cargo test -p p2p-daemon --lib`.
+
+## 2026-04-30T13:13:37Z - GPT-5.4 - Pump MQTT event loop after signaling publishes
+- Updated `p2p-signaling` so `MqttSignalingTransport::publish_signal` now advances the `rumqttc` event loop after queueing a publish and buffers any own-topic payloads seen during that pump.
+- This addresses the runtime gap where `AsyncClient::publish` only queued requests locally until `event_loop.poll()` ran, which could leave offer-side signaling messages unsent while the session remained stuck in `negotiating`.
+- Validated with `cargo test -p p2p-signaling` and `cargo test -p p2p-daemon --lib`.
