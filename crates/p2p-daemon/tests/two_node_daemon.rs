@@ -287,10 +287,10 @@ async fn wait_for_status(path: &Path, expected_state: &str) -> serde_json::Value
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         if let Ok(content) = tokio::fs::read_to_string(path).await {
-            let json: serde_json::Value =
-                serde_json::from_str(&content).expect("status file should contain valid json");
-            if json["current_state"] == expected_state {
-                return json;
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if json["current_state"] == expected_state {
+                    return json;
+                }
             }
         }
         assert!(tokio::time::Instant::now() < deadline, "status {expected_state} not observed in time");
@@ -298,10 +298,16 @@ async fn wait_for_status(path: &Path, expected_state: &str) -> serde_json::Value
     }
 }
 
-fn decode_message_types(
+#[derive(Clone, Copy)]
+struct DecodedSignalRecord {
+    session_id: p2p_core::SessionId,
+    message_type: MessageType,
+}
+
+fn decode_signal_records(
     payloads: &[Vec<u8>],
     codec: &SignalCodec<'_>,
-) -> Vec<MessageType> {
+) -> Vec<DecodedSignalRecord> {
     payloads
         .iter()
         .map(|payload| {
@@ -309,7 +315,7 @@ fn decode_message_types(
             let (_envelope, message, _sender) = codec
                 .decode(payload, &mut replay_cache, None)
                 .expect("recorded signaling payload should decode");
-            message.message_type
+            DecodedSignalRecord { session_id: message.session_id, message_type: message.message_type }
         })
         .collect()
 }
@@ -322,6 +328,7 @@ async fn run_one_in_memory_session(
     duplicate_answer_to_offer_payloads: usize,
     inject_offer_disconnect: bool,
     enable_ice_restart: bool,
+    expect_success: bool,
 ) {
     let offer_identity = generate_identity("offer-home").expect("offer identity should build");
     let answer_identity = generate_identity("answer-office").expect("answer identity should build");
@@ -355,6 +362,7 @@ async fn run_one_in_memory_session(
         if inject_offer_disconnect { 300 } else { 0 },
     );
     let (hook_tx, mut hook_rx) = mpsc::unbounded_channel();
+    let mut injected_session_id = None;
 
     let answer_server = tokio::spawn(async move {
         let (mut stream, _) = target_listener.accept().await.expect("target accept should succeed");
@@ -381,10 +389,11 @@ async fn run_one_in_memory_session(
 
     let mut client = connect_with_retry(offer_port).await;
     if inject_offer_disconnect {
-        let OfferSessionTestHandle { ice_state_injector, .. } = timeout(Duration::from_secs(10), hook_rx.recv())
+        let OfferSessionTestHandle { session_id, ice_state_injector } = timeout(Duration::from_secs(10), hook_rx.recv())
             .await
             .expect("offer session hook should arrive in time")
             .expect("offer session hook should contain a handle");
+        injected_session_id = Some(session_id);
         ice_state_injector
             .inject(IceConnectionState::Disconnected)
             .await
@@ -392,17 +401,27 @@ async fn run_one_in_memory_session(
     }
     client.write_all(b"ping").await.expect("client should write request bytes");
     let mut response = [0_u8; 4];
-    timeout(Duration::from_secs(15), client.read_exact(&mut response))
-        .await
-        .expect("client should receive tunnel response in time")
-        .expect("client should read response bytes");
-    assert_eq!(&response, b"pong");
-    client.shutdown().await.expect("client should shutdown cleanly");
+    let client_result = timeout(Duration::from_secs(15), client.read_exact(&mut response)).await;
 
-    timeout(Duration::from_secs(15), answer_server)
-        .await
-        .expect("target server should finish in time")
-        .expect("target server task should succeed");
+    if expect_success {
+        client_result
+            .expect("client should receive tunnel response in time")
+            .expect("client should read response bytes");
+        assert_eq!(&response, b"pong");
+        client.shutdown().await.expect("client should shutdown cleanly");
+
+        timeout(Duration::from_secs(15), answer_server)
+            .await
+            .expect("target server should finish in time")
+            .expect("target server task should succeed");
+    } else {
+        let error = client_result
+            .expect("client failure should arrive in time")
+            .expect_err("client should not receive a successful tunnel response");
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+        answer_server.abort();
+        let _ = answer_server.await;
+    }
 
     let offer_status = wait_for_status(&offer_status_path, "waiting_for_local_client").await;
     let answer_status = wait_for_status(&answer_status_path, "idle").await;
@@ -414,19 +433,36 @@ async fn run_one_in_memory_session(
     assert_eq!(answer_status["mqtt_connected"], true);
 
     if inject_offer_disconnect {
-        let offer_to_answer = decode_message_types(&trace.payloads_for("answer-office"), &answer_codec);
-        let answer_to_offer = decode_message_types(&trace.payloads_for("offer-home"), &offer_codec);
+        let offer_to_answer = decode_signal_records(&trace.payloads_for("answer-office"), &answer_codec);
+        let answer_to_offer = decode_signal_records(&trace.payloads_for("offer-home"), &offer_codec);
         assert!(
-            offer_to_answer.iter().filter(|message_type| **message_type == MessageType::Offer).count() >= 2,
+            offer_to_answer
+                .iter()
+                .filter(|record| record.message_type == MessageType::Offer)
+                .count()
+                >= 2,
             "offer side should publish a replacement offer after the injected disconnect"
         );
         assert!(
-            !answer_to_offer.iter().any(|message_type| matches!(
-                message_type,
+            !answer_to_offer.iter().any(|record| matches!(
+                record.message_type,
                 MessageType::Offer | MessageType::IceRestartRequest | MessageType::RenegotiateRequest
             )),
             "answer side must not initiate reconnect signaling"
         );
+        if !expect_success {
+            assert_eq!(
+                offer_to_answer
+                    .iter()
+                    .filter(|record| {
+                        record.message_type == MessageType::Offer
+                            && Some(record.session_id) == injected_session_id
+                    })
+                    .count(),
+                2,
+                "offer side should attempt a same-session ICE restart before giving up on the current local client"
+            );
+        }
     }
 
     offer_task.abort();
@@ -439,15 +475,20 @@ async fn run_one_in_memory_session(
 
 #[tokio::test]
 async fn offer_and_answer_daemons_complete_one_in_memory_session() {
-    run_one_in_memory_session(0, false, true).await;
+    run_one_in_memory_session(0, false, true, true).await;
 }
 
 #[tokio::test]
 async fn active_offer_session_survives_duplicate_answer_payload_and_completes() {
-    run_one_in_memory_session(1, false, true).await;
+    run_one_in_memory_session(1, false, true, true).await;
 }
 
 #[tokio::test]
 async fn offer_side_drives_reconnect_after_injected_disconnect() {
-    run_one_in_memory_session(0, true, false).await;
+    run_one_in_memory_session(0, true, false, true).await;
+}
+
+#[tokio::test]
+async fn active_session_ice_restart_attempt_drops_local_client_before_recovery() {
+    run_one_in_memory_session(0, true, true, false).await;
 }
