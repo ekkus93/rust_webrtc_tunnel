@@ -211,3 +211,24 @@
 ## 2026-04-30T14:54:25Z - GPT-5.4 - Full workspace validation passed after transport regressions
 - Ran the full workspace verification sweep after adding the `p2p-signaling` transport buffering tests; all crates passed `cargo test --workspace --all-targets`.
 - The workspace also passed `cargo clippy --workspace --all-targets --all-features -- -D warnings`, so the new regressions are clean outside the signaling crate too.
+
+## 2026-04-30T15:04:29Z - GPT-5.4 - Added daemon-level two-node integration coverage
+- Added a public daemon transport seam that keeps the production MQTT entry points unchanged but allows `run_offer_daemon_with_transport` and `run_answer_daemon_with_transport` to run against an injected signaling transport in tests.
+- Added `crates/p2p-daemon/tests/two_node_daemon.rs`, which runs real offer and answer daemon tasks over an in-memory signaling transport pair, drives a local client through the offer listener into an answer-side target service, and verifies one full `ping`/`pong` tunnel session plus steady-state recovery back to `waiting_for_local_client` and `idle`.
+- Validated with `cargo test -p p2p-daemon --test two_node_daemon`, `cargo test -p p2p-daemon`, and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T15:07:58Z - GPT-5.4 - Added daemon duplicate-survival integration coverage
+- Extended the in-memory daemon transport harness to support scripted duplicate delivery on a route and added a second outer-loop test in `crates/p2p-daemon/tests/two_node_daemon.rs` that duplicates the first answer-to-offer signaling payload during an active session.
+- The new integration test proves the offer daemon tolerates the duplicated active-session signaling payload, still completes the end-to-end `ping`/`pong` tunnel session, and returns to `waiting_for_local_client` while the answer daemon returns to `idle`.
+- Validated with `cargo test -p p2p-daemon --test two_node_daemon`, `cargo test -p p2p-daemon`, and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T15:11:15Z - GPT-5.4 - Added WebRTC ICE fault injection seam for integration tests
+- Added a small non-release ICE state injection hook to `WebRtcPeer` in `crates/p2p-webrtc/src/lib.rs` by retaining a sender for the existing ICE state stream behind `#[cfg(any(test, debug_assertions))]` and exposing `inject_ice_state_for_tests`.
+- Added a focused `p2p-webrtc` test proving an injected `IceConnectionState::Disconnected` is observed through the normal `next_ice_state` path, which gives the daemon integration layer a deterministic fault seam for reconnect-leadership coverage.
+- Validated with `cargo test -p p2p-webrtc` and `cargo clippy -p p2p-webrtc --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T15:24:02Z - GPT-5.4 - Added reconnect leadership integration coverage
+- Reworked the WebRTC test seam into a cloneable non-release `IceStateInjectorForTests`, added a daemon-side non-release `OfferSessionTestHandle`, and exposed `run_offer_daemon_with_transport_and_test_hook` so integration tests can inject an offer-side ICE disconnect after the initial offer is published.
+- Extended `crates/p2p-daemon/tests/two_node_daemon.rs` with message tracing plus a reconnect-leadership integration scenario that injects `IceConnectionState::Disconnected`, verifies the offer side publishes a replacement `Offer`, and verifies the answer side never initiates reconnect signaling (`Offer`, `IceRestartRequest`, or `RenegotiateRequest`). The scenario uses renegotiation-only recovery (`enable_ice_restart = false`) to isolate leadership policy from the currently unsupported active-session ICE-restart path on the answer side.
+- Hardened reconnect response handling in `crates/p2p-daemon/src/lib.rs` so reconnect wait loops now ignore stale or duplicate session payloads by reusing the existing tolerant offer-session payload helper.
+- Validated with `cargo test -p p2p-daemon --test two_node_daemon`, `cargo test -p p2p-daemon`, `cargo test -p p2p-webrtc`, `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`, and `cargo clippy -p p2p-webrtc --all-targets --all-features -- -D warnings`.

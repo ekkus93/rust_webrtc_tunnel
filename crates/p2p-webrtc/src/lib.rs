@@ -54,6 +54,22 @@ pub enum IceConnectionState {
     Closed,
 }
 
+#[cfg(any(test, debug_assertions))]
+#[derive(Clone)]
+pub struct IceStateInjectorForTests {
+    tx: mpsc::Sender<IceConnectionState>,
+}
+
+#[cfg(any(test, debug_assertions))]
+impl IceStateInjectorForTests {
+    pub async fn inject(&self, state: IceConnectionState) -> Result<(), WebRtcError> {
+        self.tx
+            .send(state)
+            .await
+            .map_err(|_| WebRtcError::InvalidConfig("ice state channel closed unexpectedly".to_owned()))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataChannelEvent {
     Open,
@@ -136,6 +152,8 @@ pub struct WebRtcPeer {
     peer_connection: Arc<RTCPeerConnection>,
     local_candidate_rx: Arc<Mutex<mpsc::Receiver<IceCandidateSignal>>>,
     ice_state_rx: Arc<Mutex<mpsc::Receiver<IceConnectionState>>>,
+    #[cfg(any(test, debug_assertions))]
+    test_ice_state_tx: mpsc::Sender<IceConnectionState>,
     incoming_data_channel_rx: Arc<Mutex<mpsc::Receiver<Result<DataChannelHandle, WebRtcError>>>>,
     config: WebRtcConfig,
 }
@@ -151,6 +169,8 @@ impl WebRtcPeer {
         let (local_candidate_tx, local_candidate_rx) = mpsc::channel(64);
         let (ice_state_tx, ice_state_rx) = mpsc::channel(32);
         let (incoming_dc_tx, incoming_dc_rx) = mpsc::channel(8);
+        #[cfg(any(test, debug_assertions))]
+        let test_ice_state_tx = ice_state_tx.clone();
 
         peer_connection.on_ice_candidate(Box::new(move |candidate| {
             let local_candidate_tx = local_candidate_tx.clone();
@@ -199,6 +219,8 @@ impl WebRtcPeer {
             peer_connection,
             local_candidate_rx: Arc::new(Mutex::new(local_candidate_rx)),
             ice_state_rx: Arc::new(Mutex::new(ice_state_rx)),
+            #[cfg(any(test, debug_assertions))]
+            test_ice_state_tx,
             incoming_data_channel_rx: Arc::new(Mutex::new(incoming_dc_rx)),
             config: config.clone(),
         })
@@ -264,6 +286,11 @@ impl WebRtcPeer {
 
     pub async fn next_ice_state(&self) -> Option<IceConnectionState> {
         self.ice_state_rx.lock().await.recv().await
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    pub fn ice_state_injector_for_tests(&self) -> IceStateInjectorForTests {
+        IceStateInjectorForTests { tx: self.test_ice_state_tx.clone() }
     }
 
     pub async fn next_incoming_data_channel(
@@ -457,5 +484,27 @@ mod tests {
 
         offer_peer.close().await.expect("offer peer should close");
         answer_peer.close().await.expect("answer peer should close");
+    }
+
+    #[tokio::test]
+    async fn injected_ice_state_is_delivered_to_observers() {
+        let mut config = sample_config();
+        config.stun_urls = Vec::new();
+        config.enable_trickle_ice = false;
+
+        let peer = WebRtcPeer::new(&config).await.expect("peer should build");
+        peer.ice_state_injector_for_tests()
+            .inject(IceConnectionState::Disconnected)
+            .await
+            .expect("test ice state injection should succeed");
+
+        let observed = timeout(Duration::from_secs(1), peer.next_ice_state())
+            .await
+            .expect("observer should receive injected ice state in time")
+            .expect("ice state stream should yield an injected value");
+
+        assert_eq!(observed, IceConnectionState::Disconnected);
+
+        peer.close().await.expect("peer should close");
     }
 }

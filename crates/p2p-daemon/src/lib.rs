@@ -35,7 +35,47 @@ pub use error::DaemonError;
 pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
 pub use status::{DaemonStatus, StatusWriter};
 
+#[cfg(any(test, debug_assertions))]
+#[derive(Clone)]
+pub struct OfferSessionTestHandle {
+    pub session_id: SessionId,
+    pub ice_state_injector: p2p_webrtc::IceStateInjectorForTests,
+}
+
 const DAEMON_RUNTIME_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+#[allow(async_fn_in_trait)]
+pub trait DaemonSignalingTransport {
+    async fn subscribe_own_topic(&mut self) -> Result<(), SignalingError>;
+
+    async fn publish_signal(
+        &mut self,
+        peer_id: &PeerId,
+        topic_prefix: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), SignalingError>;
+
+    async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError>;
+}
+
+impl DaemonSignalingTransport for MqttSignalingTransport {
+    async fn subscribe_own_topic(&mut self) -> Result<(), SignalingError> {
+        MqttSignalingTransport::subscribe_own_topic(self).await
+    }
+
+    async fn publish_signal(
+        &mut self,
+        peer_id: &PeerId,
+        topic_prefix: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), SignalingError> {
+        MqttSignalingTransport::publish_signal(self, peer_id, topic_prefix, payload).await
+    }
+
+    async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError> {
+        MqttSignalingTransport::poll_signal_payload(self).await
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BridgeSessionState {
@@ -162,13 +202,68 @@ pub async fn run_offer_daemon(
     local_identity: IdentityFile,
     authorized_keys: AuthorizedKeys,
 ) -> Result<(), DaemonError> {
+    let transport = MqttSignalingTransport::connect(&config)?;
+    run_offer_daemon_with_transport(config, local_identity, authorized_keys, transport).await
+}
+
+pub async fn run_offer_daemon_with_transport<T: DaemonSignalingTransport>(
+    config: AppConfig,
+    local_identity: IdentityFile,
+    authorized_keys: AuthorizedKeys,
+    transport: T,
+) -> Result<(), DaemonError> {
+    #[cfg(any(test, debug_assertions))]
+    {
+        run_offer_daemon_with_transport_and_test_hook(
+            config,
+            local_identity,
+            authorized_keys,
+            transport,
+            None,
+        )
+        .await
+    }
+
+    #[cfg(not(any(test, debug_assertions)))]
+    {
+        run_offer_daemon_inner(config, local_identity, authorized_keys, &mut transport, None).await
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+pub async fn run_offer_daemon_with_transport_and_test_hook<T: DaemonSignalingTransport>(
+    config: AppConfig,
+    local_identity: IdentityFile,
+    authorized_keys: AuthorizedKeys,
+    mut transport: T,
+    session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
+) -> Result<(), DaemonError> {
+    run_offer_daemon_inner(
+        config,
+        local_identity,
+        authorized_keys,
+        &mut transport,
+        session_hook,
+    )
+    .await
+}
+
+async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
+    config: AppConfig,
+    local_identity: IdentityFile,
+    authorized_keys: AuthorizedKeys,
+    transport: &mut T,
+    #[cfg(any(test, debug_assertions))] session_hook: Option<
+        mpsc::UnboundedSender<OfferSessionTestHandle>,
+    >,
+    #[cfg(not(any(test, debug_assertions)))] _session_hook: Option<()>,
+) -> Result<(), DaemonError> {
     let codec = SignalCodec::new(
         &local_identity,
         &authorized_keys,
         config.security.max_clock_skew_secs,
         config.security.max_message_age_secs,
     );
-    let mut transport = MqttSignalingTransport::connect(&config)?;
     transport.subscribe_own_topic().await?;
 
     let status = StatusWriter::new(&config);
@@ -196,7 +291,17 @@ pub async fn run_offer_daemon(
             .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
         tracing::info!("accepted local client and entering busy offer session state");
         let result =
-            run_offer_session(&config, &codec, &mut transport, &mut ctx, client, &remote).await;
+            run_offer_session(
+                &config,
+                &codec,
+                transport,
+                &mut ctx,
+                client,
+                &remote,
+                #[cfg(any(test, debug_assertions))]
+                session_hook.clone(),
+            )
+            .await;
         recover_daemon_after_session(&ctx, result).await;
         tracing::info!("offer daemon returned to waiting state");
     }
@@ -207,13 +312,22 @@ pub async fn run_answer_daemon(
     local_identity: IdentityFile,
     authorized_keys: AuthorizedKeys,
 ) -> Result<(), DaemonError> {
+    let transport = MqttSignalingTransport::connect(&config)?;
+    run_answer_daemon_with_transport(config, local_identity, authorized_keys, transport).await
+}
+
+pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
+    config: AppConfig,
+    local_identity: IdentityFile,
+    authorized_keys: AuthorizedKeys,
+    mut transport: T,
+) -> Result<(), DaemonError> {
     let codec = SignalCodec::new(
         &local_identity,
         &authorized_keys,
         config.security.max_clock_skew_secs,
         config.security.max_message_age_secs,
     );
-    let mut transport = MqttSignalingTransport::connect(&config)?;
     transport.subscribe_own_topic().await?;
     let status = StatusWriter::new(&config);
     let mut runtime = DaemonRuntimeState::new_connected();
@@ -402,13 +516,14 @@ pub fn compute_backoff_delay(config: &AppConfig, attempt: u32) -> Duration {
     Duration::from_millis(base_ms.saturating_add_signed(jitter))
 }
 
-async fn run_offer_session(
+async fn run_offer_session<T: DaemonSignalingTransport>(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     ctx: &mut RuntimeContext<'_>,
     mut client: OfferClient,
     remote: &AuthorizedKey,
+    #[cfg(any(test, debug_assertions))] session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
 ) -> Result<(), DaemonError> {
     let peer = WebRtcPeer::new(&config.webrtc).await?;
     let session_id = SessionId::random();
@@ -482,6 +597,14 @@ async fn run_offer_session(
         },
     )
     .await?;
+
+    #[cfg(any(test, debug_assertions))]
+    if let Some(session_hook) = session_hook {
+        let _ = session_hook.send(OfferSessionTestHandle {
+            session_id: session.session_id,
+            ice_state_injector: session.peer.ice_state_injector_for_tests(),
+        });
+    }
 
     let mut tick = interval(Duration::from_secs(1));
     let local_stream = client.take_stream()?;
@@ -715,10 +838,10 @@ async fn handle_answer_session_message(
     Ok(())
 }
 
-async fn run_answer_session(
+async fn run_answer_session<T: DaemonSignalingTransport>(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     connector: &AnswerTargetConnector,
     ctx: &mut RuntimeContext<'_>,
     mut session: ActiveSession,
@@ -1086,9 +1209,9 @@ async fn mark_transport_usable(ctx: &mut RuntimeContext<'_>, snapshot: StatusSna
     );
 }
 
-async fn poll_session_signal_payload(
+async fn poll_session_signal_payload<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     snapshot: StatusSnapshot,
 ) -> Result<Option<Vec<u8>>, DaemonError> {
     match transport.poll_signal_payload().await {
@@ -1103,9 +1226,9 @@ async fn poll_session_signal_payload(
     }
 }
 
-async fn poll_idle_signal_payload(
+async fn poll_idle_signal_payload<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
 ) -> Option<Vec<u8>> {
     match poll_session_signal_payload(
         ctx,
@@ -1130,10 +1253,10 @@ async fn poll_idle_signal_payload(
     }
 }
 
-async fn send_local_candidate(
+async fn send_local_candidate<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     session: &mut ActiveSession,
     remote: &AuthorizedKey,
     candidate: IceCandidateSignal,
@@ -1171,10 +1294,10 @@ async fn send_local_candidate(
     .await
 }
 
-async fn publish_message(
+async fn publish_message<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     snapshot: StatusSnapshot,
     signaling: Option<&mut SignalingSession>,
     recipient: &AuthorizedKey,
@@ -1226,9 +1349,9 @@ async fn publish_message(
     Ok(())
 }
 
-async fn retry_pending_acks(
+async fn retry_pending_acks<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     snapshot: StatusSnapshot,
     session: &mut ActiveSession,
 ) -> Result<(), DaemonError> {
@@ -1248,10 +1371,10 @@ async fn retry_pending_acks(
     Ok(())
 }
 
-async fn process_offer_session_payload(
+async fn process_offer_session_payload<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     remote: &AuthorizedKey,
     session: &mut ActiveSession,
     payload: &[u8],
@@ -1313,10 +1436,10 @@ async fn process_offer_session_payload(
     Ok(OfferSessionPayloadOutcome::Handled)
 }
 
-async fn maybe_handle_active_busy_offer(
+async fn maybe_handle_active_busy_offer<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     active_busy_offers: &mut ActiveBusyOfferCache,
     payload: &[u8],
     active_session_id: SessionId,
@@ -1384,10 +1507,10 @@ async fn maybe_handle_active_busy_offer(
     Ok(true)
 }
 
-async fn maybe_ack_duplicate_active_session_message(
+async fn maybe_ack_duplicate_active_session_message<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     session: &ActiveSession,
     payload: &[u8],
     error: &SignalingError,
@@ -1558,10 +1681,10 @@ fn candidate_from_body(body: &IceCandidateBody) -> IceCandidateSignal {
     }
 }
 
-async fn attempt_offer_reconnect(
+async fn attempt_offer_reconnect<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     session: &mut ActiveSession,
     remote: &AuthorizedKey,
 ) -> Result<bool, DaemonError> {
@@ -1618,10 +1741,10 @@ async fn attempt_offer_reconnect(
     Ok(false)
 }
 
-async fn reconnect_with_offer(
+async fn reconnect_with_offer<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     session: &mut ActiveSession,
     remote: &AuthorizedKey,
     ice_restart: bool,
@@ -1709,10 +1832,10 @@ async fn reconnect_with_offer(
     }
 }
 
-async fn wait_for_offer_reconnect_response(
+async fn wait_for_offer_reconnect_response<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
-    transport: &mut MqttSignalingTransport,
+    transport: &mut T,
     session: &mut ActiveSession,
     remote: &AuthorizedKey,
     timeout: Duration,
@@ -1748,36 +1871,15 @@ async fn wait_for_offer_reconnect_response(
                 },
             ) => {
                 if let Some(payload) = payload? {
-                    let (envelope, message, sender) = codec.decode(
+                    process_offer_session_payload(
+                        ctx,
+                        codec,
+                        transport,
+                        remote,
+                        session,
                         &payload,
-                        &mut session.signaling.replay_cache,
-                        Some(session.session_id),
-                    )?;
-                    if sender.peer_id != session.remote_peer_id {
-                        continue;
-                    }
-                    if message.message_type.requires_ack() {
-                        publish_message(
-                            ctx,
-                            codec,
-                            transport,
-                            StatusSnapshot {
-                                active_session_id: Some(session.session_id),
-                                current_state: session.state,
-                            },
-                            None,
-                            remote,
-                            OutgoingSignal {
-                                message: codec.build_ack(
-                                    remote.peer_id.clone(),
-                                    session.session_id,
-                                    envelope.msg_id,
-                                ),
-                                response: true,
-                            },
-                        ).await?;
-                    }
-                    handle_offer_session_message(&message, session).await?;
+                    )
+                    .await?;
                 }
             }
             candidate = session.peer.next_local_candidate() => {
