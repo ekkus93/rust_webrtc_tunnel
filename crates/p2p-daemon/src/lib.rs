@@ -1361,26 +1361,19 @@ async fn maybe_ack_duplicate_active_session_message(
     payload: &[u8],
     error: &SignalingError,
 ) -> Result<bool, DaemonError> {
-    let SignalingError::Protocol(message) = error else {
+    let Some(ack_message) = duplicate_active_session_ack_message(
+        codec,
+        session.session_id,
+        &session.remote_authorized,
+        &session.remote_peer_id,
+        payload,
+        error,
+    ) else {
         return Ok(false);
     };
-    if message != "duplicate message detected" {
-        return Ok(false);
-    }
 
-    let envelope = match OuterEnvelope::decode(payload) {
-        Ok(envelope) => envelope,
-        Err(_) => return Ok(false),
-    };
-    if !envelope.flags.ack_required {
-        return Ok(false);
-    }
-
-    let expected_sender_kid =
-        kid_from_signing_key(&session.remote_authorized.public_identity.sign_public);
-    if envelope.sender_kid != expected_sender_kid {
-        return Ok(false);
-    }
+    let envelope = OuterEnvelope::decode(payload)
+        .map_err(|error| DaemonError::Signaling(SignalingError::Protocol(error.to_string())))?;
 
     publish_message(
         ctx,
@@ -1392,14 +1385,7 @@ async fn maybe_ack_duplicate_active_session_message(
         },
         None,
         &session.remote_authorized,
-        OutgoingSignal {
-            message: codec.build_ack(
-                session.remote_peer_id.clone(),
-                session.session_id,
-                envelope.msg_id,
-            ),
-            response: true,
-        },
+        OutgoingSignal { message: ack_message, response: true },
     )
     .await?;
 
@@ -1410,6 +1396,34 @@ async fn maybe_ack_duplicate_active_session_message(
         "re-acknowledged duplicate active-session signaling message"
     );
     Ok(true)
+}
+
+fn duplicate_active_session_ack_message(
+    codec: &SignalCodec<'_>,
+    session_id: SessionId,
+    remote_authorized: &AuthorizedKey,
+    remote_peer_id: &PeerId,
+    payload: &[u8],
+    error: &SignalingError,
+) -> Option<InnerMessage> {
+    let SignalingError::Protocol(message) = error else {
+        return None;
+    };
+    if message != "duplicate message detected" {
+        return None;
+    }
+
+    let envelope = OuterEnvelope::decode(payload).ok()?;
+    if !envelope.flags.ack_required {
+        return None;
+    }
+
+    let expected_sender_kid = kid_from_signing_key(&remote_authorized.public_identity.sign_public);
+    if envelope.sender_kid != expected_sender_kid {
+        return None;
+    }
+
+    Some(codec.build_ack(remote_peer_id.clone(), session_id, envelope.msg_id))
 }
 
 fn replayed_active_busy_offer_key(
@@ -1798,14 +1812,14 @@ mod tests {
 
     use p2p_core::AppConfig;
     use p2p_core::{
-        BrokerConfig, BrokerTlsConfig, FailureCode, HealthConfig, LoggingConfig, NodeConfig,
-        NodeRole, ReconnectConfig, SecurityConfig, SessionId, TunnelAnswerConfig, TunnelConfig,
-        TunnelOfferConfig, WebRtcConfig,
+        ACK_RETRY_TIMEOUT_SECS, BrokerConfig, BrokerTlsConfig, FailureCode, HealthConfig,
+        LoggingConfig, NodeConfig, NodeRole, ReconnectConfig, SecurityConfig, SessionId,
+        TunnelAnswerConfig, TunnelConfig, TunnelOfferConfig, WebRtcConfig,
     };
     use p2p_crypto::{AuthorizedKeys, generate_identity};
     use p2p_signaling::{
-        ErrorBody, InnerMessageBuilder, MessageBody, OfferBody, OuterEnvelope, ReplayCache,
-        SignalCodec, SignalingError,
+        AckBody, ErrorBody, InnerMessageBuilder, MessageBody, OfferBody, OuterEnvelope,
+        ReplayCache, SignalCodec, SignalingError,
     };
     use serde_json::Value;
     use tokio::io::AsyncReadExt;
@@ -1813,13 +1827,15 @@ mod tests {
 
     use super::{
         ActiveBusyOfferAction, ActiveBusyOfferCache, ActiveBusyOfferKey, BridgeSessionState,
-        DaemonError, DaemonRuntimeState, DaemonState, IceConnectionState, OfferListener,
-        RuntimeContext, StatusSnapshot, StatusWriter, apply_answer_overrides,
+        ActiveSession, DaemonError, DaemonRuntimeState, DaemonState, IceConnectionState,
+        OfferListener, RuntimeContext, StatusSnapshot, StatusWriter, WebRtcPeer,
+        apply_answer_overrides,
         apply_offer_overrides, apply_override_pairs, classify_active_busy_offer,
-        compute_backoff_delay, decode_idle_signaling_message, mark_transport_unusable,
-        mark_transport_usable, recover_daemon_after_session, replayed_active_busy_offer_key,
-        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
-        spawn_offer_accept_loop, steady_state_for_role,
+        compute_backoff_delay, decode_idle_signaling_message,
+        duplicate_active_session_ack_message, mark_transport_unusable, mark_transport_usable,
+        handle_offer_session_message, recover_daemon_after_session,
+        replayed_active_busy_offer_key, should_ack_idle_offer, should_attempt_offer_reconnect,
+        should_continue_reconnect_attempt, spawn_offer_accept_loop, steady_state_for_role,
         write_steady_state_status,
     };
 
@@ -2115,6 +2131,158 @@ mod tests {
     fn steady_state_matches_v1_role_policy() {
         assert_eq!(steady_state_for_role(&NodeRole::Offer), DaemonState::WaitingForLocalClient);
         assert_eq!(steady_state_for_role(&NodeRole::Answer), DaemonState::Idle);
+    }
+
+    #[test]
+    fn duplicate_active_session_message_builds_re_ack_for_original_msg_id() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let session_id = SessionId::random();
+        let duplicate_error = SignalingError::Protocol("duplicate message detected".to_owned());
+        let message = InnerMessageBuilder::new(
+            session_id,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Error(ErrorBody {
+            code: FailureCode::ProtocolError.as_str().to_owned(),
+            message: "duplicate retry".to_owned(),
+            fatal: true,
+        }));
+        let (envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("message encodes");
+
+        let ack = duplicate_active_session_ack_message(
+            &answer_codec,
+            session_id,
+            answer_keys.get_by_peer_id(&offer.identity.peer_id).expect("offer key"),
+            &offer.identity.peer_id,
+            &payload,
+            &duplicate_error,
+        )
+        .expect("duplicate active-session message should be re-acknowledged");
+
+        assert_eq!(ack.session_id, session_id);
+        assert_eq!(ack.sender_peer_id, answer.identity.peer_id);
+        assert_eq!(ack.recipient_peer_id, offer.identity.peer_id);
+        assert!(matches!(
+            ack.body,
+            MessageBody::Ack(AckBody { ack_msg_id }) if ack_msg_id == envelope.msg_id.into_bytes()
+        ));
+    }
+
+    #[tokio::test]
+    async fn active_session_retry_and_duplicate_reack_flow_retires_pending_ack() {
+        let mut config = sample_config();
+        config.webrtc.stun_urls = Vec::new();
+        config.webrtc.enable_trickle_ice = false;
+
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let remote = offer_keys
+            .get_by_peer_id(&answer.identity.peer_id)
+            .cloned()
+            .expect("answer authorized key");
+        let peer = WebRtcPeer::new(&config.webrtc).await.expect("offer peer should build");
+        let session_id = SessionId::random();
+        let mut session =
+            ActiveSession::new(session_id, remote.clone(), peer, config.security.replay_cache_size);
+
+        let outbound_message = InnerMessageBuilder::new(
+            session_id,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Error(ErrorBody {
+            code: FailureCode::ProtocolError.as_str().to_owned(),
+            message: "retry me".to_owned(),
+            fatal: true,
+        }));
+        let (outbound_envelope, outbound_payload) = offer_codec
+            .encode_for_peer(&remote, &outbound_message, false)
+            .expect("outbound message encodes");
+        session.signaling.ack_tracker.register(
+            outbound_envelope.msg_id,
+            outbound_message.message_type,
+            outbound_payload.clone(),
+            0,
+        );
+
+        let retries = session.signaling.ack_tracker.retry_due(ACK_RETRY_TIMEOUT_SECS * 1_000);
+        assert_eq!(retries.len(), 1, "pending outbound message should be retried once due");
+        assert_eq!(retries[0].0, outbound_envelope.msg_id);
+        assert_eq!(retries[0].1, outbound_payload);
+
+        let duplicate_inbound = InnerMessageBuilder::new(
+            session_id,
+            answer.identity.peer_id.clone(),
+            offer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Error(ErrorBody {
+            code: FailureCode::ProtocolError.as_str().to_owned(),
+            message: "duplicate inbound".to_owned(),
+            fatal: true,
+        }));
+        let (duplicate_envelope, duplicate_payload) = answer_codec
+            .encode_for_peer(
+                answer_keys.get_by_peer_id(&offer.identity.peer_id).expect("offer key"),
+                &duplicate_inbound,
+                false,
+            )
+            .expect("duplicate inbound encodes");
+        let duplicate_error = SignalingError::Protocol("duplicate message detected".to_owned());
+
+        let reack = duplicate_active_session_ack_message(
+            &offer_codec,
+            session_id,
+            &session.remote_authorized,
+            &session.remote_peer_id,
+            &duplicate_payload,
+            &duplicate_error,
+        )
+        .expect("duplicate inbound payload should be re-acknowledged");
+
+        assert!(matches!(
+            reack.body,
+            MessageBody::Ack(AckBody { ack_msg_id }) if ack_msg_id == duplicate_envelope.msg_id.into_bytes()
+        ));
+
+        let inbound_ack = answer_codec.build_ack(
+            offer.identity.peer_id.clone(),
+            session_id,
+            outbound_envelope.msg_id,
+        );
+        handle_offer_session_message(&inbound_ack, &mut session)
+            .await
+            .expect("inbound ack should retire pending outbound message");
+
+        assert!(
+            session.signaling.ack_tracker.retry_due(u64::MAX).is_empty(),
+            "inbound ack should clear the pending outbound retry"
+        );
+        assert!(
+            session.signaling.ack_tracker.expired().is_empty(),
+            "retired pending message should not linger as expired"
+        );
+
+        session.peer.close().await.expect("offer peer should close");
     }
 
     #[tokio::test]

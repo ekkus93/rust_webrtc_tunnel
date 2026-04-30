@@ -159,3 +159,26 @@
 - Added real local WebRTC-backed tunnel tests in `p2p-tunnel` that verify the offer/answer `OPEN` handshake reaches the target TCP service and bridges bytes end to end.
 - Added a companion regression that verifies answer-side target connect failure is surfaced back to the offer bridge as `RemoteFailure(TargetConnectFailed)` instead of silently hanging.
 - Validated with `cargo test -p p2p-tunnel --lib` and `cargo clippy -p p2p-tunnel --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:15:14Z - GPT-5.4 - Added ACK lifecycle and incoming data-channel regressions
+- Added focused `p2p-signaling` unit tests covering ACK retirement for the exact `msg_id`, ignoring non-ACK-required message types, and expiry only after the configured retry limit.
+- Added a `p2p-webrtc` regression proving the answer side receives the incoming `tunnel` data channel immediately after SDP exchange, matching the daemon's bridge-on-incoming-channel handoff.
+- Validated with `cargo test -p p2p-signaling --lib`, `cargo test -p p2p-webrtc --lib`, and `cargo clippy -p p2p-signaling -p p2p-webrtc --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:20:37Z - GPT-5.4 - Added daemon duplicate active-session re-ACK regression
+- Extracted the daemon's duplicate active-session re-ACK decision into a small pure helper so the exact re-ACK condition can be tested without needing a broker.
+- Added a `p2p-daemon` regression that feeds a real encoded duplicate ack-required payload through that helper and asserts the daemon builds an ACK for the original duplicate `msg_id` back to the authorized remote peer.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:21:54Z - GPT-5.4 - Full workspace tests passed after latest regression additions
+- Re-ran `cargo test --workspace --all-targets` after the latest ACK lifecycle, incoming data-channel, and daemon duplicate re-ACK regression additions.
+- The workspace passed cleanly, including 31 `p2p-daemon` tests, 25 `p2p-signaling` tests across unit and mocked-MQTT coverage, 10 `p2p-tunnel` tests, 5 `p2p-webrtc` tests, 11 `p2p-core` tests, 10 `p2p-crypto` tests across unit and integration coverage, and 2 `p2pctl` tests.
+
+## 2026-04-30T14:26:45Z - GPT-5.4 - Added daemon ACK retry and retirement regression
+- Added a `p2p-daemon` tokio test that builds a real `ActiveSession`, forces one outbound ack-required message into retry, verifies a duplicate inbound ack-required payload is re-ACKed, and then proves a later inbound ACK retires the pending outbound entry.
+- This pins the daemon-owned ACK lifecycle that previously led to operational timeout pain, without depending on a live broker.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:29:14Z - GPT-5.4 - Full workspace lint and tests passed after latest daemon ACK regression
+- Re-ran `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo test --workspace --all-targets` after the latest daemon ACK retry/retirement regression landed.
+- Both passed cleanly; the workspace now reports 32 `p2p-daemon` tests, 25 `p2p-signaling` tests across unit and mocked-MQTT coverage, 10 `p2p-tunnel` tests, 5 `p2p-webrtc` tests, 11 `p2p-core` tests, 10 `p2p-crypto` tests, and 2 `p2pctl` tests.

@@ -371,9 +371,12 @@ fn expected_data_channel_label() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{IceConnectionState, build_rtc_configuration, expected_data_channel_label};
+    use std::time::Duration;
+
+    use super::{IceConnectionState, WebRtcPeer, build_rtc_configuration, expected_data_channel_label};
     use p2p_core::DATA_CHANNEL_LABEL;
     use p2p_core::WebRtcConfig;
+    use tokio::time::timeout;
 
     fn sample_config() -> WebRtcConfig {
         WebRtcConfig {
@@ -408,5 +411,51 @@ mod tests {
     #[test]
     fn data_channel_label_is_fixed_to_protocol_constant() {
         assert_eq!(expected_data_channel_label(), DATA_CHANNEL_LABEL);
+    }
+
+    #[tokio::test]
+    async fn incoming_data_channel_is_delivered_after_sdp_exchange() {
+        let mut config = sample_config();
+        config.stun_urls = Vec::new();
+        config.enable_trickle_ice = false;
+
+        let offer_peer = WebRtcPeer::new(&config).await.expect("offer peer should build");
+        let answer_peer = WebRtcPeer::new(&config).await.expect("answer peer should build");
+
+        let offer_channel = offer_peer
+            .create_data_channel()
+            .await
+            .expect("offer data channel should build");
+        let offer_sdp = offer_peer.create_offer().await.expect("offer SDP should build");
+        answer_peer
+            .apply_remote_offer(&offer_sdp)
+            .await
+            .expect("answer should apply remote offer");
+        let answer_sdp = answer_peer.create_answer().await.expect("answer SDP should build");
+        offer_peer
+            .apply_remote_answer(&answer_sdp)
+            .await
+            .expect("offer should apply remote answer");
+
+        let answer_channel = timeout(Duration::from_secs(10), answer_peer.next_incoming_data_channel())
+            .await
+            .expect("incoming data channel should arrive")
+            .expect("incoming data channel stream should yield")
+            .expect("incoming data channel should be accepted");
+
+        assert_eq!(answer_channel.label(), DATA_CHANNEL_LABEL);
+        assert!(answer_channel.ordered());
+
+        offer_channel
+            .wait_for_open(Duration::from_secs(10))
+            .await
+            .expect("offer data channel should open");
+        answer_channel
+            .wait_for_open(Duration::from_secs(10))
+            .await
+            .expect("answer data channel should open");
+
+        offer_peer.close().await.expect("offer peer should close");
+        answer_peer.close().await.expect("answer peer should close");
     }
 }
