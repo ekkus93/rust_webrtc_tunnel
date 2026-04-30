@@ -39,6 +39,12 @@ enum BridgeSessionState {
     Closed,
 }
 
+#[derive(Clone, Debug)]
+enum ActiveBusyOfferAction {
+    Ignore,
+    ReplyBusy { session_id: SessionId, sender: Box<AuthorizedKey> },
+}
+
 pub struct ActiveSession {
     pub session_id: SessionId,
     pub remote_peer_id: PeerId,
@@ -580,7 +586,7 @@ async fn run_answer_session(
                         ) {
                             Ok(decoded) => decoded,
                             Err(error) => {
-                                if maybe_reject_busy_offer(
+                                if maybe_handle_active_busy_offer(
                                     config,
                                     codec,
                                     transport,
@@ -896,7 +902,7 @@ async fn retry_pending_acks(
     Ok(())
 }
 
-async fn maybe_reject_busy_offer(
+async fn maybe_handle_active_busy_offer(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
@@ -904,30 +910,60 @@ async fn maybe_reject_busy_offer(
     active_session_id: SessionId,
     replay_cache_size: usize,
 ) -> Result<bool, DaemonError> {
-    let mut replay_cache = p2p_signaling::ReplayCache::new(replay_cache_size);
-    let Ok((_envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+    let Some(action) =
+        classify_active_busy_offer(config, codec, payload, active_session_id, replay_cache_size)
+    else {
         return Ok(false);
     };
-    if !matches!(message.body, MessageBody::Offer(_)) || message.session_id == active_session_id {
-        return Ok(false);
+    match action {
+        ActiveBusyOfferAction::Ignore => {}
+        ActiveBusyOfferAction::ReplyBusy { session_id, sender } => {
+            publish_message(
+                config,
+                codec,
+                transport,
+                None,
+                &sender,
+                build_error_message(
+                    &config.node.peer_id,
+                    &sender.peer_id,
+                    session_id,
+                    FailureCode::Busy,
+                    "answer daemon already has an active session",
+                ),
+                true,
+            )
+            .await?;
+        }
     }
-    publish_message(
-        config,
-        codec,
-        transport,
-        None,
-        &sender,
-        build_error_message(
-            &config.node.peer_id,
-            &sender.peer_id,
-            message.session_id,
-            FailureCode::Busy,
-            "answer daemon already has an active session",
-        ),
-        true,
-    )
-    .await?;
     Ok(true)
+}
+
+fn classify_active_busy_offer(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    payload: &[u8],
+    active_session_id: SessionId,
+    replay_cache_size: usize,
+) -> Option<ActiveBusyOfferAction> {
+    let mut replay_cache = p2p_signaling::ReplayCache::new(replay_cache_size);
+    let Ok((_envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+        return None;
+    };
+    if !matches!(message.body, MessageBody::Offer(_)) || message.session_id == active_session_id {
+        return None;
+    }
+    if !is_peer_allowed_for_active_busy_reply(config, &sender.peer_id) {
+        return Some(ActiveBusyOfferAction::Ignore);
+    }
+    Some(ActiveBusyOfferAction::ReplyBusy {
+        session_id: message.session_id,
+        sender: Box::new(sender),
+    })
+}
+
+fn is_peer_allowed_for_active_busy_reply(config: &AppConfig, sender_peer_id: &PeerId) -> bool {
+    config.tunnel.answer.allow_remote_peers.contains(sender_peer_id)
 }
 
 fn decode_idle_signaling_message<'a>(
@@ -1258,10 +1294,11 @@ mod tests {
     use tokio::time::timeout;
 
     use super::{
-        BridgeSessionState, DaemonError, DaemonState, IceConnectionState, OfferListener,
-        StatusWriter, apply_answer_overrides, apply_offer_overrides, apply_override_pairs,
-        compute_backoff_delay, decode_idle_signaling_message, recover_daemon_after_session,
-        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
+        ActiveBusyOfferAction, BridgeSessionState, DaemonError, DaemonState, IceConnectionState,
+        OfferListener, StatusWriter, apply_answer_overrides, apply_offer_overrides,
+        apply_override_pairs, classify_active_busy_offer, compute_backoff_delay,
+        decode_idle_signaling_message, recover_daemon_after_session, should_ack_idle_offer,
+        should_attempt_offer_reconnect, should_continue_reconnect_attempt,
         should_poll_answer_data_events, spawn_offer_accept_loop, steady_state_for_role,
         write_steady_state_status,
     };
@@ -1715,5 +1752,124 @@ mod tests {
             .expect("accept loop should stay alive")
             .expect("third session should be accepted");
         drop(third_session);
+    }
+
+    #[test]
+    fn active_answer_busy_offer_replies_only_to_allowed_peers() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys parse");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys parse");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let active_session = SessionId::random();
+        let new_offer_session = SessionId::random();
+        let message = InnerMessageBuilder::new(
+            new_offer_session,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "second-offer".to_owned() }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("offer encodes");
+
+        match classify_active_busy_offer(
+            &sample_config(),
+            &answer_codec,
+            &payload,
+            active_session,
+            64,
+        ) {
+            Some(ActiveBusyOfferAction::ReplyBusy { session_id, sender }) => {
+                assert_eq!(session_id, new_offer_session);
+                assert_eq!(sender.peer_id, offer.identity.peer_id);
+            }
+            other => panic!("expected busy reply for allowed peer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn active_answer_busy_offer_ignores_authorized_but_disallowed_peer() {
+        let allowed = generate_identity("offer-home").expect("allowed identity");
+        let disallowed = generate_identity("offer-guest").expect("disallowed identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys = AuthorizedKeys::parse(&format!(
+            "{}\n{}\n",
+            allowed.public_identity.render(),
+            disallowed.public_identity.render()
+        ))
+        .expect("answer keys parse");
+        let disallowed_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("disallowed keys parse");
+        let disallowed_codec = SignalCodec::new(&disallowed.identity, &disallowed_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let message = InnerMessageBuilder::new(
+            SessionId::random(),
+            disallowed.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "guest-offer".to_owned() }));
+        let (_envelope, payload) = disallowed_codec
+            .encode_for_peer(
+                disallowed_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("disallowed offer encodes");
+
+        assert!(matches!(
+            classify_active_busy_offer(
+                &sample_config(),
+                &answer_codec,
+                &payload,
+                SessionId::random(),
+                64
+            ),
+            Some(ActiveBusyOfferAction::Ignore)
+        ));
+    }
+
+    #[test]
+    fn active_answer_busy_offer_ignores_unauthorized_peer() {
+        let allowed = generate_identity("offer-home").expect("allowed identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let rogue = generate_identity("rogue-peer").expect("rogue identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&allowed.public_identity.render()).expect("answer keys parse");
+        let rogue_keys = AuthorizedKeys::parse(&answer.public_identity.render())
+            .expect("rogue recipient keys parse");
+        let rogue_codec = SignalCodec::new(&rogue.identity, &rogue_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let message = InnerMessageBuilder::new(
+            SessionId::random(),
+            rogue.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "rogue-offer".to_owned() }));
+        let (_envelope, payload) = rogue_codec
+            .encode_for_peer(
+                rogue_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("rogue offer encodes");
+
+        assert!(
+            classify_active_busy_offer(
+                &sample_config(),
+                &answer_codec,
+                &payload,
+                SessionId::random(),
+                64
+            )
+            .is_none()
+        );
     }
 }

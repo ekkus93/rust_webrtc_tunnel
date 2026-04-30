@@ -135,6 +135,8 @@ Add tests that verify:
 
 ## P1 — Make Active-Answer Busy Rejection Follow Full Policy
 
+- [x] Status: complete
+
 ### Objective
 
 Ensure answer-side behavior is consistent between:
@@ -146,20 +148,20 @@ Specifically, busy rejection should not bypass `allow_remote_peers` policy.
 
 ### Task 2.1 — Audit active answer “busy offer” handling
 
-- Inspect the code path that detects a new/foreign incoming offer while an answer session is already active.
-- Confirm which policy checks are applied before replying with `busy`.
-- Compare it directly with the idle-path authorization/policy logic.
+- [x] Inspect the code path that detects a new/foreign incoming offer while an answer session is already active.
+- [x] Confirm which policy checks are applied before replying with `busy`.
+- [x] Compare it directly with the idle-path authorization/policy logic.
 
 ### Task 2.2 — Apply consistent policy rules
 
-- Ensure active-session busy handling respects:
-  - `authorized_keys`
-  - `allow_remote_peers`
-  - session validity expectations
-- Decide what unauthorized or disallowed peers receive:
-  - no response,
-  - explicit error,
-  - or explicit busy only if fully allowed.
+- [x] Ensure active-session busy handling respects:
+  - [x] `authorized_keys`
+  - [x] `allow_remote_peers`
+  - [x] session validity expectations
+- [x] Decide what unauthorized or disallowed peers receive:
+  - [x] no response
+  - [x] explicit error not used
+  - [x] explicit busy only if fully allowed
 
 **Recommendation for v1:**
 - If peer is not authorized or not in `allow_remote_peers`, do not send normal `busy`.
@@ -169,9 +171,9 @@ Specifically, busy rejection should not bypass `allow_remote_peers` policy.
 
 Add tests covering:
 
-- allowed peer gets `busy` during active answer session
-- unauthorized peer gets rejected appropriately
-- authorized but disallowed peer does not get a misleading `busy`
+- [x] allowed peer gets `busy` during active answer session
+- [x] unauthorized peer gets rejected appropriately
+- [x] authorized but disallowed peer does not get a misleading `busy`
 
 ---
 

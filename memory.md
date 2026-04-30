@@ -33,3 +33,6 @@
 
 ## 2026-04-30T08:48:09Z - GPT-5.4 - Review 3 phase 1 landed
 - Round-3 phase 1 changed the offer daemon to keep a dedicated accept loop alive during active sessions so extra local clients are accepted and immediately closed with no banner, and added daemon-level busy tests to verify prompt rejection while the first session stays intact.
+
+## 2026-04-30T08:52:17Z - GPT-5.4 - Review 3 phase 2 landed
+- Round-3 phase 2 made active-answer busy handling respect both authorization and `allow_remote_peers`, so only fully allowed peers receive encrypted `busy` during an active session while unauthorized or disallowed peers get no response.
