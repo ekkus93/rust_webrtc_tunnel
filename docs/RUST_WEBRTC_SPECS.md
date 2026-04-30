@@ -714,6 +714,11 @@ Allowed:
 - local stdout/file logs
 - optional Unix domain socket in a later revision
 
+Status semantics in v1:
+- `mqtt_connected` in the local status file is a best-effort latest-known signaling transport usability flag.
+- Recoverable poll/publish failures should flip it to `false` before retry/backoff.
+- Later successful transport activity should flip it back to `true`.
+
 Not allowed in v1:
 - plaintext diagnostic/status messages over MQTT
 

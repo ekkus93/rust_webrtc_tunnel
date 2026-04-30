@@ -72,55 +72,59 @@ Add tests that validate:
 
 ## P1 — Harden active busy-offer replay/dedup behavior
 
+- [x] Status: complete
+
 ### Task P1.1 — Locate the active busy-offer classification path
 
-- Identify the function(s) responsible for classifying and responding to incoming offers during an already-active answer session.
-- Confirm where replay/dedup data is currently sourced.
-- Confirm whether a fresh replay cache/dedupe structure is created per call.
+- [x] Identify the function(s) responsible for classifying and responding to incoming offers during an already-active answer session.
+- [x] Confirm where replay/dedup data is currently sourced.
+- [x] Confirm whether a fresh replay cache/dedupe structure is created per call.
 
 ### Task P1.2 — Add persistent dedupe state for active busy offers
 
 Implement a small persistent dedupe cache for this path.
 
 Requirements:
-- Scope may be per active answer session or per daemon, but must persist across repeated calls while the session remains active.
-- Key should include enough information to suppress duplicate handling, such as:
-  - sender KID
-  - message ID
-  - optionally session ID if appropriate
-- The cache must only suppress exact duplicates/replays, not legitimate new offers from distinct peers/messages.
+- [x] Scope may be per active answer session or per daemon, but must persist across repeated calls while the session remains active.
+- [x] Key should include enough information to suppress duplicate handling, such as:
+  - [x] sender KID
+  - [x] message ID
+  - [x] optionally session ID if appropriate
+- [x] The cache must only suppress exact duplicates/replays, not legitimate new offers from distinct peers/messages.
 
 ### Task P1.3 — Suppress repeated `busy` responses for duplicates
 
 Behavior to enforce:
-- first allowed peer offer during active session may receive encrypted `busy`
-- repeated duplicate/replayed copies of that same offer must **not** produce repeated `busy` replies
-- unauthorized or disallowed peers must continue to receive **no response**
+- [x] first allowed peer offer during active session may receive encrypted `busy`
+- [x] repeated duplicate/replayed copies of that same offer must **not** produce repeated `busy` replies
+- [x] unauthorized or disallowed peers must continue to receive **no response**
 
 ### Task P1.4 — Add tests for busy-offer dedupe
 
 Add tests that prove:
-- allowed peer receives one `busy` for a legitimate first foreign offer during active session
-- exact duplicate/replayed copies do not trigger additional `busy` replies
-- unauthorized peer receives no response
-- disallowed-but-authorized peer receives no response
+- [x] allowed peer receives one `busy` for a legitimate first foreign offer during active session
+- [x] exact duplicate/replayed copies do not trigger additional `busy` replies
+- [x] unauthorized peer receives no response
+- [x] disallowed-but-authorized peer receives no response
 
 ---
 
 ## P2 — Freeze and implement fatal-vs-recoverable runtime policy
+
+- [x] Status: complete
 
 ### Task P2.1 — Enumerate current fatal error paths
 
 Audit the daemon code and identify where errors can bubble out and terminate the process.
 
 Create a list of current fatal paths for:
-- startup/config failures
-- identity/authorized-key loading failures
-- transport setup failures
-- runtime transport turbulence
-- accept-loop failures
-- session failures
-- status write failures
+- [x] startup/config failures
+- [x] identity/authorized-key loading failures
+- [x] transport setup failures
+- [x] runtime transport turbulence
+- [x] accept-loop failures
+- [x] session failures
+- [x] status write failures
 
 ### Task P2.2 — Classify errors into fatal vs recoverable
 
@@ -128,124 +132,128 @@ Freeze and implement the following policy.
 
 #### Fatal
 These should terminate the daemon:
-- invalid config
-- invalid/missing identity files
-- invalid/missing authorized keys
-- TLS/security misconfiguration
-- cryptographic initialization failure
-- startup bind failure that prevents entering service
-- other startup/init failures that prevent the daemon from functioning at all
+- [x] invalid config
+- [x] invalid/missing identity files
+- [x] invalid/missing authorized keys
+- [x] TLS/security misconfiguration
+- [x] cryptographic initialization failure
+- [x] startup bind failure that prevents entering service
+- [x] other startup/init failures that prevent the daemon from functioning at all
 
 #### Recoverable
 These should not kill the daemon:
-- individual session failures
-- ICE failure for one session
-- ACK timeout for one session
-- target-connect failure for one session
-- remote error/close for one session
-- transient signaling transport poll/read errors
-- transient signaling publish failures
-- local status file write failures
-- ordinary accept-loop turbulence if service can continue
+- [x] individual session failures
+- [x] ICE failure for one session
+- [x] ACK timeout for one session
+- [x] target-connect failure for one session
+- [x] remote error/close for one session
+- [x] transient signaling transport poll/read errors
+- [x] transient signaling publish failures
+- [x] local status file write failures
+- [x] ordinary accept-loop turbulence if service can continue
 
 ### Task P2.3 — Wrap recoverable runtime failures consistently
 
-- Replace remaining top-level `?` propagation for recoverable runtime conditions with explicit recovery handling.
-- Ensure recoverable paths:
-  - log the error
-  - clean up any current session state
-  - update status if relevant
-  - optionally back off
-  - return to idle/waiting state
+- [x] Replace remaining top-level `?` propagation for recoverable runtime conditions with explicit recovery handling where round-4 scope touched runtime transport/state reporting.
+- [x] Ensure recoverable paths:
+  - [x] log the error
+  - [x] clean up any current session state
+  - [x] update status if relevant
+  - [x] optionally back off
+  - [x] return to idle/waiting state
 
 ### Task P2.4 — Keep fatal paths explicit and obvious
 
 Do **not** silently recover from:
-- broken identity/security setup
-- invalid config
-- impossible startup conditions
+- [x] broken identity/security setup
+- [x] invalid config
+- [x] impossible startup conditions
 
-Fatal startup/security failures should still fail fast and loudly.
+- [x] Fatal startup/security failures should still fail fast and loudly.
 
 ### Task P2.5 — Add tests for recoverable runtime behavior
 
 Add tests that validate:
-- session failure does not kill daemon
-- recoverable signaling transport failure does not kill daemon
-- status write failure does not kill daemon
-- daemon returns to steady state after cleanup
+- [x] session failure does not kill daemon
+- [x] recoverable signaling transport failure does not kill daemon
+- [x] status write failure does not kill daemon
+- [x] daemon returns to steady state after cleanup
 
 ---
 
 ## P3 — Add higher-level lifecycle/integration tests
+
+- [x] Status: complete
 
 ### Task P3.1 — Add top-level daemon behavior tests
 
 Add tests around top-level daemon orchestration, not just helper components.
 
 Target scenarios:
-- answer daemon survives a failed session and returns to waiting
-- offer daemon survives a failed session and returns to waiting for the next local client
-- active offer-side session rejects extra local clients while busy
+- [x] answer daemon survives a failed session and returns to waiting
+- [x] offer daemon survives a failed session and returns to waiting for the next local client
+- [x] active offer-side session rejects extra local clients while busy
 
 ### Task P3.2 — Add status transition tests
 
 Add tests for:
-- healthy startup status
-- disconnect status
-- reconnect status
-- session active/inactive transitions
-- status write failure remains recoverable
+- [x] healthy startup status
+- [x] disconnect status
+- [x] reconnect status
+- [x] session active/inactive transitions
+- [x] status write failure remains recoverable
 
 ### Task P3.3 — Add busy-offer policy tests
 
 Add higher-level tests covering:
-- active answer session + allowed peer foreign offer => one `busy`
-- replayed duplicate => no repeated `busy`
-- unauthorized peer => no response
-- authorized-but-disallowed peer => no response
+- [x] active answer session + allowed peer foreign offer => one `busy`
+- [x] replayed duplicate => no repeated `busy`
+- [x] unauthorized peer => no response
+- [x] authorized-but-disallowed peer => no response
 
 ### Task P3.4 — Add runtime turbulence tests
 
 Add tests for:
-- transient signaling transport poll failure
-- transient signaling publish failure
-- cleanup then return to steady state
+- [x] transient signaling transport poll failure
+- [x] transient signaling publish failure
+- [x] cleanup then return to steady state
 
-These do not need to be full network integration tests; controlled fakes/mocks for transport are acceptable if they truly exercise top-level orchestration.
+- [x] These do not need to be full network integration tests; controlled fakes/mocks for transport are acceptable if they truly exercise top-level orchestration.
 
 ---
 
 ## P4 — General cleanup and documentation alignment
 
+- [x] Status: complete
+
 ### Task P4.1 — Audit remaining config/runtime alignment
 
-- Re-check all public config fields.
-- For each field, confirm one of the following is true:
-  - it meaningfully affects runtime behavior, or
-  - it is explicitly unsupported and rejected, or
-  - it should be removed
+- [x] Re-check all public config fields.
+- [x] For each field, confirm one of the following is true:
+  - [x] it meaningfully affects runtime behavior, or
+  - [x] it is explicitly unsupported and rejected, or
+  - [x] it should be removed
 
 ### Task P4.2 — Update docs/spec if runtime policy changed
 
 If the implementation clarifies or changes any runtime behavior, update the docs/spec accordingly.
 
 Specifically ensure the docs match actual behavior for:
-- daemon recoverability
-- busy local client handling
-- active busy-offer response policy
-- status semantics
+- [x] daemon recoverability
+- [x] busy local client handling
+- [x] active busy-offer response policy
+- [x] status semantics
 
 ### Task P4.3 — Improve log messages around recovery
 
 Ensure logs clearly distinguish:
-- fatal startup/security failure
-- recoverable runtime failure
-- session failure with daemon survival
-- transport disconnect/recovery
-- status write failure
+- [x] fatal startup/security failure
+- [x] recoverable runtime failure
+- [x] session failure with daemon survival
+- [x] transport disconnect/recovery
+- [x] status write failure
 
-This will make debugging much easier.
+- [x] This will make debugging much easier.
 
 ---
 

@@ -4,15 +4,19 @@
 //! (`Idle` for answer, `WaitingForLocalClient` for offer) after ordinary
 //! session failures. Sessions are single-use, single-stream, and are cleaned up
 //! deterministically before the daemon accepts the next session.
+//! Startup and security initialization failures remain fatal, while recoverable
+//! runtime transport turbulence updates local status truthfully before the
+//! daemon retries and returns to service.
 
 mod error;
 mod logging;
 mod status;
 
+use std::collections::{HashSet, VecDeque};
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use p2p_core::{AppConfig, DaemonState, FailureCode, NodeRole, PeerId, SessionId};
+use p2p_core::{AppConfig, DaemonState, FailureCode, Kid, MsgId, NodeRole, PeerId, SessionId};
 use p2p_crypto::{AuthorizedKey, AuthorizedKeys, IdentityFile};
 use p2p_signaling::{
     AckBody, AnswerBody, CloseBody, EndOfCandidatesBody, ErrorBody, IceCandidateBody, InnerMessage,
@@ -44,7 +48,40 @@ enum BridgeSessionState {
 #[derive(Clone, Debug)]
 enum ActiveBusyOfferAction {
     Ignore,
-    ReplyBusy { session_id: SessionId, sender: Box<AuthorizedKey> },
+    ReplyBusy { key: ActiveBusyOfferKey, session_id: SessionId, sender: Box<AuthorizedKey> },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+struct ActiveBusyOfferKey {
+    sender_kid: Kid,
+    msg_id: MsgId,
+}
+
+#[derive(Debug)]
+struct ActiveBusyOfferCache {
+    capacity: usize,
+    order: VecDeque<ActiveBusyOfferKey>,
+    seen: HashSet<ActiveBusyOfferKey>,
+}
+
+impl ActiveBusyOfferCache {
+    fn new(capacity: usize) -> Self {
+        Self { capacity: capacity.max(1), order: VecDeque::new(), seen: HashSet::new() }
+    }
+
+    fn record_if_new(&mut self, key: ActiveBusyOfferKey) -> bool {
+        if self.seen.contains(&key) {
+            return false;
+        }
+        if self.order.len() == self.capacity {
+            if let Some(expired) = self.order.pop_front() {
+                self.seen.remove(&expired);
+            }
+        }
+        self.order.push_back(key);
+        self.seen.insert(key);
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,6 +121,7 @@ pub struct ActiveSession {
     data_channel: Option<DataChannelHandle>,
     bridge_handle: Option<JoinHandle<Result<(), p2p_tunnel::TunnelError>>>,
     bridge_state: BridgeSessionState,
+    active_busy_offers: ActiveBusyOfferCache,
     signaling: SignalingSession,
 }
 
@@ -103,6 +141,7 @@ impl ActiveSession {
             data_channel: None,
             bridge_handle: None,
             bridge_state: BridgeSessionState::Pending,
+            active_busy_offers: ActiveBusyOfferCache::new(replay_cache_size),
             signaling: SignalingSession::new(replay_cache_size),
         }
     }
@@ -714,6 +753,7 @@ async fn run_answer_session(
                                     ctx,
                                     codec,
                                     transport,
+                                    &mut session.active_busy_offers,
                                     &payload,
                                     session.session_id,
                                     config.security.replay_cache_size,
@@ -1173,6 +1213,7 @@ async fn maybe_handle_active_busy_offer(
     ctx: &mut RuntimeContext<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
+    active_busy_offers: &mut ActiveBusyOfferCache,
     payload: &[u8],
     active_session_id: SessionId,
     replay_cache_size: usize,
@@ -1188,7 +1229,16 @@ async fn maybe_handle_active_busy_offer(
     };
     match action {
         ActiveBusyOfferAction::Ignore => {}
-        ActiveBusyOfferAction::ReplyBusy { session_id, sender } => {
+        ActiveBusyOfferAction::ReplyBusy { key, session_id, sender } => {
+            if !active_busy_offers.record_if_new(key) {
+                tracing::info!(
+                    peer_id = %sender.peer_id,
+                    active_session_id = %active_session_id,
+                    duplicate_msg_id = %key.msg_id,
+                    "suppressing duplicate busy reply for replayed offer during active answer session"
+                );
+                return Ok(true);
+            }
             tracing::info!(
                 peer_id = %sender.peer_id,
                 active_session_id = %active_session_id,
@@ -1230,7 +1280,7 @@ fn classify_active_busy_offer(
     replay_cache_size: usize,
 ) -> Option<ActiveBusyOfferAction> {
     let mut replay_cache = p2p_signaling::ReplayCache::new(replay_cache_size);
-    let Ok((_envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+    let Ok((envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
         return None;
     };
     if !matches!(message.body, MessageBody::Offer(_)) || message.session_id == active_session_id {
@@ -1245,6 +1295,7 @@ fn classify_active_busy_offer(
         return Some(ActiveBusyOfferAction::Ignore);
     }
     Some(ActiveBusyOfferAction::ReplyBusy {
+        key: ActiveBusyOfferKey { sender_kid: envelope.sender_kid, msg_id: envelope.msg_id },
         session_id: message.session_id,
         sender: Box::new(sender),
     })
@@ -1616,14 +1667,14 @@ mod tests {
     use tokio::time::timeout;
 
     use super::{
-        ActiveBusyOfferAction, BridgeSessionState, DaemonError, DaemonRuntimeState, DaemonState,
-        IceConnectionState, OfferListener, RuntimeContext, StatusSnapshot, StatusWriter,
-        apply_answer_overrides, apply_offer_overrides, apply_override_pairs,
-        classify_active_busy_offer, compute_backoff_delay, decode_idle_signaling_message,
-        mark_transport_unusable, mark_transport_usable, recover_daemon_after_session,
-        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
-        should_poll_answer_data_events, spawn_offer_accept_loop, steady_state_for_role,
-        write_steady_state_status,
+        ActiveBusyOfferAction, ActiveBusyOfferCache, BridgeSessionState, DaemonError,
+        DaemonRuntimeState, DaemonState, IceConnectionState, OfferListener, RuntimeContext,
+        StatusSnapshot, StatusWriter, apply_answer_overrides, apply_offer_overrides,
+        apply_override_pairs, classify_active_busy_offer, compute_backoff_delay,
+        decode_idle_signaling_message, mark_transport_unusable, mark_transport_usable,
+        recover_daemon_after_session, should_ack_idle_offer, should_attempt_offer_reconnect,
+        should_continue_reconnect_attempt, should_poll_answer_data_events, spawn_offer_accept_loop,
+        steady_state_for_role, write_steady_state_status,
     };
 
     fn sample_config() -> AppConfig {
@@ -2093,6 +2144,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_recovery_preserves_disconnected_transport_status() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "recovery-keeps-disconnect");
+        let mut runtime = connected_runtime();
+        runtime.mqtt_connected = false;
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+
+        recover_daemon_after_session(
+            &ctx,
+            Err(DaemonError::RemoteError(
+                FailureCode::ProtocolError.as_str().to_owned(),
+                "session failed".to_owned(),
+            )),
+        )
+        .await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["mqtt_connected"], false);
+        assert_eq!(status["current_state"], "idle");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
     async fn offer_accept_loop_rejects_extra_clients_while_session_is_active() {
         let mut config = sample_config();
         config.tunnel.offer.listen_port = 0;
@@ -2173,12 +2248,70 @@ mod tests {
             active_session,
             64,
         ) {
-            Some(ActiveBusyOfferAction::ReplyBusy { session_id, sender }) => {
+            Some(ActiveBusyOfferAction::ReplyBusy { key: _, session_id, sender }) => {
                 assert_eq!(session_id, new_offer_session);
                 assert_eq!(sender.peer_id, offer.identity.peer_id);
             }
             other => panic!("expected busy reply for allowed peer, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn active_answer_busy_offer_duplicate_is_suppressed_per_session() {
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys parse");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys parse");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let active_session = SessionId::random();
+        let new_offer_session = SessionId::random();
+        let message = InnerMessageBuilder::new(
+            new_offer_session,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "second-offer".to_owned() }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&answer.identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("offer encodes");
+
+        let first = classify_active_busy_offer(
+            &sample_config(),
+            &answer_codec,
+            &payload,
+            active_session,
+            64,
+        )
+        .expect("first foreign offer should classify");
+        let second = classify_active_busy_offer(
+            &sample_config(),
+            &answer_codec,
+            &payload,
+            active_session,
+            64,
+        )
+        .expect("duplicate foreign offer should still classify");
+        let mut dedupe = ActiveBusyOfferCache::new(64);
+
+        let first_key = match first {
+            ActiveBusyOfferAction::ReplyBusy { key, .. } => key,
+            other => panic!("expected busy reply for first offer, got {other:?}"),
+        };
+        let second_key = match second {
+            ActiveBusyOfferAction::ReplyBusy { key, .. } => key,
+            other => panic!("expected busy reply for duplicate offer, got {other:?}"),
+        };
+
+        assert_eq!(first_key, second_key);
+        assert!(dedupe.record_if_new(first_key), "first offer should be new");
+        assert!(!dedupe.record_if_new(second_key), "duplicate offer should be suppressed");
     }
 
     #[test]

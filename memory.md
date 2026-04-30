@@ -58,3 +58,7 @@
 
 ## 2026-04-30T09:46:29Z - GPT-5.4 - Review 4 phase 1 landed
 - Round-4 phase 1 added explicit daemon-side transport usability tracking for `mqtt_connected`, routed daemon status writes through that tracked runtime state, flipped status false before idle/session transport backoff on recoverable poll/publish failures, restored it after successful transport activity, and added focused tests for healthy, disconnected, and recovered status transitions.
+
+## 2026-04-30T09:51:17Z - GPT-5.4 - Review 4 phases 2 and 3 landed
+- Round-4 phase 2 added a bounded per-active-answer-session dedupe cache keyed by `(sender_kid, msg_id)` so duplicate replays of the same foreign offer no longer trigger repeated encrypted `busy` replies, while unauthorized or disallowed peers still receive no response.
+- Round-4 phase 3 added a regression proving daemon recovery preserves a disconnected `mqtt_connected` state until transport activity succeeds again, aligned README/spec/Copilot guidance with the status and busy-dedupe semantics, and completed the remaining review4 checklist within the frozen focused scope.

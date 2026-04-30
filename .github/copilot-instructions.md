@@ -59,6 +59,7 @@ Do not collapse unrelated responsibilities into a single crate unless the user e
 - Any mismatch is a **hard protocol error**: reject, log locally, and do not process further.
 - Reject stale, duplicate, future-skewed, unsigned, undecryptable, or unauthorized messages.
 - **No retained MQTT signaling messages**. All signaling publishes must use `retain = false`.
+- During an active answer session, dedupe repeated foreign busy-offer handling per session using at least `(sender_kid, msg_id)` so duplicates do not trigger repeated encrypted `busy` replies.
 
 ### ACK and retry behavior
 
@@ -124,6 +125,7 @@ Do not collapse unrelated responsibilities into a single crate unless the user e
 - Redact SDP and ICE candidates by default.
 - Do not log decrypted sensitive payloads casually.
 - Use `secrecy` and `zeroize` where appropriate for private keys and derived secrets.
+- Treat `mqtt_connected` as a latest-known signaling transport usability flag in local status output; update it on recoverable poll/publish failure before backoff and restore it after successful transport activity.
 
 ## Implementation style
 

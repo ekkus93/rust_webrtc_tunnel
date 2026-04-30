@@ -151,7 +151,7 @@ Set `username = ""` and `password_file = ""` for anonymous or certificate-only b
 
 The fixed v1 protocol constants for WebRTC message size, tunnel frame version, and single-stream handling live in code and the spec rather than in the public config file.
 
-While an offer-side session is active, additional local TCP clients are accepted and immediately closed with no banner. During an active answer-side session, only a fully allowed peer may receive an encrypted `busy` response; unauthorized or disallowed peers receive no response.
+While an offer-side session is active, additional local TCP clients are accepted and immediately closed with no banner. During an active answer-side session, only a fully allowed peer may receive an encrypted `busy` response; unauthorized or disallowed peers receive no response, and duplicate replays of the same foreign offer do not trigger repeated `busy` replies.
 
 ### Example offer-side tunnel config
 
@@ -284,7 +284,7 @@ Every encrypted signaling message carries a `msg_id`, timestamps are freshness-c
 - logs can write to stdout, a local file, or both
 - secrets are always redacted
 - SDP and ICE candidates are redacted by default
-- the daemon writes a local `status.json` with peer ID, role, MQTT state, session ID, and daemon state
+- the daemon writes a local `status.json` with peer ID, role, latest-known MQTT transport usability, session ID, and daemon state
 
 Read status with:
 
