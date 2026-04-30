@@ -18,3 +18,6 @@
 
 ## 2026-04-30T08:18:06Z - GPT-5.4 - Review 2 phase 3 landed
 - Round-2 phase 3 removed public `broker.tls.server_name` from the v1 config/runtime surface, kept `connect_timeout_secs` and `session_expiry_secs` as explicitly fixed compatibility settings, and updated docs/instructions to match the real supported semantics.
+
+## 2026-04-30T08:23:27Z - GPT-5.4 - Review 2 phase 4 landed
+- Round-2 phase 4 added explicit daemon lifecycle documentation plus recovery-path tests that prove offer/answer daemons return to their steady states after target-connect, bridge-task, ICE, and remote-session failures, and the round-2 TODO checklist is now fully complete.

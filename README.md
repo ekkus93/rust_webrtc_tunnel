@@ -55,6 +55,8 @@ At runtime:
 4. Both sides establish a reliable, ordered WebRTC data channel named `tunnel`.
 5. Tunnel frames carry one TCP stream with explicit `OPEN`, `DATA`, `CLOSE`, `ERROR`, `PING`, and `PONG` messages.
 
+Ordinary session failures tear down only the active session. The offer daemon then returns to waiting for the next local client, and the answer daemon returns to idle for the next valid offer.
+
 ## Trust model
 
 MQTT is **not** trusted. The broker is only a message relay.

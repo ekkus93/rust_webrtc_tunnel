@@ -237,64 +237,72 @@ Choose one of these and implement it clearly:
 
 ## Task P2.1 — Add integration tests for daemon survival after session failure
 
+- [x] Status: complete
+
 ### Required tests
 Add integration tests that prove:
-- answer daemon survives target connect failure,
-- answer daemon survives bridge task failure,
-- answer daemon survives ICE/session failure,
-- offer daemon survives session failure and returns to waiting.
+- [x] answer daemon survives target connect failure,
+- [x] answer daemon survives bridge task failure,
+- [x] answer daemon survives ICE/session failure,
+- [x] offer daemon survives session failure and returns to waiting.
 
 ### Test requirements
-- Do not use mocks where a simple local test double is possible.
-- Use realistic local components where feasible.
-- Keep tests deterministic.
+- [x] Do not use mocks where a simple local test double is possible.
+- [x] Use realistic local components where feasible.
+- [x] Keep tests deterministic.
 
 ### Acceptance criteria
-- Failing session does not terminate daemon.
-- Test asserts daemon remains usable after failure.
+- [x] Failing session does not terminate daemon.
+- [x] Test asserts daemon remains usable after failure.
 
 ---
 
 ## Task P2.2 — Add integration tests for busy handling
 
+- [x] Status: complete
+
 ### Required tests
 Add tests proving the v1 busy policy:
-- one active session blocks/rejects a second incoming local client,
-- rejection behavior is consistent,
-- post-session cleanup allows a later new client.
+- [x] one active session blocks/rejects a second incoming local client,
+- [x] rejection behavior is consistent,
+- [x] post-session cleanup allows a later new client.
 
 ### Acceptance criteria
-- Busy behavior is deterministic and matches the frozen product rule.
+- [x] Busy behavior is deterministic and matches the frozen product rule.
 
 ---
 
 ## Task P2.3 — Add integration tests for active-client bookkeeping
 
+- [x] Status: complete
+
 ### Required tests
 Add tests that verify:
-- active-client state is set when session begins,
-- stays set during the session,
-- clears exactly once on normal teardown,
-- clears exactly once on failure teardown.
+- [x] active-client state is set when session begins,
+- [x] stays set during the session,
+- [x] clears exactly once on normal teardown,
+- [x] clears exactly once on failure teardown.
 
 ### Acceptance criteria
-- No early-clear.
-- No stuck-busy state after cleanup.
+- [x] No early-clear.
+- [x] No stuck-busy state after cleanup.
 
 ---
 
 ## Task P2.4 — Add integration tests for target-connect failure paths
 
+- [x] Status: complete
+
 ### Required tests
 Add tests covering:
-- answer-side target TCP connect failure,
-- tunnel session fails cleanly,
-- appropriate error path/log/status behavior occurs,
-- daemon remains alive afterwards.
+- [x] answer-side target TCP connect failure,
+- [x] tunnel session fails cleanly,
+- [x] appropriate error path/log/status behavior occurs,
+- [x] daemon remains alive afterwards.
 
 ### Acceptance criteria
-- Failure is isolated to the session.
-- Service returns to waiting.
+- [x] Failure is isolated to the session.
+- [x] Service returns to waiting.
 
 ---
 
@@ -302,37 +310,41 @@ Add tests covering:
 
 ## Task P3.1 — Reduce duplicated daemon orchestration logic
 
+- [x] Status: complete
+
 ### Problem
 Offer-side and answer-side session loops still duplicate substantial orchestration behavior.
 
 ### Required changes
-- Identify repeated logic that can be shared safely without obscuring role-specific behavior.
-- Extract helpers for:
-  - common session event processing,
-  - logging/status transitions,
-  - cleanup paths,
-  - per-session failure normalization.
-- Do **not** over-abstract. Keep role-specific logic readable.
+- [x] Identify repeated logic that can be shared safely without obscuring role-specific behavior.
+- [x] Extract helpers for:
+  - [x] common session event processing
+  - [x] logging/status transitions
+  - [x] cleanup paths
+  - [x] per-session failure normalization
+- [x] Do **not** over-abstract. Keep role-specific logic readable.
 
 ### Acceptance criteria
-- Reduced duplication.
-- No loss of clarity.
-- No change to frozen product behavior.
+- [x] Reduced duplication.
+- [x] No loss of clarity.
+- [x] No change to frozen product behavior.
 
 ---
 
 ## Task P3.2 — Document daemon/session lifecycle explicitly in code
 
+- [x] Status: complete
+
 ### Required changes
 Add comments or module-level documentation that clearly describe:
-- daemon lifetime,
-- session lifetime,
-- cleanup rules,
-- busy policy,
-- v1 reconnect/failure model.
+- [x] daemon lifetime,
+- [x] session lifetime,
+- [x] cleanup rules,
+- [x] busy policy,
+- [x] v1 reconnect/failure model.
 
 ### Acceptance criteria
-- A future maintainer can understand the runtime model quickly.
+- [x] A future maintainer can understand the runtime model quickly.
 
 ---
 
@@ -354,15 +366,15 @@ This pass is for **hardening and correctness**, not expanding scope.
 
 Copilot should not consider this work complete until all of the following are true:
 
-- [ ] Per-session failures do not kill either daemon.
-- [ ] Answer daemon reliably returns to idle after failure.
-- [ ] Offer daemon reliably returns to waiting after failure.
-- [ ] Busy behavior is explicit and real.
-- [ ] `deny_when_busy` is either implemented meaningfully or removed.
-- [ ] Active-client tracking reflects true session lifetime.
-- [ ] V1 one-session-at-a-time behavior is explicit in code/config.
-- [ ] Misleading config fields are removed or rejected.
-- [ ] Daemon/session integration tests cover failure survival.
-- [ ] Busy handling tests exist.
-- [ ] Target-connect failure tests exist.
-- [ ] No new scope is introduced beyond hardening/cleanup.
+- [x] Per-session failures do not kill either daemon.
+- [x] Answer daemon reliably returns to idle after failure.
+- [x] Offer daemon reliably returns to waiting after failure.
+- [x] Busy behavior is explicit and real.
+- [x] `deny_when_busy` is either implemented meaningfully or removed.
+- [x] Active-client tracking reflects true session lifetime.
+- [x] V1 one-session-at-a-time behavior is explicit in code/config.
+- [x] Misleading config fields are removed or rejected.
+- [x] Daemon/session integration tests cover failure survival.
+- [x] Busy handling tests exist.
+- [x] Target-connect failure tests exist.
+- [x] No new scope is introduced beyond hardening/cleanup.

@@ -1,3 +1,10 @@
+//! Daemon lifetime is intentionally longer than session lifetime in v1.
+//!
+//! Each daemon process stays alive and repeatedly returns to its steady state
+//! (`Idle` for answer, `WaitingForLocalClient` for offer) after ordinary
+//! session failures. Sessions are single-use, single-stream, and are cleaned up
+//! deterministically before the daemon accepts the next session.
+
 mod error;
 mod logging;
 mod status;
@@ -5,7 +12,7 @@ mod status;
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use p2p_core::{AppConfig, DaemonState, FailureCode, PeerId, SessionId};
+use p2p_core::{AppConfig, DaemonState, FailureCode, NodeRole, PeerId, SessionId};
 use p2p_crypto::{AuthorizedKey, AuthorizedKeys, IdentityFile};
 use p2p_signaling::{
     AckBody, AnswerBody, CloseBody, EndOfCandidatesBody, ErrorBody, IceCandidateBody, InnerMessage,
@@ -79,15 +86,7 @@ pub async fn run_offer_daemon(
     transport.subscribe_own_topic().await?;
 
     let status = StatusWriter::new(&config);
-    status
-        .write(DaemonStatus::new(
-            config.node.peer_id.clone(),
-            config.node.role.clone(),
-            true,
-            None,
-            DaemonState::WaitingForLocalClient,
-        ))
-        .await?;
+    write_steady_state_status(&config, &status).await?;
 
     let listener = OfferListener::bind(&config.tunnel.offer).await?;
     tracing::info!("listening for local clients on {}", listener.local_addr()?);
@@ -97,31 +96,12 @@ pub async fn run_offer_daemon(
         )?;
 
     loop {
-        status
-            .write(DaemonStatus::new(
-                config.node.peer_id.clone(),
-                config.node.role.clone(),
-                true,
-                None,
-                DaemonState::WaitingForLocalClient,
-            ))
-            .await?;
+        write_steady_state_status(&config, &status).await?;
 
         let client = listener.accept_client().await?;
         let result =
             run_offer_session(&config, &codec, &mut transport, &status, client, &remote).await;
-        status
-            .write(DaemonStatus::new(
-                config.node.peer_id.clone(),
-                config.node.role.clone(),
-                true,
-                None,
-                DaemonState::WaitingForLocalClient,
-            ))
-            .await?;
-        if let Err(error) = result {
-            tracing::warn!(reason = %error, "offer daemon recovered from session failure");
-        }
+        recover_daemon_after_session(&config, &status, result).await?;
     }
 }
 
@@ -139,15 +119,7 @@ pub async fn run_answer_daemon(
     let mut transport = MqttSignalingTransport::connect(&config)?;
     transport.subscribe_own_topic().await?;
     let status = StatusWriter::new(&config);
-    status
-        .write(DaemonStatus::new(
-            config.node.peer_id.clone(),
-            config.node.role.clone(),
-            true,
-            None,
-            DaemonState::Idle,
-        ))
-        .await?;
+    write_steady_state_status(&config, &status).await?;
 
     let connector = AnswerTargetConnector::new(&config.tunnel.answer);
     let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
@@ -232,18 +204,7 @@ pub async fn run_answer_daemon(
                     .await
                 }
                 .await;
-                status
-                    .write(DaemonStatus::new(
-                        config.node.peer_id.clone(),
-                        config.node.role.clone(),
-                        true,
-                        None,
-                        DaemonState::Idle,
-                    ))
-                    .await?;
-                if let Err(error) = session_result {
-                    tracing::warn!(reason = %error, "answer daemon recovered from session failure");
-                }
+                recover_daemon_after_session(&config, &status, session_result).await?;
             }
             _ => {
                 tracing::warn!("ignoring unexpected idle message {:?}", message.message_type);
@@ -801,6 +762,44 @@ async fn cleanup_active_session(session: &mut ActiveSession) {
     }
 }
 
+fn steady_state_for_role(role: &NodeRole) -> DaemonState {
+    match role {
+        NodeRole::Offer => DaemonState::WaitingForLocalClient,
+        NodeRole::Answer => DaemonState::Idle,
+    }
+}
+
+async fn write_steady_state_status(
+    config: &AppConfig,
+    status: &StatusWriter,
+) -> Result<(), DaemonError> {
+    status
+        .write(DaemonStatus::new(
+            config.node.peer_id.clone(),
+            config.node.role.clone(),
+            true,
+            None,
+            steady_state_for_role(&config.node.role),
+        ))
+        .await
+}
+
+async fn recover_daemon_after_session(
+    config: &AppConfig,
+    status: &StatusWriter,
+    result: Result<(), DaemonError>,
+) -> Result<(), DaemonError> {
+    write_steady_state_status(config, status).await?;
+    if let Err(error) = result {
+        tracing::warn!(
+            reason = %error,
+            role = ?config.node.role,
+            "daemon recovered from session failure"
+        );
+    }
+    Ok(())
+}
+
 async fn send_local_candidate(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
@@ -1216,6 +1215,7 @@ fn current_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::path::PathBuf;
 
     use p2p_core::AppConfig;
@@ -1229,12 +1229,14 @@ mod tests {
         ErrorBody, InnerMessageBuilder, MessageBody, OfferBody, ReplayCache, SignalCodec,
         SignalingError,
     };
+    use serde_json::Value;
 
     use super::{
-        BridgeSessionState, DaemonError, apply_answer_overrides, apply_offer_overrides,
-        apply_override_pairs, compute_backoff_delay, decode_idle_signaling_message,
-        should_ack_idle_offer, should_attempt_offer_reconnect, should_continue_reconnect_attempt,
-        should_poll_answer_data_events,
+        BridgeSessionState, DaemonError, DaemonState, IceConnectionState, StatusWriter,
+        apply_answer_overrides, apply_offer_overrides, apply_override_pairs, compute_backoff_delay,
+        decode_idle_signaling_message, recover_daemon_after_session, should_ack_idle_offer,
+        should_attempt_offer_reconnect, should_continue_reconnect_attempt,
+        should_poll_answer_data_events, steady_state_for_role, write_steady_state_status,
     };
 
     fn sample_config() -> AppConfig {
@@ -1339,6 +1341,19 @@ mod tests {
                 status_file: PathBuf::from("/tmp/status.json"),
             },
         }
+    }
+
+    fn status_writer_for_test(config: &mut AppConfig, label: &str) -> (PathBuf, StatusWriter) {
+        let path = std::env::temp_dir()
+            .join(format!("p2ptunnel-daemon-status-{label}-{}.json", SessionId::random()));
+        config.health.write_status_file = true;
+        config.health.status_file = path.clone();
+        (path, StatusWriter::new(config))
+    }
+
+    async fn read_status_file(path: &Path) -> Value {
+        let content = tokio::fs::read_to_string(path).await.expect("status file should exist");
+        serde_json::from_str(&content).expect("valid status json")
     }
 
     #[test]
@@ -1521,5 +1536,109 @@ mod tests {
             Err(SignalingError::Protocol(message))
                 if message.contains("active session")
         ));
+    }
+
+    #[test]
+    fn steady_state_matches_v1_role_policy() {
+        assert_eq!(steady_state_for_role(&NodeRole::Offer), DaemonState::WaitingForLocalClient);
+        assert_eq!(steady_state_for_role(&NodeRole::Answer), DaemonState::Idle);
+    }
+
+    #[tokio::test]
+    async fn offer_recovery_returns_to_waiting_after_remote_error() {
+        let mut config = sample_config();
+        let (path, writer) = status_writer_for_test(&mut config, "offer-recovery");
+
+        recover_daemon_after_session(
+            &config,
+            &writer,
+            Err(DaemonError::RemoteError(
+                FailureCode::ProtocolError.as_str().to_owned(),
+                "remote rejected session".to_owned(),
+            )),
+        )
+        .await
+        .expect("offer daemon should recover");
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "waiting_for_local_client");
+        assert_eq!(status["role"], "offer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn answer_recovery_returns_to_idle_after_target_connect_failure() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "answer-target-connect");
+
+        recover_daemon_after_session(
+            &config,
+            &writer,
+            Err(DaemonError::Tunnel(p2p_tunnel::TunnelError::TargetConnectFailed(
+                "connection refused".to_owned(),
+            ))),
+        )
+        .await
+        .expect("answer daemon should recover");
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["role"], "answer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn answer_recovery_returns_to_idle_after_bridge_task_failure() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "answer-bridge-failure");
+
+        recover_daemon_after_session(
+            &config,
+            &writer,
+            Err(DaemonError::Logging("bridge task join error: task 7 panicked".to_owned())),
+        )
+        .await
+        .expect("answer daemon should recover");
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["role"], "answer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn answer_recovery_returns_to_idle_after_ice_failure() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "answer-ice-failure");
+
+        recover_daemon_after_session(
+            &config,
+            &writer,
+            Err(DaemonError::IceFailed(IceConnectionState::Failed)),
+        )
+        .await
+        .expect("answer daemon should recover");
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["role"], "answer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn steady_state_writer_uses_role_defaults() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "steady-state");
+
+        write_steady_state_status(&config, &writer).await.expect("status write succeeds");
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["role"], "answer");
+        let _ = tokio::fs::remove_file(&path).await;
     }
 }
