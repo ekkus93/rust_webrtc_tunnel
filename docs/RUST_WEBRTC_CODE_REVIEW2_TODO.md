@@ -100,6 +100,8 @@ For v1:
 
 ## Task P0.4 — Fix or remove `deny_when_busy`
 
+- [x] Status: complete
+
 ### Problem
 `deny_when_busy` appears to have no meaningful behavioral effect.
 
@@ -112,20 +114,22 @@ Use the simplest supported behavior:
 Pick one path and implement it fully:
 
 #### Preferred path
-- Remove `deny_when_busy` from config and code.
-- Hardcode the v1 busy policy.
+- [x] Remove `deny_when_busy` from config and code.
+- [x] Hardcode the v1 busy policy.
 
 #### Acceptable alternative
-- Keep `deny_when_busy` only if both branches truly behave differently and are tested.
+- [x] Alternative not used in v1.
 
 ### Acceptance criteria
-- Busy state handling is explicit and real.
-- No dead config flag remains for this feature.
-- Tests prove the behavior.
+- [x] Busy state handling is explicit and real.
+- [x] No dead config flag remains for this feature.
+- [x] Tests prove the behavior.
 
 ---
 
 ## Task P0.5 — Fix offer-side active-client lifetime tracking
+
+- [x] Status: complete
 
 ### Problem
 Offer-side active-client tracking appears to be cleared too early, likely when an intermediate wrapper is consumed/dropped rather than when the session actually ends.
@@ -134,20 +138,22 @@ Offer-side active-client tracking appears to be cleared too early, likely when a
 The active-client marker must reflect the true session lifetime.
 
 ### Required changes
-- Review the offer listener / accepted-client wrapper lifetime design.
-- Remove any bookkeeping tied to short-lived wrapper ownership if it does not match actual session lifetime.
-- Move active-client clearing to final session teardown.
-- Ensure failure paths also clear state exactly once.
-- Make double-clear and early-clear impossible.
+- [x] Review the offer listener / accepted-client wrapper lifetime design.
+- [x] Remove any bookkeeping tied to short-lived wrapper ownership if it does not match actual session lifetime.
+- [x] Move active-client clearing to final session teardown.
+- [x] Ensure failure paths also clear state exactly once.
+- [x] Make double-clear and early-clear impossible.
 
 ### Acceptance criteria
-- Active-client state is set when a real session starts.
-- It remains set for the full session lifetime.
-- It is cleared only after session teardown completes.
+- [x] Active-client state is set when a real session starts.
+- [x] It remains set for the full session lifetime.
+- [x] It is cleared only after session teardown completes.
 
 ---
 
 ## Task P0.6 — Freeze the v1 concurrency model in code and config
+
+- [x] Status: complete
 
 ### Product rule
 For v1:
@@ -157,14 +163,14 @@ For v1:
 - no concurrent local sessions.
 
 ### Required changes
-- Audit config fields and runtime logic related to concurrency.
-- Remove or reject unsupported concurrency-related knobs.
-- Update comments/docs to reflect the actual v1 behavior.
-- Simplify the listener/session code accordingly.
+- [x] Audit config fields and runtime logic related to concurrency.
+- [x] Remove or reject unsupported concurrency-related knobs.
+- [x] Update comments/docs to reflect the actual v1 behavior.
+- [x] Simplify the listener/session code accordingly.
 
 ### Acceptance criteria
-- Code and config clearly express “one session at a time.”
-- No misleading concurrency behavior remains.
+- [x] Code and config clearly express “one session at a time.”
+- [x] No misleading concurrency behavior remains.
 
 ---
 

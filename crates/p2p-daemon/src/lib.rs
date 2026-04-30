@@ -312,7 +312,7 @@ async fn run_offer_session(
     codec: &SignalCodec<'_>,
     transport: &mut MqttSignalingTransport,
     status: &StatusWriter,
-    client: OfferClient,
+    mut client: OfferClient,
     remote: &AuthorizedKey,
 ) -> Result<(), DaemonError> {
     let peer = WebRtcPeer::new(&config.webrtc).await?;
@@ -361,7 +361,7 @@ async fn run_offer_session(
     .await?;
 
     let mut tick = interval(Duration::from_secs(1));
-    let local_stream = client.into_stream()?;
+    let local_stream = client.take_stream()?;
     let mut pending_stream = Some(local_stream);
     let result = async {
         loop {
@@ -1289,8 +1289,6 @@ mod tests {
                     listen_port: 5000,
                     remote_peer_id: "answer-office".parse().expect("peer id"),
                     auto_open: true,
-                    max_concurrent_clients: 1,
-                    deny_when_busy: true,
                 },
                 answer: TunnelAnswerConfig {
                     target_host: "127.0.0.1".to_owned(),

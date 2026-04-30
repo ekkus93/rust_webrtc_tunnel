@@ -12,3 +12,6 @@
 
 ## 2026-04-30T08:12:30Z - GPT-5.4 - Review 2 phase 1 landed
 - Round-2 phase 1 now keeps both daemons alive across ordinary per-session failures by catching session-bound errors, logging them, cleaning up session resources, and returning status to idle/waiting instead of exiting the process.
+
+## 2026-04-30T08:15:52Z - GPT-5.4 - Review 2 phase 2 landed
+- Round-2 phase 2 removed `deny_when_busy` and `max_concurrent_clients` from the v1 config surface, made the offer listener explicitly single-session, and fixed offer-side active-client bookkeeping so it stays set until full session teardown.

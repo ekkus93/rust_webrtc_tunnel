@@ -577,8 +577,6 @@ listen_host = "127.0.0.1"
 listen_port = 2222
 remote_peer_id = "answer-office"
 auto_open = true
-max_concurrent_clients = 1
-deny_when_busy = true
 
 [tunnel.answer]
 target_host = ""

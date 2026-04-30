@@ -679,8 +679,6 @@ mod tests {
                     listen_port: 2222,
                     remote_peer_id: "offer-home".parse().expect("peer id"),
                     auto_open: true,
-                    max_concurrent_clients: 1,
-                    deny_when_busy: true,
                 },
                 answer: TunnelAnswerConfig {
                     target_host: "127.0.0.1".to_owned(),

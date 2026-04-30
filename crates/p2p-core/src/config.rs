@@ -345,8 +345,6 @@ pub struct TunnelOfferConfig {
     pub listen_port: u16,
     pub remote_peer_id: PeerId,
     pub auto_open: bool,
-    pub max_concurrent_clients: usize,
-    pub deny_when_busy: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -553,8 +551,6 @@ listen_host = "127.0.0.1"
 listen_port = 2222
 remote_peer_id = "offer-home"
 auto_open = true
-max_concurrent_clients = 1
-deny_when_busy = true
 
 [tunnel.answer]
 target_host = "127.0.0.1"
