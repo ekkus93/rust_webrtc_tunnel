@@ -1,6 +1,6 @@
 # rust_webrtc
 
-[![CI](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml/badge.svg)](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml)
+[![CI](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml)
 
 `rust_webrtc` is a CLI-only secure TCP tunnel that carries a single TCP stream over a WebRTC data channel while using MQTT only as an untrusted signaling transport.
 
@@ -122,6 +122,7 @@ The config format is `p2ptunnel-config-v1`.
 - `[tunnel.offer]`: local listen host/port and remote peer
 - `[tunnel.answer]`: target host/port and allowed remote peers
 - `[reconnect]`: ICE restart, renegotiation, and backoff settings
+- `[security]`: mandatory v1 security requirements such as TLS, encryption, signatures, replay limits, and strict config parsing
 - `[logging]`: text/json output, stdout/file logging, and redaction flags
 - `[health]`: local status file path
 
@@ -150,6 +151,8 @@ insecure_skip_verify = false
 Set `username = ""` and `password_file = ""` for anonymous or certificate-only broker auth, or keep `username` set and leave `password_file = ""` for username-only auth. In v1, `connect_timeout_secs` must stay `5`, `session_expiry_secs` must stay `0`, TLS server name is derived from the broker URL host, and broker TLS verification cannot be disabled.
 
 The fixed v1 protocol constants for ICE timing behavior, WebRTC message size, tunnel frame version, and single-stream handling live in code and the spec rather than in the public config file.
+
+The `[security]` section is intentionally fail-closed in v1: required TLS, encryption, signatures, authorized keys, strict unknown-key rejection, and path/identity safety checks must stay enabled rather than being treated as optional tuning knobs.
 
 While an offer-side session is active, additional local TCP clients are accepted and immediately closed with no banner. During an active answer-side session, only a fully allowed peer may receive an encrypted `busy` response; unauthorized or disallowed peers receive no response, and duplicate replays of the same foreign offer are dropped from the active-session dedupe cache before they can trigger repeated `busy` replies or a second full reclassification pass.
 
@@ -308,6 +311,6 @@ These are the intended end-to-end checks for operators:
 - no TURN support
 - no plaintext signaling
 - no unsigned signaling
-- one active tunnel session at a time on the answer side
+- one active tunnel session at a time; the offer side immediately closes extra local clients while busy, and the answer side rejects a second allowed peer with encrypted `busy`
 - no retained MQTT signaling messages
 - no default logging of secrets, SDP, ICE candidates, or decrypted payloads

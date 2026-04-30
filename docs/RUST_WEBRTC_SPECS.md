@@ -316,6 +316,8 @@ Schema:
 }
 ```
 
+`hello` is optional in v1. It is only a capability hint and is not required before `offer`; a peer may send `offer` as the first message of a new session.
+
 #### `offer`
 ```text
 { "sdp": "<full SDP>" }
@@ -656,7 +658,8 @@ Startup must fail if:
    - create new `session_id`
    - create WebRTC PeerConnection
    - create data channel
-   - send encrypted `hello` and `offer`
+   - optionally send encrypted `hello`
+   - send encrypted `offer`
    - send encrypted trickled ICE candidates
 5. Receive encrypted `answer` and remote candidates
 6. Wait for data channel open
@@ -725,7 +728,7 @@ Not allowed in v1:
 
 ### `p2pctl`
 Subcommands:
-- `keygen --peer-id <peer_id>`
+- `keygen <peer_id>`
 - `fingerprint <identity.pub>`
 - `add-authorized-key <identity.pub>`
 - `check-config [--config <path>]`
@@ -766,5 +769,5 @@ Subcommands:
 - STUN only
 - No TURN in v1
 - On ICE failure, send encrypted MQTT error and fail cleanly
-- One active tunnel session at a time
+- One active tunnel session at a time; the offer side immediately closes extra local clients while busy, and the answer side rejects a second allowed peer with encrypted `busy`
 - Always-on answer daemon supported and expected

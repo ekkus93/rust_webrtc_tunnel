@@ -81,3 +81,11 @@
 ## 2026-04-30T10:44:28Z - GPT-5.4 - CI clippy fix landed
 - GitHub Actions hit a stricter `clippy::collapsible_match` diagnostic in `crates/p2p-tunnel/src/bridge.rs` that did not surface earlier locally; the EOF arm was rewritten with a match guard so the behavior stays the same while satisfying the newer CI toolchain.
 - After the fix, `cargo fmt --all`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-targets` all passed locally again.
+
+## 2026-04-30T10:57:40Z - GPT-5.4 - README refreshed
+- README was audited against the current config schema, CI workflow, and runtime behavior; it now lists the public `[security]` section explicitly, explains that v1 security controls are fail-closed rather than optional tuning knobs, and makes the single-session rule match both offer-side and answer-side behavior.
+- The CI badge URL now explicitly targets `master` so the README points at the intended branch status.
+
+## 2026-04-30T10:59:16Z - GPT-5.4 - Spec refreshed
+- `docs/RUST_WEBRTC_SPECS.md` had a few stale operator-facing details: it still implied `hello` was part of the required offer lifecycle, documented `p2pctl keygen --peer-id <peer_id>` instead of the real positional CLI syntax, and stated the single-session rule less precisely than the implemented offer/answer busy behavior.
+- The spec now says `hello` is optional in v1, shows `keygen <peer_id>`, and aligns the single-session wording with the actual offer-side immediate-close and answer-side encrypted-`busy` behavior.
