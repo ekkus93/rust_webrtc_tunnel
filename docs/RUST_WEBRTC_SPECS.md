@@ -553,7 +553,6 @@ session_expiry_secs = 0
 ca_file = "~/.config/p2ptunnel/ca.crt"
 client_cert_file = ""
 client_key_file = ""
-server_name = "mqtt.example.com"
 insecure_skip_verify = false
 
 [webrtc]
@@ -629,7 +628,9 @@ status_file = "~/.local/state/p2ptunnel/status.json"
 
 Notes:
 - `broker.username` / `broker.password_file` support three explicit modes in v1: anonymous or certificate-only (`""` / `""`), username-only (`"user"` / `""`), or username plus password file.
+- TLS server-name behavior is derived from the broker URL host in v1; there is no separate public `server_name` override.
 - `webrtc.max_message_size` is fixed at `262144` in v1.
+- `broker.connect_timeout_secs` must stay `5` and `broker.session_expiry_secs` must stay `0`; those fields remain as fixed transport-compatibility settings rather than independent tuning knobs in v1.
 - `reconnect.hold_local_client_during_reconnect` must stay `false` and `reconnect.local_client_hold_secs` must stay `0`; holding a live local client across reconnect is not implemented.
 - `logging.log_rotation` is not implemented in v1 and must remain `"none"`.
 - `health.status_socket` is not implemented in v1 and must remain empty.

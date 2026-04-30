@@ -110,13 +110,14 @@ impl AppConfig {
         }
         if self.broker.connect_timeout_secs != 5 {
             return Err(ConfigError::InvalidConfig(
-                "broker.connect_timeout_secs is unsupported by the current MQTT transport"
+                "broker.connect_timeout_secs must remain 5 in v1 because the current MQTT transport does not expose a configurable connect timeout"
                     .to_owned(),
             ));
         }
         if self.broker.session_expiry_secs != 0 {
             return Err(ConfigError::InvalidConfig(
-                "broker.session_expiry_secs is unsupported with the MQTT v4 transport".to_owned(),
+                "broker.session_expiry_secs must remain 0 in v1 because the current signaling transport uses MQTT v4 semantics"
+                    .to_owned(),
             ));
         }
         if self.broker.username.is_empty() && !self.broker.password_file.as_os_str().is_empty() {
@@ -128,11 +129,6 @@ impl AppConfig {
             if self.broker.tls.ca_file.as_os_str().is_empty() {
                 return Err(ConfigError::InvalidConfig(
                     "broker.tls.ca_file must be set for mqtts:// brokers".to_owned(),
-                ));
-            }
-            if self.broker.tls.server_name.is_empty() {
-                return Err(ConfigError::InvalidConfig(
-                    "broker.tls.server_name must be set for mqtts:// brokers".to_owned(),
                 ));
             }
             if self.broker.tls.insecure_skip_verify {
@@ -310,7 +306,6 @@ pub struct BrokerTlsConfig {
     pub ca_file: PathBuf,
     pub client_cert_file: PathBuf,
     pub client_key_file: PathBuf,
-    pub server_name: String,
     pub insecure_skip_verify: bool,
 }
 
@@ -527,7 +522,6 @@ session_expiry_secs = 0
 ca_file = "{ca_file}"
 client_cert_file = ""
 client_key_file = ""
-server_name = "mqtt.example.com"
 insecure_skip_verify = false
 
 [webrtc]

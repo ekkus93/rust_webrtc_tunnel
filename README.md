@@ -142,11 +142,10 @@ session_expiry_secs = 0
 ca_file = "~/.config/p2ptunnel/ca.pem"
 client_cert_file = "~/.config/p2ptunnel/client.crt"
 client_key_file = "~/.config/p2ptunnel/client.key"
-server_name = "broker.example.com"
 insecure_skip_verify = false
 ```
 
-Set `username = ""` and `password_file = ""` for anonymous or certificate-only broker auth, or keep `username` set and leave `password_file = ""` for username-only auth. In v1, `connect_timeout_secs` must stay `5`, `session_expiry_secs` must stay `0`, and broker TLS verification cannot be disabled.
+Set `username = ""` and `password_file = ""` for anonymous or certificate-only broker auth, or keep `username` set and leave `password_file = ""` for username-only auth. In v1, `connect_timeout_secs` must stay `5`, `session_expiry_secs` must stay `0`, TLS server name is derived from the broker URL host, and broker TLS verification cannot be disabled.
 
 ### Example offer-side tunnel config
 

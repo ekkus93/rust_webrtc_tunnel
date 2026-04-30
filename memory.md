@@ -15,3 +15,6 @@
 
 ## 2026-04-30T08:15:52Z - GPT-5.4 - Review 2 phase 2 landed
 - Round-2 phase 2 removed `deny_when_busy` and `max_concurrent_clients` from the v1 config surface, made the offer listener explicitly single-session, and fixed offer-side active-client bookkeeping so it stays set until full session teardown.
+
+## 2026-04-30T08:18:06Z - GPT-5.4 - Review 2 phase 3 landed
+- Round-2 phase 3 removed public `broker.tls.server_name` from the v1 config/runtime surface, kept `connect_timeout_secs` and `session_expiry_secs` as explicitly fixed compatibility settings, and updated docs/instructions to match the real supported semantics.

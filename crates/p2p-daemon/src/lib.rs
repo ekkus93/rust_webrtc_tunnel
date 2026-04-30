@@ -1265,7 +1265,6 @@ mod tests {
                     ca_file: PathBuf::from("/tmp/ca"),
                     client_cert_file: PathBuf::from("/tmp/cert"),
                     client_key_file: PathBuf::from("/tmp/key"),
-                    server_name: "broker.example".to_owned(),
                     insecure_skip_verify: false,
                 },
             },

@@ -228,12 +228,12 @@ fn build_mqtt_options(config: &AppConfig) -> Result<(MqttOptions, QoS, String), 
     }
     if config.broker.connect_timeout_secs != 5 {
         return Err(SignalingError::Protocol(
-            "broker.connect_timeout_secs is unsupported by the current MQTT transport".to_owned(),
+            "broker.connect_timeout_secs must remain 5 in v1 because the current MQTT transport does not expose a configurable connect timeout".to_owned(),
         ));
     }
     if config.broker.session_expiry_secs != 0 {
         return Err(SignalingError::Protocol(
-            "broker.session_expiry_secs is unsupported with the MQTT v4 transport".to_owned(),
+            "broker.session_expiry_secs must remain 0 in v1 because the current signaling transport uses MQTT v4 semantics".to_owned(),
         ));
     }
 
@@ -259,8 +259,7 @@ fn build_mqtt_options(config: &AppConfig) -> Result<(MqttOptions, QoS, String), 
     }
 
     if config.broker.url.starts_with("mqtts://") {
-        let (broker_host, _port) = options.broker_address();
-        options.set_transport(build_tls_transport(config, &broker_host)?);
+        options.set_transport(build_tls_transport(config)?);
     }
 
     let qos = qos_from_u8(config.broker.qos)?;
@@ -268,15 +267,10 @@ fn build_mqtt_options(config: &AppConfig) -> Result<(MqttOptions, QoS, String), 
     Ok((options, qos, own_topic))
 }
 
-fn build_tls_transport(config: &AppConfig, broker_host: &str) -> Result<Transport, SignalingError> {
+fn build_tls_transport(config: &AppConfig) -> Result<Transport, SignalingError> {
     if config.broker.tls.insecure_skip_verify {
         return Err(SignalingError::Protocol(
             "broker.tls.insecure_skip_verify is unsupported in v1".to_owned(),
-        ));
-    }
-    if !config.broker.tls.server_name.is_empty() && config.broker.tls.server_name != broker_host {
-        return Err(SignalingError::Protocol(
-            "broker.tls.server_name must match the broker URL host in v1".to_owned(),
         ));
     }
 
@@ -655,7 +649,6 @@ mod tests {
                     ca_file: base.join("ca.pem"),
                     client_cert_file: PathBuf::new(),
                     client_key_file: PathBuf::new(),
-                    server_name: "broker.example".to_owned(),
                     insecure_skip_verify: false,
                 },
             },
@@ -815,25 +808,6 @@ mod tests {
             build_mqtt_options(&config),
             Err(SignalingError::Protocol(message))
                 if message.contains("connect_timeout_secs")
-        ));
-    }
-
-    #[test]
-    fn build_mqtt_options_rejects_server_name_mismatch() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(temp_dir.path().join("password"), "secret\n").expect("password");
-        std::fs::write(
-            temp_dir.path().join("ca.pem"),
-            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
-        )
-        .expect("ca");
-        let mut config = sample_config(temp_dir.path());
-        config.broker.tls.server_name = "other.example".to_owned();
-
-        assert!(matches!(
-            build_mqtt_options(&config),
-            Err(SignalingError::Protocol(message))
-                if message.contains("server_name must match")
         ));
     }
 

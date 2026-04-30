@@ -178,38 +178,42 @@ For v1:
 
 ## Task P1.1 — Audit config fields against real implemented behavior
 
+- [x] Status: complete
+
 ### Problem
 Some config fields still exist even though they are not clearly supported or do not provide meaningful v1 behavior.
 
 ### Required changes
 For every field in the config schema, classify it as one of:
-- fully supported,
-- supported with restricted v1 semantics,
-- unsupported and must be rejected,
-- removable from v1.
+- [x] fully supported,
+- [x] supported with restricted v1 semantics,
+- [x] unsupported and must be rejected,
+- [x] removable from v1.
 
 Then implement one of these actions:
-- keep and document,
-- keep but validate/restrict,
-- reject at startup,
-- remove entirely.
+- [x] keep and document,
+- [x] keep but validate/restrict,
+- [x] reject at startup,
+- [x] remove entirely.
 
 ### Focus fields
 At minimum review:
-- `server_name`
-- `connect_timeout_secs`
-- `session_expiry_secs`
-- `log_rotation`
-- `status_socket`
-- any remaining concurrency/busy fields
+- [x] `server_name`
+- [x] `connect_timeout_secs`
+- [x] `session_expiry_secs`
+- [x] `log_rotation`
+- [x] `status_socket`
+- [x] any remaining concurrency/busy fields
 
 ### Acceptance criteria
-- No config field silently over-promises.
-- Unsupported v1 knobs are rejected or removed.
+- [x] No config field silently over-promises.
+- [x] Unsupported v1 knobs are rejected or removed.
 
 ---
 
 ## Task P1.2 — Clarify `server_name` semantics
+
+- [x] Status: complete
 
 ### Problem
 `server_name` currently appears to behave more like a consistency check than a true independent TLS control.
@@ -218,14 +222,14 @@ At minimum review:
 Choose one of these and implement it clearly:
 
 #### Option A
-Make `server_name` a real TLS server-name override with explicit semantics.
+- [x] Not chosen for v1.
 
 #### Option B (preferred for v1 simplicity)
-Remove `server_name` as a public override and derive it from the broker URL / documented rules.
+- [x] Remove `server_name` as a public override and derive it from the broker URL / documented rules.
 
 ### Acceptance criteria
-- Operators cannot misunderstand what `server_name` does.
-- Validation and runtime behavior match documentation.
+- [x] Operators cannot misunderstand what `server_name` does.
+- [x] Validation and runtime behavior match documentation.
 
 ---
 
