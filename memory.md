@@ -248,5 +248,9 @@
 
 ## 2026-04-30T15:59:53Z - GPT-5.4 - Added daemon unit coverage for pending-session replacement
 - Added a test-local `RecordingTransport` in `crates/p2p-daemon/src/lib.rs` and a focused unit test, `pending_answer_session_is_replaced_by_same_peer_offer`, that drives `maybe_replace_pending_answer_session` directly instead of relying on the daemon integration harness.
+
+## 2026-04-30T18:13:36Z - GPT-5.4 - Fixed release-build lint split for injected offer transport
+- Adjusted `run_offer_daemon_with_transport` in `crates/p2p-daemon/src/lib.rs` so the transport binding stays immutable at the function boundary and becomes mutable only inside the non-test branch that passes `&mut transport` into `run_offer_daemon_inner`.
+- This preserves the earlier `cargo build --release --workspace` fix while also satisfying workspace `clippy` by removing the test-build-only `unused_mut` warning.
 - The new unit test proves that a pending answer session is swapped to the replacement `session_id`, remains in `connecting_data_channel`, and publishes exactly the expected `Ack` plus `Answer` back to the same authorized peer.
 - Validated with `cargo test -p p2p-daemon pending_answer_session_is_replaced_by_same_peer_offer -- --nocapture`, `cargo test -p p2p-daemon`, and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.

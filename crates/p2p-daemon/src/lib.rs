@@ -227,6 +227,7 @@ pub async fn run_offer_daemon_with_transport<T: DaemonSignalingTransport>(
 
     #[cfg(not(any(test, debug_assertions)))]
     {
+        let mut transport = transport;
         run_offer_daemon_inner(config, local_identity, authorized_keys, &mut transport, None).await
     }
 }
