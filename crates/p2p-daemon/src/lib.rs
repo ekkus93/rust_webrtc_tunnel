@@ -116,6 +116,12 @@ struct OutgoingSignal {
     response: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OfferSessionPayloadOutcome {
+    Ignored,
+    Handled,
+}
+
 pub struct ActiveSession {
     pub session_id: SessionId,
     pub remote_peer_id: PeerId,
@@ -507,63 +513,15 @@ async fn run_offer_session(
                     },
                 ) => {
                     if let Some(payload) = payload? {
-                        let (envelope, message, sender) = match codec.decode(
+                        process_offer_session_payload(
+                            ctx,
+                            codec,
+                            transport,
+                            remote,
+                            &mut session,
                             &payload,
-                            &mut session.signaling.replay_cache,
-                            Some(session.session_id),
-                        ) {
-                            Ok(decoded) => decoded,
-                            Err(error) => {
-                                if maybe_ack_duplicate_active_session_message(
-                                    ctx,
-                                    codec,
-                                    transport,
-                                    &session,
-                                    &payload,
-                                    &error,
-                                )
-                                .await?
-                                {
-                                    continue;
-                                }
-                                tracing::warn!(
-                                    reason = %error,
-                                    session_id = %session.session_id,
-                                    "rejecting signaling message during active offer session"
-                                );
-                                continue;
-                            }
-                        };
-                        if sender.peer_id != session.remote_peer_id {
-                            tracing::warn!(
-                                peer_id = %sender.peer_id,
-                                expected_peer_id = %session.remote_peer_id,
-                                "ignoring message from unexpected peer"
-                            );
-                            continue;
-                        }
-                        if message.message_type.requires_ack() {
-                            publish_message(
-                                ctx,
-                                codec,
-                                transport,
-                                StatusSnapshot {
-                                    active_session_id: Some(session.session_id),
-                                    current_state: session.state,
-                                },
-                                None,
-                                remote,
-                                OutgoingSignal {
-                                    message: codec.build_ack(
-                                        remote.peer_id.clone(),
-                                        session.session_id,
-                                        envelope.msg_id,
-                                    ),
-                                    response: true,
-                                },
-                            ).await?;
-                        }
-                        handle_offer_session_message(&message, &mut session).await?;
+                        )
+                        .await?;
                     }
                 }
                 candidate = session.peer.next_local_candidate() => {
@@ -889,16 +847,7 @@ async fn run_answer_session(
                     }
                 }
                 incoming = session.peer.next_incoming_data_channel(), if session.data_channel.is_none() => {
-                    if let Some(channel) = incoming {
-                        let channel = channel?;
-                        session.data_channel = Some(channel.clone());
-                        let bridge = TunnelBridge::new(channel, &config.tunnel);
-                        let connector = connector.clone();
-                        session.bridge_state = BridgeSessionState::Active;
-                        session.bridge_handle = Some(tokio::spawn(async move {
-                            bridge.run_answer(&connector).await
-                        }));
-                    }
+                    handle_answer_incoming_data_channel(&mut session, incoming, connector, &config.tunnel)?;
                 }
                 ice_state = session.peer.next_ice_state() => {
                     if let Some(ice_state) = ice_state {
@@ -1017,6 +966,23 @@ async fn cleanup_active_session(session: &mut ActiveSession) {
             "failed to close session peer during cleanup"
         );
     }
+}
+
+fn handle_answer_incoming_data_channel(
+    session: &mut ActiveSession,
+    incoming: Option<Result<DataChannelHandle, p2p_webrtc::WebRtcError>>,
+    connector: &AnswerTargetConnector,
+    tunnel: &p2p_core::TunnelConfig,
+) -> Result<(), DaemonError> {
+    if let Some(channel) = incoming {
+        let channel = channel?;
+        session.data_channel = Some(channel.clone());
+        let bridge = TunnelBridge::new(channel, tunnel);
+        let connector = connector.clone();
+        session.bridge_state = BridgeSessionState::Active;
+        session.bridge_handle = Some(tokio::spawn(async move { bridge.run_answer(&connector).await }));
+    }
+    Ok(())
 }
 
 fn spawn_offer_accept_loop(
@@ -1280,6 +1246,71 @@ async fn retry_pending_acks(
         }
     }
     Ok(())
+}
+
+async fn process_offer_session_payload(
+    ctx: &mut RuntimeContext<'_>,
+    codec: &SignalCodec<'_>,
+    transport: &mut MqttSignalingTransport,
+    remote: &AuthorizedKey,
+    session: &mut ActiveSession,
+    payload: &[u8],
+) -> Result<OfferSessionPayloadOutcome, DaemonError> {
+    let (envelope, message, sender) = match codec.decode(
+        payload,
+        &mut session.signaling.replay_cache,
+        Some(session.session_id),
+    ) {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            if maybe_ack_duplicate_active_session_message(
+                ctx,
+                codec,
+                transport,
+                session,
+                payload,
+                &error,
+            )
+            .await?
+            {
+                return Ok(OfferSessionPayloadOutcome::Ignored);
+            }
+            tracing::warn!(
+                reason = %error,
+                session_id = %session.session_id,
+                "rejecting signaling message during active offer session"
+            );
+            return Ok(OfferSessionPayloadOutcome::Ignored);
+        }
+    };
+    if sender.peer_id != session.remote_peer_id {
+        tracing::warn!(
+            peer_id = %sender.peer_id,
+            expected_peer_id = %session.remote_peer_id,
+            "ignoring message from unexpected peer"
+        );
+        return Ok(OfferSessionPayloadOutcome::Ignored);
+    }
+    if message.message_type.requires_ack() {
+        publish_message(
+            ctx,
+            codec,
+            transport,
+            StatusSnapshot {
+                active_session_id: Some(session.session_id),
+                current_state: session.state,
+            },
+            None,
+            remote,
+            OutgoingSignal {
+                message: codec.build_ack(remote.peer_id.clone(), session.session_id, envelope.msg_id),
+                response: true,
+            },
+        )
+        .await?;
+    }
+    handle_offer_session_message(&message, session).await?;
+    Ok(OfferSessionPayloadOutcome::Handled)
 }
 
 async fn maybe_handle_active_busy_offer(
@@ -1822,18 +1853,22 @@ mod tests {
         ReplayCache, SignalCodec, SignalingError,
     };
     use serde_json::Value;
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
     use tokio::time::timeout;
 
     use super::{
         ActiveBusyOfferAction, ActiveBusyOfferCache, ActiveBusyOfferKey, BridgeSessionState,
-        ActiveSession, DaemonError, DaemonRuntimeState, DaemonState, IceConnectionState,
-        OfferListener, RuntimeContext, StatusSnapshot, StatusWriter, WebRtcPeer,
+        ActiveSession, AnswerTargetConnector, DaemonError, DaemonRuntimeState, DaemonState,
+        IceConnectionState, MqttSignalingTransport, OfferListener, OfferSessionPayloadOutcome,
+        RuntimeContext, StatusSnapshot, StatusWriter, TunnelBridge, WebRtcPeer,
         apply_answer_overrides,
         apply_offer_overrides, apply_override_pairs, classify_active_busy_offer,
         compute_backoff_delay, decode_idle_signaling_message,
         duplicate_active_session_ack_message, mark_transport_unusable, mark_transport_usable,
-        handle_offer_session_message, recover_daemon_after_session,
+        handle_answer_incoming_data_channel, handle_answer_session_message,
+        handle_offer_session_message,
+        process_offer_session_payload, recover_daemon_after_session,
         replayed_active_busy_offer_key, should_ack_idle_offer, should_attempt_offer_reconnect,
         should_continue_reconnect_attempt, spawn_offer_accept_loop, steady_state_for_role,
         write_steady_state_status,
@@ -1950,6 +1985,49 @@ mod tests {
 
     fn connected_runtime() -> DaemonRuntimeState {
         DaemonRuntimeState::new_connected()
+    }
+
+    fn answer_connector(port: u16) -> AnswerTargetConnector {
+        AnswerTargetConnector::new(&TunnelAnswerConfig {
+            target_host: "127.0.0.1".to_owned(),
+            target_port: port,
+            allow_remote_peers: vec!["offer-home".parse().expect("peer id")],
+        })
+    }
+
+    async fn connected_channels(
+        webrtc: &WebRtcConfig,
+    ) -> (WebRtcPeer, WebRtcPeer, p2p_webrtc::DataChannelHandle, p2p_webrtc::DataChannelHandle) {
+        let offer_peer = WebRtcPeer::new(webrtc).await.expect("offer peer should build");
+        let answer_peer = WebRtcPeer::new(webrtc).await.expect("answer peer should build");
+
+        let offer_channel = offer_peer
+            .create_data_channel()
+            .await
+            .expect("offer data channel should build");
+        let offer_sdp = offer_peer.create_offer().await.expect("offer SDP should build");
+        answer_peer
+            .apply_remote_offer(&offer_sdp)
+            .await
+            .expect("answer should accept offer");
+        let answer_sdp = answer_peer.create_answer().await.expect("answer SDP should build");
+        offer_peer
+            .apply_remote_answer(&answer_sdp)
+            .await
+            .expect("offer should accept answer");
+
+        let answer_channel = timeout(Duration::from_secs(10), answer_peer.next_incoming_data_channel())
+            .await
+            .expect("incoming data channel should arrive")
+            .expect("incoming data channel stream should yield")
+            .expect("incoming data channel should be accepted");
+
+        offer_channel
+            .wait_for_open(Duration::from_secs(10))
+            .await
+            .expect("offer data channel should open");
+
+        (offer_peer, answer_peer, offer_channel, answer_channel)
     }
 
     #[test]
@@ -2286,6 +2364,279 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn answer_incoming_data_channel_handoff_starts_bridge_without_open_event_branch() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        config.webrtc.stun_urls = Vec::new();
+        config.webrtc.enable_trickle_ice = false;
+
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let remote = answer_keys
+            .get_by_peer_id(&offer.identity.peer_id)
+            .cloned()
+            .expect("offer authorized key");
+
+        let (offer_peer, answer_peer, offer_channel, answer_channel) =
+            connected_channels(&config.webrtc).await;
+        let mut session = ActiveSession::new(
+            SessionId::random(),
+            remote,
+            answer_peer,
+            config.security.replay_cache_size,
+        );
+
+        let target_listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("target listener should bind");
+        let connector = answer_connector(
+            target_listener
+                .local_addr()
+                .expect("target local addr")
+                .port(),
+        );
+
+        handle_answer_incoming_data_channel(
+            &mut session,
+            Some(Ok(answer_channel)),
+            &connector,
+            &config.tunnel,
+        )
+        .expect("incoming data channel should hand off to answer bridge");
+
+        assert!(session.data_channel.is_some(), "answer session should retain the incoming channel");
+        assert!(session.bridge_handle.is_some(), "answer session should start the bridge immediately");
+        assert_eq!(session.bridge_state, BridgeSessionState::Active);
+
+        let target_task = tokio::spawn(async move {
+            let (mut target_stream, _) = target_listener.accept().await.expect("target accept");
+            let mut received = [0_u8; 4];
+            target_stream.read_exact(&mut received).await.expect("target read");
+            assert_eq!(&received, b"ping");
+            target_stream.write_all(b"pong").await.expect("target write");
+            target_stream.shutdown().await.expect("target shutdown");
+        });
+
+        let local_listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("local listener should bind");
+        let local_addr = local_listener.local_addr().expect("local addr");
+        let client_task = tokio::spawn(async move {
+            let mut client = TcpStream::connect(local_addr).await.expect("client connect");
+            client.write_all(b"ping").await.expect("client write");
+            let mut response = [0_u8; 4];
+            client.read_exact(&mut response).await.expect("client read");
+            assert_eq!(&response, b"pong");
+            client.shutdown().await.expect("client shutdown");
+        });
+        let (offer_stream, _) = local_listener.accept().await.expect("offer accept");
+
+        let offer_task = tokio::spawn(async move {
+            TunnelBridge::new(offer_channel, &config.tunnel).run_offer(offer_stream).await
+        });
+
+        timeout(Duration::from_secs(10), client_task)
+            .await
+            .expect("client task should finish in time")
+            .expect("client task should succeed");
+        timeout(Duration::from_secs(10), target_task)
+            .await
+            .expect("target task should finish in time")
+            .expect("target task should succeed");
+        timeout(Duration::from_secs(10), offer_task)
+            .await
+            .expect("offer bridge should finish in time")
+            .expect("offer bridge join should succeed")
+            .expect("offer bridge should succeed");
+        timeout(
+            Duration::from_secs(10),
+            session.bridge_handle.take().expect("answer bridge handle should exist"),
+        )
+        .await
+        .expect("answer bridge should finish in time")
+        .expect("answer bridge join should succeed")
+        .expect("answer bridge should succeed");
+
+        offer_peer.close().await.expect("offer peer should close");
+        session.peer.close().await.expect("answer peer should close");
+    }
+
+    #[tokio::test]
+    async fn active_offer_session_ignores_duplicate_signal_and_processes_later_valid_ack() {
+        let mut config = sample_config();
+        config.webrtc.stun_urls = Vec::new();
+        config.webrtc.enable_trickle_ice = false;
+        config.broker.username.clear();
+        config.broker.password_file = PathBuf::new();
+        config.broker.tls.ca_file = PathBuf::from("/etc/ssl/certs/ca-certificates.crt");
+        config.broker.tls.client_cert_file = PathBuf::new();
+        config.broker.tls.client_key_file = PathBuf::new();
+
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let answer_codec = SignalCodec::new(&answer.identity, &answer_keys, 120, 300);
+        let remote = offer_keys
+            .get_by_peer_id(&answer.identity.peer_id)
+            .cloned()
+            .expect("answer authorized key");
+        let peer = WebRtcPeer::new(&config.webrtc).await.expect("offer peer should build");
+        let session_id = SessionId::random();
+        let mut session =
+            ActiveSession::new(session_id, remote.clone(), peer, config.security.replay_cache_size);
+        let (path, writer) = status_writer_for_test(&mut config, "offer-duplicate-survival");
+        let mut runtime = connected_runtime();
+        let mut ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+        let mut transport = MqttSignalingTransport::connect(&config).expect("transport should build");
+
+        let outbound_message = InnerMessageBuilder::new(
+            session_id,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "pending-offer".to_owned() }));
+        let (outbound_envelope, outbound_payload) = offer_codec
+            .encode_for_peer(&remote, &outbound_message, false)
+            .expect("offer encodes");
+        session.signaling.ack_tracker.register(
+            outbound_envelope.msg_id,
+            outbound_message.message_type,
+            outbound_payload,
+            0,
+        );
+
+        let duplicate_ack = answer_codec.build_ack(
+            offer.identity.peer_id.clone(),
+            session_id,
+            p2p_core::MsgId::random(),
+        );
+        let (_duplicate_envelope, duplicate_payload) = answer_codec
+            .encode_for_peer(
+                answer_keys.get_by_peer_id(&offer.identity.peer_id).expect("offer key"),
+                &duplicate_ack,
+                false,
+            )
+            .expect("duplicate ack encodes");
+
+        let first = process_offer_session_payload(
+            &mut ctx,
+            &offer_codec,
+            &mut transport,
+            &remote,
+            &mut session,
+            &duplicate_payload,
+        )
+        .await
+        .expect("first ack should process cleanly");
+        assert_eq!(first, OfferSessionPayloadOutcome::Handled);
+
+        let duplicate = process_offer_session_payload(
+            &mut ctx,
+            &offer_codec,
+            &mut transport,
+            &remote,
+            &mut session,
+            &duplicate_payload,
+        )
+        .await
+        .expect("duplicate ack should be ignored rather than abort the session");
+        assert_eq!(duplicate, OfferSessionPayloadOutcome::Ignored);
+
+        let valid_ack = answer_codec.build_ack(
+            offer.identity.peer_id.clone(),
+            session_id,
+            outbound_envelope.msg_id,
+        );
+        let (_valid_envelope, valid_payload) = answer_codec
+            .encode_for_peer(
+                answer_keys.get_by_peer_id(&offer.identity.peer_id).expect("offer key"),
+                &valid_ack,
+                false,
+            )
+            .expect("valid ack encodes");
+        let processed = process_offer_session_payload(
+            &mut ctx,
+            &offer_codec,
+            &mut transport,
+            &remote,
+            &mut session,
+            &valid_payload,
+        )
+        .await
+        .expect("later valid ack should still be processed");
+        assert_eq!(processed, OfferSessionPayloadOutcome::Handled);
+        assert!(
+            session.signaling.ack_tracker.retry_due(u64::MAX).is_empty(),
+            "later valid ack should retire the pending outbound offer"
+        );
+        assert!(session.signaling.ack_tracker.expired().is_empty());
+
+        let _ = tokio::fs::remove_file(&path).await;
+        session.peer.close().await.expect("offer peer should close");
+    }
+
+    #[tokio::test]
+    async fn answer_session_does_not_initiate_reconnect_from_remote_requests() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        config.webrtc.stun_urls = Vec::new();
+        config.webrtc.enable_trickle_ice = false;
+
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let answer_keys =
+            AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys");
+        let remote = answer_keys
+            .get_by_peer_id(&offer.identity.peer_id)
+            .cloned()
+            .expect("offer authorized key");
+        let peer = WebRtcPeer::new(&config.webrtc).await.expect("answer peer should build");
+        let session_id = SessionId::random();
+        let mut session = ActiveSession::new(
+            session_id,
+            remote,
+            peer,
+            config.security.replay_cache_size,
+        );
+        let original_state = session.state;
+
+        let ice_restart_request = InnerMessageBuilder::new(
+            session_id,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::IceRestartRequest);
+        handle_answer_session_message(&ice_restart_request, &mut session)
+            .await
+            .expect("answer session should ignore remote ice restart request");
+
+        let renegotiate_request = InnerMessageBuilder::new(
+            session_id,
+            offer.identity.peer_id.clone(),
+            answer.identity.peer_id.clone(),
+        )
+        .build(MessageBody::RenegotiateRequest(p2p_signaling::RenegotiateRequestBody {
+            reason: "offer-side recovery only".to_owned(),
+        }));
+        handle_answer_session_message(&renegotiate_request, &mut session)
+            .await
+            .expect("answer session should ignore remote renegotiate request");
+
+        assert_eq!(session.session_id, session_id);
+        assert_eq!(session.state, original_state);
+        assert!(session.data_channel.is_none(), "answer session should not create a data channel");
+        assert!(session.bridge_handle.is_none(), "answer session should not start a new bridge task");
+        assert_eq!(session.bridge_state, BridgeSessionState::Pending);
+
+        session.peer.close().await.expect("answer peer should close");
+    }
+
+    #[tokio::test]
     async fn offer_recovery_returns_to_waiting_after_remote_error() {
         let mut config = sample_config();
         let (path, writer) = status_writer_for_test(&mut config, "offer-recovery");
@@ -2308,6 +2659,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn offer_recovery_returns_to_waiting_after_remote_close() {
+        let mut config = sample_config();
+        let (path, writer) = status_writer_for_test(&mut config, "offer-remote-close");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+
+        recover_daemon_after_session(
+            &ctx,
+            Err(DaemonError::RemoteClosed("session_closed".to_owned())),
+        )
+        .await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "waiting_for_local_client");
+        assert_eq!(status["role"], "offer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
     async fn answer_recovery_returns_to_idle_after_target_connect_failure() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
@@ -2320,6 +2690,26 @@ mod tests {
             Err(DaemonError::Tunnel(p2p_tunnel::TunnelError::TargetConnectFailed(
                 "connection refused".to_owned(),
             ))),
+        )
+        .await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["role"], "answer");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn answer_recovery_returns_to_idle_after_remote_close() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, writer) = status_writer_for_test(&mut config, "answer-remote-close");
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &writer, runtime: &mut runtime };
+
+        recover_daemon_after_session(
+            &ctx,
+            Err(DaemonError::RemoteClosed("session_closed".to_owned())),
         )
         .await;
 

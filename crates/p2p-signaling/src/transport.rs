@@ -194,13 +194,11 @@ impl MqttSignalingTransport {
             .map_err(SignalingError::from)?;
 
         loop {
-            match self.poll().await? {
-                Event::Incoming(Packet::SubAck(_)) => return Ok(()),
-                Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
-                    self.pending_payloads.push_back(publish.payload.to_vec());
-                }
-                _ => {}
+            let event = self.poll().await?;
+            if matches!(event, Event::Incoming(Packet::SubAck(_))) {
+                return Ok(());
             }
+            buffer_pending_own_topic_publish(&event, &self.own_topic, &mut self.pending_payloads);
         }
     }
 
@@ -236,13 +234,23 @@ impl MqttSignalingTransport {
     }
 
     async fn pump_once(&mut self) -> Result<(), SignalingError> {
-        match self.poll().await? {
-            Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
-                self.pending_payloads.push_back(publish.payload.to_vec());
-            }
-            _ => {}
-        }
+        let event = self.poll().await?;
+        buffer_pending_own_topic_publish(&event, &self.own_topic, &mut self.pending_payloads);
         Ok(())
+    }
+}
+
+fn buffer_pending_own_topic_publish(
+    event: &Event,
+    own_topic: &str,
+    pending_payloads: &mut VecDeque<Vec<u8>>,
+) -> bool {
+    match event {
+        Event::Incoming(Packet::Publish(publish)) if publish.topic == own_topic => {
+            pending_payloads.push_back(publish.payload.to_vec());
+            true
+        }
+        _ => false,
     }
 }
 
@@ -366,11 +374,12 @@ mod tests {
     };
     use p2p_core::{MessageType, SessionId};
     use p2p_crypto::{AuthorizedKeys, generate_identity};
-    use rumqttc::Transport;
+    use rumqttc::mqttbytes::v4::{Publish, SubAck, SubscribeReasonCode};
+    use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
 
     use super::{
         EnvelopeFlags, InnerMessageBuilder, MqttSignalingTransport, OuterEnvelope, ReplayCache,
-        SignalCodec, build_mqtt_options, signal_topic,
+        SignalCodec, buffer_pending_own_topic_publish, build_mqtt_options, signal_topic,
     };
     use crate::{ErrorBody, MessageBody, OfferBody, SignalingError};
 
@@ -650,6 +659,60 @@ mod tests {
     #[test]
     fn transport_type_exists() {
         let _ = std::mem::size_of::<MqttSignalingTransport>();
+    }
+
+    #[test]
+    fn own_topic_publish_is_buffered_during_subscribe_handshake() {
+        let own_topic = "p2ptunnel/v1/nodes/answer-office/signal";
+        let event = Event::Incoming(Packet::Publish(Publish::new(
+            own_topic,
+            QoS::AtLeastOnce,
+            b"hello".to_vec(),
+        )));
+        let mut pending = std::collections::VecDeque::new();
+
+        assert!(buffer_pending_own_topic_publish(&event, own_topic, &mut pending));
+        assert_eq!(pending.pop_front(), Some(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn unrelated_events_are_not_buffered_as_pending_payloads() {
+        let own_topic = "p2ptunnel/v1/nodes/answer-office/signal";
+        let foreign_publish = Event::Incoming(Packet::Publish(Publish::new(
+            "p2ptunnel/v1/nodes/offer-home/signal",
+            QoS::AtLeastOnce,
+            b"foreign".to_vec(),
+        )));
+        let suback = Event::Incoming(Packet::SubAck(SubAck::new(
+            7,
+            vec![SubscribeReasonCode::Success(QoS::AtLeastOnce)],
+        )));
+        let mut pending = std::collections::VecDeque::new();
+
+        assert!(!buffer_pending_own_topic_publish(&foreign_publish, own_topic, &mut pending));
+        assert!(!buffer_pending_own_topic_publish(&suback, own_topic, &mut pending));
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_signal_payload_returns_buffered_payload_before_polling_network() {
+        let options = MqttOptions::new("test-client", "localhost", 1883);
+        let (client, event_loop) = AsyncClient::new(options, 10);
+        let mut transport = MqttSignalingTransport {
+            client,
+            event_loop,
+            own_topic: "p2ptunnel/v1/nodes/answer-office/signal".to_owned(),
+            qos: QoS::AtLeastOnce,
+            pending_payloads: std::collections::VecDeque::from([b"buffered".to_vec()]),
+        };
+
+        let payload = transport
+            .poll_signal_payload()
+            .await
+            .expect("buffered payload should be returned without polling the network");
+
+        assert_eq!(payload, Some(b"buffered".to_vec()));
+        assert!(transport.pending_payloads.is_empty());
     }
 
     fn sample_config(base: &std::path::Path) -> AppConfig {

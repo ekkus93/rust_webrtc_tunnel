@@ -182,3 +182,32 @@
 ## 2026-04-30T14:29:14Z - GPT-5.4 - Full workspace lint and tests passed after latest daemon ACK regression
 - Re-ran `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo test --workspace --all-targets` after the latest daemon ACK retry/retirement regression landed.
 - Both passed cleanly; the workspace now reports 32 `p2p-daemon` tests, 25 `p2p-signaling` tests across unit and mocked-MQTT coverage, 10 `p2p-tunnel` tests, 5 `p2p-webrtc` tests, 11 `p2p-core` tests, 10 `p2p-crypto` tests, and 2 `p2pctl` tests.
+
+## 2026-04-30T14:38:23Z - GPT-5.4 - Added answer-daemon incoming-channel handoff regression
+- Extracted the answer-session incoming-data-channel branch into a small helper so the daemon-owned handoff behavior can be tested directly.
+- Added a `p2p-daemon` tokio regression that creates real connected WebRTC peers, hands the answer side an incoming `tunnel` channel, starts the answer bridge immediately from that handoff, and proves an end-to-end `ping`/`pong` exchange succeeds without a separate daemon-side open-event branch.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:42:58Z - GPT-5.4 - Added offer-session duplicate-survival regression
+- Extracted the active offer-session payload branch into a small helper so the daemon's duplicate-message handling and follow-on processing can be tested directly.
+- Added a `p2p-daemon` tokio regression that feeds an inbound ACK twice, proves the duplicate replay is ignored instead of aborting the active offer session, and then proves a later valid ACK still retires the pending outbound offer state.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:45:53Z - GPT-5.4 - Added reconnect leadership regression for answer sessions
+- Added a `p2p-daemon` tokio regression that feeds `IceRestartRequest` and `RenegotiateRequest` into an active answer session and proves the answer side ignores both without creating a data channel, bridge task, or replacement session state.
+- This pins the v1 policy that offer-side recovery owns reconnect and renegotiation while the answer side does not initiate a fresh session on remote request messages.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:49:27Z - GPT-5.4 - Added remote-close recovery regressions
+- Added focused `p2p-daemon` regressions proving both offer and answer daemons return to their steady states after `DaemonError::RemoteClosed`, covering the missing remote-close half of the teardown recovery path.
+- This complements the existing remote-error and target-connect-failure recovery tests so ordinary remote session shutdown now has explicit steady-state coverage for both roles.
+- Validated with `cargo test -p p2p-daemon --lib` and `cargo clippy -p p2p-daemon --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:53:07Z - GPT-5.4 - Added signaling transport buffering regressions
+- Added focused `p2p-signaling` coverage for the MQTT transport buffering seam: own-topic publishes are buffered when observed during subscription/pump handling, unrelated events are ignored, and `poll_signal_payload()` drains buffered payloads before polling the broker again.
+- This pins the earlier runtime fix around `pending_payloads` so own-topic messages seen around `subscribe_own_topic()` and publish pump boundaries stay recoverable without depending on a live broker race.
+- Validated with `cargo test -p p2p-signaling --lib` and `cargo clippy -p p2p-signaling --all-targets --all-features -- -D warnings`.
+
+## 2026-04-30T14:54:25Z - GPT-5.4 - Full workspace validation passed after transport regressions
+- Ran the full workspace verification sweep after adding the `p2p-signaling` transport buffering tests; all crates passed `cargo test --workspace --all-targets`.
+- The workspace also passed `cargo clippy --workspace --all-targets --all-features -- -D warnings`, so the new regressions are clean outside the signaling crate too.
