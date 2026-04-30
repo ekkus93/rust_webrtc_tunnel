@@ -149,3 +149,8 @@
 - Updated the offer-side active session loop in `p2p-daemon` to log and ignore signaling decode/replay failures, matching the answer-side behavior, instead of aborting the whole session on duplicate retransmits.
 - This was triggered by a live run where signaling and WebRTC reached `connected`, but the offer session then failed on `protocol error: duplicate message detected`.
 - Validated with `cargo test -p p2p-daemon --lib`.
+
+## 2026-04-30T13:38:35Z - GPT-5.4 - MQTT subscribe handshake is now completed before sessions rely on inbound signaling
+- Updated `p2p-signaling` so `MqttSignalingTransport::subscribe_own_topic` waits for `SUBACK` and buffers any own-topic publishes seen while pumping the event loop.
+- This addresses the offer-side runtime gap where `AsyncClient::subscribe` could still be only locally queued while the daemon was already accepting a local client, allowing the answer side's first `Ack` and `Answer` to race ahead of the active subscription.
+- Validated with `cargo test -p p2p-signaling --lib`, `cargo test -p p2p-daemon --lib`, and `cargo clippy -p p2p-signaling -p p2p-daemon --all-targets --all-features -- -D warnings`.

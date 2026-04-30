@@ -187,8 +187,21 @@ impl MqttSignalingTransport {
         Ok(Self { client, event_loop, own_topic, qos, pending_payloads: VecDeque::new() })
     }
 
-    pub async fn subscribe_own_topic(&self) -> Result<(), SignalingError> {
-        self.client.subscribe(self.own_topic.clone(), self.qos).await.map_err(SignalingError::from)
+    pub async fn subscribe_own_topic(&mut self) -> Result<(), SignalingError> {
+        self.client
+            .subscribe(self.own_topic.clone(), self.qos)
+            .await
+            .map_err(SignalingError::from)?;
+
+        loop {
+            match self.poll().await? {
+                Event::Incoming(Packet::SubAck(_)) => return Ok(()),
+                Event::Incoming(Packet::Publish(publish)) if publish.topic == self.own_topic => {
+                    self.pending_payloads.push_back(publish.payload.to_vec());
+                }
+                _ => {}
+            }
+        }
     }
 
     pub async fn publish_signal(
