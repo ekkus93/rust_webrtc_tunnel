@@ -25,11 +25,13 @@ use p2p_webrtc::{
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::interval;
+use tokio::time::{interval, sleep};
 
 pub use error::DaemonError;
 pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
 pub use status::{DaemonStatus, StatusWriter};
+
+const DAEMON_RUNTIME_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BridgeSessionState {
@@ -93,7 +95,7 @@ pub async fn run_offer_daemon(
     transport.subscribe_own_topic().await?;
 
     let status = StatusWriter::new(&config);
-    write_steady_state_status(&config, &status).await?;
+    write_steady_state_status(&config, &status).await;
 
     let listener = OfferListener::bind(&config.tunnel.offer).await?;
     tracing::info!("listening for local clients on {}", listener.local_addr()?);
@@ -107,15 +109,17 @@ pub async fn run_offer_daemon(
         )?;
 
     loop {
-        write_steady_state_status(&config, &status).await?;
+        write_steady_state_status(&config, &status).await;
 
         let client = accepted_clients
             .recv()
             .await
             .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
+        tracing::info!("accepted local client and entering busy offer session state");
         let result =
             run_offer_session(&config, &codec, &mut transport, &status, client, &remote).await;
-        recover_daemon_after_session(&config, &status, result).await?;
+        recover_daemon_after_session(&config, &status, result).await;
+        tracing::info!("offer daemon returned to waiting state");
     }
 }
 
@@ -133,13 +137,14 @@ pub async fn run_answer_daemon(
     let mut transport = MqttSignalingTransport::connect(&config)?;
     transport.subscribe_own_topic().await?;
     let status = StatusWriter::new(&config);
-    write_steady_state_status(&config, &status).await?;
+    write_steady_state_status(&config, &status).await;
 
     let connector = AnswerTargetConnector::new(&config.tunnel.answer);
     let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
 
     loop {
-        let Some(payload) = transport.poll_signal_payload().await? else {
+        let Some(payload) = poll_idle_signal_payload(&config.node.role, &mut transport).await
+        else {
             continue;
         };
 
@@ -164,23 +169,23 @@ pub async fn run_answer_daemon(
                     tracing::warn!(peer_id = %sender.peer_id, "rejecting unauthorized peer");
                     continue;
                 }
-                if should_ack_idle_offer(peer_allowed, message.message_type.requires_ack()) {
-                    publish_message(
-                        &config,
-                        &codec,
-                        &mut transport,
-                        None,
-                        &sender,
-                        codec.build_ack(
-                            sender.peer_id.clone(),
-                            message.session_id,
-                            envelope.msg_id,
-                        ),
-                        true,
-                    )
-                    .await?;
-                }
                 let session_result = async {
+                    if should_ack_idle_offer(peer_allowed, message.message_type.requires_ack()) {
+                        publish_message(
+                            &config,
+                            &codec,
+                            &mut transport,
+                            None,
+                            &sender,
+                            codec.build_ack(
+                                sender.peer_id.clone(),
+                                message.session_id,
+                                envelope.msg_id,
+                            ),
+                            true,
+                        )
+                        .await?;
+                    }
                     let peer = WebRtcPeer::new(&config.webrtc).await?;
                     peer.apply_remote_offer(&offer.sdp).await?;
                     let mut session = ActiveSession::new(
@@ -218,7 +223,8 @@ pub async fn run_answer_daemon(
                     .await
                 }
                 .await;
-                recover_daemon_after_session(&config, &status, session_result).await?;
+                recover_daemon_after_session(&config, &status, session_result).await;
+                tracing::info!("answer daemon returned to idle state");
             }
             _ => {
                 tracing::warn!("ignoring unexpected idle message {:?}", message.message_type);
@@ -295,15 +301,17 @@ async fn run_offer_session(
     let mut session =
         ActiveSession::new(session_id, remote.clone(), peer, config.security.replay_cache_size);
 
-    status
-        .write(DaemonStatus::new(
+    write_status_or_log(
+        status,
+        DaemonStatus::new(
             config.node.peer_id.clone(),
             config.node.role.clone(),
             true,
             Some(session.session_id),
             DaemonState::Negotiating,
-        ))
-        .await?;
+        ),
+    )
+    .await;
 
     publish_message(
         config,
@@ -435,15 +443,17 @@ async fn run_offer_session(
                     }
                 }, if session.bridge_handle.is_none() => {
                     if let Some(DataChannelEvent::Open) = data_event {
-                        status
-                            .write(DaemonStatus::new(
+                        write_status_or_log(
+                            status,
+                            DaemonStatus::new(
                                 config.node.peer_id.clone(),
                                 config.node.role.clone(),
                                 true,
                                 Some(session.session_id),
                                 DaemonState::TunnelOpen,
-                            ))
-                            .await?;
+                            ),
+                        )
+                        .await;
                         let bridge = TunnelBridge::new(
                             session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?,
                             &config.tunnel,
@@ -557,15 +567,17 @@ async fn run_answer_session(
     status: &StatusWriter,
     mut session: ActiveSession,
 ) -> Result<(), DaemonError> {
-    status
-        .write(DaemonStatus::new(
+    write_status_or_log(
+        status,
+        DaemonStatus::new(
             config.node.peer_id.clone(),
             config.node.role.clone(),
             true,
             Some(session.session_id),
             session.state,
-        ))
-        .await?;
+        ),
+    )
+    .await;
 
     let mut tick = interval(Duration::from_secs(1));
     let result = async {
@@ -681,15 +693,17 @@ async fn run_answer_session(
                     }
                 }, if should_poll_answer_data_events(session.data_channel.is_some(), session.bridge_handle.is_some()) => {
                     if let Some(DataChannelEvent::Open) = data_event {
-                        status
-                            .write(DaemonStatus::new(
+                        write_status_or_log(
+                            status,
+                            DaemonStatus::new(
                                 config.node.peer_id.clone(),
                                 config.node.role.clone(),
                                 true,
                                 Some(session.session_id),
                                 DaemonState::TunnelOpen,
-                            ))
-                            .await?;
+                            ),
+                        )
+                        .await;
                         let bridge = TunnelBridge::new(
                             session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?,
                             &config.tunnel,
@@ -782,9 +796,16 @@ fn spawn_offer_accept_loop(
     let (tx, rx) = mpsc::channel(1);
     tokio::spawn(async move {
         loop {
-            let accepted = listener.accept_client().await.map_err(DaemonError::from);
-            if tx.send(accepted).await.is_err() {
-                return;
+            match listener.accept_client().await {
+                Ok(accepted) => {
+                    if tx.send(Ok(accepted)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(reason = %error, "offer accept loop hit recoverable listener error");
+                    sleep(DAEMON_RUNTIME_RETRY_DELAY).await;
+                }
             }
         }
     });
@@ -798,27 +819,26 @@ fn steady_state_for_role(role: &NodeRole) -> DaemonState {
     }
 }
 
-async fn write_steady_state_status(
-    config: &AppConfig,
-    status: &StatusWriter,
-) -> Result<(), DaemonError> {
-    status
-        .write(DaemonStatus::new(
+async fn write_steady_state_status(config: &AppConfig, status: &StatusWriter) {
+    write_status_or_log(
+        status,
+        DaemonStatus::new(
             config.node.peer_id.clone(),
             config.node.role.clone(),
             true,
             None,
             steady_state_for_role(&config.node.role),
-        ))
-        .await
+        ),
+    )
+    .await;
 }
 
 async fn recover_daemon_after_session(
     config: &AppConfig,
     status: &StatusWriter,
     result: Result<(), DaemonError>,
-) -> Result<(), DaemonError> {
-    write_steady_state_status(config, status).await?;
+) {
+    write_steady_state_status(config, status).await;
     if let Err(error) = result {
         tracing::warn!(
             reason = %error,
@@ -826,7 +846,30 @@ async fn recover_daemon_after_session(
             "daemon recovered from session failure"
         );
     }
-    Ok(())
+}
+
+async fn write_status_or_log(status: &StatusWriter, daemon_status: DaemonStatus) {
+    if let Err(error) = status.write(daemon_status).await {
+        tracing::warn!(reason = %error, "status write failed; continuing without status update");
+    }
+}
+
+async fn poll_idle_signal_payload(
+    role: &NodeRole,
+    transport: &mut MqttSignalingTransport,
+) -> Option<Vec<u8>> {
+    match transport.poll_signal_payload().await {
+        Ok(payload) => payload,
+        Err(error) => {
+            tracing::warn!(
+                reason = %error,
+                role = ?role,
+                "recoverable signaling transport error while idle; backing off before retry"
+            );
+            sleep(DAEMON_RUNTIME_RETRY_DELAY).await;
+            None
+        }
+    }
 }
 
 async fn send_local_candidate(
@@ -918,6 +961,12 @@ async fn maybe_handle_active_busy_offer(
     match action {
         ActiveBusyOfferAction::Ignore => {}
         ActiveBusyOfferAction::ReplyBusy { session_id, sender } => {
+            tracing::info!(
+                peer_id = %sender.peer_id,
+                active_session_id = %active_session_id,
+                rejected_session_id = %session_id,
+                "rejecting new offer with busy because answer daemon already has an active allowed session"
+            );
             publish_message(
                 config,
                 codec,
@@ -954,6 +1003,11 @@ fn classify_active_busy_offer(
         return None;
     }
     if !is_peer_allowed_for_active_busy_reply(config, &sender.peer_id) {
+        tracing::warn!(
+            peer_id = %sender.peer_id,
+            active_session_id = %active_session_id,
+            "ignoring new offer during active answer session because peer is not allowlisted"
+        );
         return Some(ActiveBusyOfferAction::Ignore);
     }
     Some(ActiveBusyOfferAction::ReplyBusy {
@@ -1045,28 +1099,32 @@ async fn attempt_offer_reconnect(
     let mut attempt = 0;
     while should_continue_reconnect_attempt(max_attempts, attempt) {
         session.state = DaemonState::Backoff;
-        status
-            .write(DaemonStatus::new(
+        write_status_or_log(
+            status,
+            DaemonStatus::new(
                 config.node.peer_id.clone(),
                 config.node.role.clone(),
                 true,
                 Some(session.session_id),
                 session.state,
-            ))
-            .await?;
+            ),
+        )
+        .await;
         tokio::time::sleep(compute_backoff_delay(config, attempt)).await;
 
         if config.webrtc.enable_ice_restart {
             session.state = DaemonState::IceRestarting;
-            status
-                .write(DaemonStatus::new(
+            write_status_or_log(
+                status,
+                DaemonStatus::new(
                     config.node.peer_id.clone(),
                     config.node.role.clone(),
                     true,
                     Some(session.session_id),
                     session.state,
-                ))
-                .await?;
+                ),
+            )
+            .await;
             if reconnect_with_offer(config, codec, transport, session, remote, true).await? {
                 session.state = DaemonState::ConnectingDataChannel;
                 return Ok(true);
@@ -1074,15 +1132,17 @@ async fn attempt_offer_reconnect(
         }
 
         session.state = DaemonState::Renegotiating;
-        status
-            .write(DaemonStatus::new(
+        write_status_or_log(
+            status,
+            DaemonStatus::new(
                 config.node.peer_id.clone(),
                 config.node.role.clone(),
                 true,
                 Some(session.session_id),
                 session.state,
-            ))
-            .await?;
+            ),
+        )
+        .await;
         if reconnect_with_offer(config, codec, transport, session, remote, false).await? {
             session.state = DaemonState::ConnectingDataChannel;
             return Ok(true);
@@ -1615,8 +1675,7 @@ mod tests {
                 "remote rejected session".to_owned(),
             )),
         )
-        .await
-        .expect("offer daemon should recover");
+        .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "waiting_for_local_client");
@@ -1637,8 +1696,7 @@ mod tests {
                 "connection refused".to_owned(),
             ))),
         )
-        .await
-        .expect("answer daemon should recover");
+        .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
@@ -1657,8 +1715,7 @@ mod tests {
             &writer,
             Err(DaemonError::Logging("bridge task join error: task 7 panicked".to_owned())),
         )
-        .await
-        .expect("answer daemon should recover");
+        .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
@@ -1677,8 +1734,7 @@ mod tests {
             &writer,
             Err(DaemonError::IceFailed(IceConnectionState::Failed)),
         )
-        .await
-        .expect("answer daemon should recover");
+        .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
@@ -1692,12 +1748,31 @@ mod tests {
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "steady-state");
 
-        write_steady_state_status(&config, &writer).await.expect("status write succeeds");
+        write_steady_state_status(&config, &writer).await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["current_state"], "idle");
         assert_eq!(status["role"], "answer");
         let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn status_write_failure_is_recoverable() {
+        let blocking_file =
+            std::env::temp_dir().join(format!("p2ptunnel-status-blocker-{}", SessionId::random()));
+        tokio::fs::write(&blocking_file, b"occupied".as_slice())
+            .await
+            .expect("blocking file should exist");
+
+        let mut config = sample_config();
+        config.health.write_status_file = true;
+        config.health.status_file = blocking_file.join("status.json");
+        let writer = StatusWriter::new(&config);
+
+        write_steady_state_status(&config, &writer).await;
+
+        assert!(!config.health.status_file.exists(), "status write failure should be ignored");
+        let _ = tokio::fs::remove_file(&blocking_file).await;
     }
 
     #[tokio::test]

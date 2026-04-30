@@ -179,44 +179,46 @@ Add tests covering:
 
 ## P1 — Review Daemon Survival For Non-Session Operational Errors
 
+- [x] Status: complete
+
 ### Objective
 
 Make daemon behavior resilient for ordinary operational failures, not just ordinary session failures.
 
 ### Task 3.1 — Audit top-level `?` exits
 
-Inspect the top-level daemon loops and identify every remaining place where an ordinary operational failure can still tear down the daemon.
+- [x] Inspect the top-level daemon loops and identify every remaining place where an ordinary operational failure can still tear down the daemon.
 
 Examples to inspect:
 
-- listener accept failures
-- transport poll failures
-- status file write failures
-- bridge task join/propagation behavior
-- transient signaling transport failures
+- [x] listener accept failures
+- [x] transport poll failures
+- [x] status file write failures
+- [x] bridge task join/propagation behavior
+- [x] transient signaling transport failures
 
 ### Task 3.2 — Classify failures
 
 Classify each failure as one of:
 
-- fatal startup/config/identity error → process should exit
-- recoverable session error → session should end, daemon should continue
-- recoverable operational error → log, back off, retry, daemon should continue
+- [x] fatal startup/config/identity error → process should exit
+- [x] recoverable session error → session should end, daemon should continue
+- [x] recoverable operational error → log, back off, retry, daemon should continue
 
 ### Task 3.3 — Implement daemon-safe handling where appropriate
 
-- Convert recoverable operational errors into log/backoff/retry behavior.
-- Avoid allowing ordinary runtime turbulence to kill the daemon.
-- Preserve fail-closed behavior for true security/configuration failures.
+- [x] Convert recoverable operational errors into log/backoff/retry behavior.
+- [x] Avoid allowing ordinary runtime turbulence to kill the daemon.
+- [x] Preserve fail-closed behavior for true security/configuration failures.
 
 ### Task 3.4 — Add tests for daemon survival
 
 Add tests for cases like:
 
-- session fails, daemon remains alive
-- target connect fails, answer daemon returns to waiting
-- remote error tears down session but not daemon
-- transient operational error is logged and daemon continues if policy says it should
+- [x] session fails, daemon remains alive
+- [x] target connect fails, answer daemon returns to waiting
+- [x] remote error tears down session but not daemon
+- [x] transient operational error is logged and daemon continues if policy says it should
 
 ---
 
@@ -249,6 +251,8 @@ If v1 remains truly single-session:
 
 ## P2 — Strengthen Integration / Lifecycle Test Coverage
 
+- [x] Status: complete
+
 ### Objective
 
 Add tests that validate the behavior of the real daemon/session orchestration rather than only unit-level helpers.
@@ -257,45 +261,47 @@ Add tests that validate the behavior of the real daemon/session orchestration ra
 
 Create tests for at least these scenarios:
 
-1. offer session success path
-2. answer target-connect failure returns daemon to waiting
-3. session error does not kill daemon
-4. second local client is rejected promptly while busy
-5. active answer session receives new allowed offer and returns `busy`
-6. active answer session receives unauthorized/disallowed offer and applies correct policy
+1. [x] offer session success path
+2. [x] answer target-connect failure returns daemon to waiting
+3. [x] session error does not kill daemon
+4. [x] second local client is rejected promptly while busy
+5. [x] active answer session receives new allowed offer and returns `busy`
+6. [x] active answer session receives unauthorized/disallowed offer and applies correct policy
 
 ### Task 5.2 — Add test helpers/fakes if needed
 
-- Introduce fake signaling transport / fake bridge / fake peer connection pieces if needed.
-- Keep tests deterministic.
-- Do not rely on real network or broker infrastructure for core daemon lifecycle tests.
+- [x] Introduce fake signaling transport / fake bridge / fake peer connection pieces if needed.
+- [x] Keep tests deterministic.
+- [x] Do not rely on real network or broker infrastructure for core daemon lifecycle tests.
 
 ### Task 5.3 — Keep tests close to real orchestration
 
-- Prefer testing the real daemon/session orchestration with controlled fakes over testing isolated helper structs only.
-- Avoid a situation where component tests pass but the top-level daemon behavior is still wrong.
+- [x] Prefer testing the real daemon/session orchestration with controlled fakes over testing isolated helper structs only.
+- [x] Avoid a situation where component tests pass but the top-level daemon behavior is still wrong.
 
 ---
 
 ## P3 — Cleanup And Polish
 
+- [x] Status: complete
+
 ### Task 6.1 — Improve logs around busy/session-state transitions
 
-- Add clear logs for:
-  - entering busy state
-  - rejecting extra local clients
-  - returning to idle
-  - active answer rejecting busy offers
-  - daemon recovering from session failure
+- [x] Add clear logs for:
+  - [x] entering busy state
+  - [x] rejecting extra local clients
+  - [x] returning to idle
+  - [x] active answer rejecting busy offers
+  - [x] daemon recovering from session failure
 
 ### Task 6.2 — Keep docs/examples aligned
 
-- Update sample config if fields are removed or rejected.
-- Update README / docs comments if busy behavior changes.
+- [x] Update sample config if fields are removed or rejected.
+- [x] Update README / docs comments if busy behavior changes.
 
 ### Task 6.3 — Remove obsolete tests and comments
 
-- If listener-only busy behavior is replaced by daemon-level behavior, remove stale tests/comments that no longer reflect the real system.
+- [x] If listener-only busy behavior is replaced by daemon-level behavior, remove stale tests/comments that no longer reflect the real system.
 
 ---
 
@@ -314,10 +320,10 @@ Create tests for at least these scenarios:
 
 This hardening pass is complete when all of the following are true:
 
-- the actual offer daemon enforces the intended busy behavior
-- v1 config surface matches real runtime behavior
-- active answer busy handling respects full allowlist policy
-- session failures do not kill the daemon
-- ordinary recoverable operational failures do not unnecessarily kill the daemon
-- integration tests cover the real daemon/session lifecycle behavior
-- docs/comments/examples reflect the true v1 model
+- [x] the actual offer daemon enforces the intended busy behavior
+- [x] v1 config surface matches real runtime behavior
+- [x] active answer busy handling respects full allowlist policy
+- [x] session failures do not kill the daemon
+- [x] ordinary recoverable operational failures do not unnecessarily kill the daemon
+- [x] integration tests cover the real daemon/session lifecycle behavior
+- [x] docs/comments/examples reflect the true v1 model

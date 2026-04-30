@@ -39,3 +39,6 @@
 
 ## 2026-04-30T08:54:54Z - GPT-5.4 - Review 3 phase 3 landed
 - Round-3 phase 3 removed dead or fixed-only v1 config knobs from the public schema, aligned README/spec/Copilot guidance with the leaner config surface, and added config tests that reject those removed fields explicitly.
+
+## 2026-04-30T08:58:55Z - GPT-5.4 - Review 3 phase 4 landed
+- Round-3 phase 4 made idle runtime accept/poll turbulence recoverable with log-and-retry behavior, converted status-file writes to best-effort logging instead of daemon-fatal errors, added a regression for recoverable status-write failure, and completed the remaining review3 lifecycle/docs checklist.

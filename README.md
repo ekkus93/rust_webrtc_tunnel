@@ -151,6 +151,8 @@ Set `username = ""` and `password_file = ""` for anonymous or certificate-only b
 
 The fixed v1 protocol constants for WebRTC message size, tunnel frame version, and single-stream handling live in code and the spec rather than in the public config file.
 
+While an offer-side session is active, additional local TCP clients are accepted and immediately closed with no banner. During an active answer-side session, only a fully allowed peer may receive an encrypted `busy` response; unauthorized or disallowed peers receive no response.
+
 ### Example offer-side tunnel config
 
 ```toml
