@@ -8,6 +8,7 @@ use webrtc::api::media_engine::MediaEngine;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
@@ -119,6 +120,10 @@ impl DataChannelHandle {
 
     pub fn ordered(&self) -> bool {
         self.inner.ordered()
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.inner.ready_state() == RTCDataChannelState::Open
     }
 
     pub async fn send(&self, payload: &[u8]) -> Result<usize, WebRtcError> {
@@ -481,6 +486,9 @@ mod tests {
             .wait_for_open(Duration::from_secs(10))
             .await
             .expect("answer data channel should open");
+
+        assert!(offer_channel.is_open());
+        assert!(answer_channel.is_open());
 
         offer_peer.close().await.expect("offer peer should close");
         answer_peer.close().await.expect("answer peer should close");

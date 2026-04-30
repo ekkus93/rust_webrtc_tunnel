@@ -450,17 +450,15 @@ async fn run_one_in_memory_session(
             )),
             "answer side must not initiate reconnect signaling"
         );
-        if !expect_success {
-            assert_eq!(
+        if enable_ice_restart {
+            assert!(
                 offer_to_answer
                     .iter()
-                    .filter(|record| {
+                    .any(|record| {
                         record.message_type == MessageType::Offer
-                            && Some(record.session_id) == injected_session_id
-                    })
-                    .count(),
-                2,
-                "offer side should attempt a same-session ICE restart before giving up on the current local client"
+                            && Some(record.session_id) != injected_session_id
+                    }),
+                "offer side should fall back to a replacement session when ICE fails before the data channel opens"
             );
         }
     }
@@ -489,6 +487,6 @@ async fn offer_side_drives_reconnect_after_injected_disconnect() {
 }
 
 #[tokio::test]
-async fn active_session_ice_restart_attempt_drops_local_client_before_recovery() {
-    run_one_in_memory_session(0, true, true, false).await;
+async fn active_session_ice_restart_recovers_pending_local_client() {
+    run_one_in_memory_session(0, true, true, true).await;
 }

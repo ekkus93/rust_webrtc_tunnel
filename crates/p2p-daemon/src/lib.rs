@@ -27,6 +27,7 @@ use p2p_tunnel::{AnswerTargetConnector, OfferClient, OfferListener, TunnelBridge
 use p2p_webrtc::{
     DataChannelEvent, DataChannelHandle, IceCandidateSignal, IceConnectionState, WebRtcPeer,
 };
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep};
@@ -611,6 +612,7 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
     let mut pending_stream = Some(local_stream);
     let result = async {
         loop {
+            maybe_start_offer_bridge(&mut session, &mut pending_stream, &config.tunnel);
             tokio::select! {
                 _ = tick.tick() => {
                     retry_pending_acks(
@@ -663,6 +665,49 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                 ice_state = session.peer.next_ice_state() => {
                     if let Some(ice_state) = ice_state {
                         if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
+                            if let Some(handle) = session.bridge_handle.take() {
+                                handle.abort();
+                            }
+                            if session.bridge_state == BridgeSessionState::Active {
+                                publish_message(
+                                    ctx,
+                                    codec,
+                                    transport,
+                                    StatusSnapshot {
+                                        active_session_id: Some(session.session_id),
+                                        current_state: session.state,
+                                    },
+                                    Some(&mut session.signaling),
+                                    remote,
+                                    OutgoingSignal {
+                                        message: build_error_message(
+                                            &config.node.peer_id,
+                                            &session.remote_peer_id,
+                                            session.session_id,
+                                            FailureCode::IceFailed,
+                                            "ice connection failed",
+                                        ),
+                                        response: false,
+                                    },
+                                ).await?;
+                                // In v1 a live tunnel failure ends the current local client/session.
+                                session.bridge_state = BridgeSessionState::Closed;
+                                return Err(DaemonError::IceFailed(ice_state));
+                            }
+                            session.bridge_state = BridgeSessionState::Reconnecting;
+                            if should_attempt_offer_reconnect(config, pending_stream.is_some(), session.bridge_state)
+                                && attempt_offer_reconnect(
+                                    ctx,
+                                    codec,
+                                    transport,
+                                    &mut session,
+                                    remote,
+                                )
+                                .await?
+                            {
+                                session.bridge_state = BridgeSessionState::Pending;
+                                continue;
+                            }
                             publish_message(
                                 ctx,
                                 codec,
@@ -684,28 +729,6 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                                     response: false,
                                 },
                             ).await?;
-                            if let Some(handle) = session.bridge_handle.take() {
-                                handle.abort();
-                            }
-                            if session.bridge_state == BridgeSessionState::Active {
-                                // In v1 a live tunnel failure ends the current local client/session.
-                                session.bridge_state = BridgeSessionState::Closed;
-                                return Err(DaemonError::IceFailed(ice_state));
-                            }
-                            session.bridge_state = BridgeSessionState::Reconnecting;
-                            if should_attempt_offer_reconnect(config, pending_stream.is_some(), session.bridge_state)
-                                && attempt_offer_reconnect(
-                                    ctx,
-                                    codec,
-                                    transport,
-                                    &mut session,
-                                    remote,
-                                )
-                                .await?
-                            {
-                                session.bridge_state = BridgeSessionState::Pending;
-                                continue;
-                            }
                             session.bridge_state = BridgeSessionState::Closed;
                             return Err(DaemonError::IceFailed(ice_state));
                         }
@@ -727,15 +750,7 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                             },
                         )
                         .await;
-                        let bridge = TunnelBridge::new(
-                            session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?,
-                            &config.tunnel,
-                        );
-                        if let Some(stream) = pending_stream.take() {
-                            session.bridge_state = BridgeSessionState::Active;
-                            session.bridge_handle =
-                                Some(tokio::spawn(async move { bridge.run_offer(stream).await }));
-                        }
+                        maybe_start_offer_bridge(&mut session, &mut pending_stream, &config.tunnel);
                     }
                 }
                 bridge_result = async {
@@ -838,6 +853,160 @@ async fn handle_answer_session_message(
     Ok(())
 }
 
+async fn handle_active_answer_offer<T: DaemonSignalingTransport>(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    ctx: &mut RuntimeContext<'_>,
+    session: &mut ActiveSession,
+    offer: &OfferBody,
+) -> Result<(), DaemonError> {
+    session.state = DaemonState::Negotiating;
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: session.state,
+        },
+    )
+    .await;
+
+    session.peer.apply_remote_offer(&offer.sdp).await?;
+    let answer_sdp = session.peer.create_answer().await?;
+    publish_message(
+        ctx,
+        codec,
+        transport,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: session.state,
+        },
+        Some(&mut session.signaling),
+        &session.remote_authorized,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+            response: false,
+        },
+    )
+    .await?;
+
+    session.state = DaemonState::ConnectingDataChannel;
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: session.state,
+        },
+    )
+    .await;
+
+    Ok(())
+}
+
+async fn maybe_replace_pending_answer_session<T: DaemonSignalingTransport>(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    ctx: &mut RuntimeContext<'_>,
+    session: &mut ActiveSession,
+    payload: &[u8],
+) -> Result<bool, DaemonError> {
+    if session.bridge_state != BridgeSessionState::Pending {
+        return Ok(false);
+    }
+
+    let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
+    let Ok((envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+        return Ok(false);
+    };
+
+    let MessageBody::Offer(offer) = &message.body else {
+        return Ok(false);
+    };
+
+    if message.session_id == session.session_id || sender.peer_id != session.remote_peer_id {
+        return Ok(false);
+    }
+
+    if message.message_type.requires_ack() {
+        publish_message(
+            ctx,
+            codec,
+            transport,
+            StatusSnapshot {
+                active_session_id: Some(session.session_id),
+                current_state: session.state,
+            },
+            None,
+            &sender,
+            OutgoingSignal {
+                message: codec.build_ack(
+                    sender.peer_id.clone(),
+                    message.session_id,
+                    envelope.msg_id,
+                ),
+                response: true,
+            },
+        )
+        .await?;
+    }
+
+    if let Some(handle) = session.bridge_handle.take() {
+        handle.abort();
+        let _ = handle.await;
+    }
+    session.data_channel = None;
+    let _ = session.peer.close().await;
+
+    let peer = WebRtcPeer::new(&config.webrtc).await?;
+    peer.apply_remote_offer(&offer.sdp).await?;
+    let mut replacement = ActiveSession::new(
+        message.session_id,
+        sender.clone(),
+        peer,
+        config.security.replay_cache_size,
+    );
+    let answer_sdp = replacement.peer.create_answer().await?;
+    publish_message(
+        ctx,
+        codec,
+        transport,
+        StatusSnapshot {
+            active_session_id: Some(replacement.session_id),
+            current_state: DaemonState::Negotiating,
+        },
+        Some(&mut replacement.signaling),
+        &replacement.remote_authorized,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                replacement.session_id,
+                config.node.peer_id.clone(),
+                replacement.remote_peer_id.clone(),
+            )
+            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+            response: false,
+        },
+    )
+    .await?;
+    replacement.state = DaemonState::ConnectingDataChannel;
+    write_daemon_status(
+        ctx,
+        StatusSnapshot {
+            active_session_id: Some(replacement.session_id),
+            current_state: replacement.state,
+        },
+    )
+    .await;
+    *session = replacement;
+
+    Ok(true)
+}
+
 async fn run_answer_session<T: DaemonSignalingTransport>(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
@@ -902,6 +1071,18 @@ async fn run_answer_session<T: DaemonSignalingTransport>(
                                 {
                                     continue;
                                 }
+                                if maybe_replace_pending_answer_session(
+                                    config,
+                                    codec,
+                                    transport,
+                                    ctx,
+                                    &mut session,
+                                    &payload,
+                                )
+                                .await?
+                                {
+                                    continue;
+                                }
                                 if maybe_handle_active_busy_offer(
                                     ctx,
                                     codec,
@@ -953,7 +1134,19 @@ async fn run_answer_session<T: DaemonSignalingTransport>(
                                 },
                             ).await?;
                         }
-                        handle_answer_session_message(&message, &mut session).await?;
+                        if let MessageBody::Offer(offer) = &message.body {
+                            handle_active_answer_offer(
+                                config,
+                                codec,
+                                transport,
+                                ctx,
+                                &mut session,
+                                offer,
+                            )
+                            .await?;
+                        } else {
+                            handle_answer_session_message(&message, &mut session).await?;
+                        }
                     }
                 }
                 candidate = session.peer.next_local_candidate() => {
@@ -1089,6 +1282,32 @@ async fn cleanup_active_session(session: &mut ActiveSession) {
             "failed to close session peer during cleanup"
         );
     }
+}
+
+fn maybe_start_offer_bridge(
+    session: &mut ActiveSession,
+    pending_stream: &mut Option<TcpStream>,
+    tunnel: &p2p_core::TunnelConfig,
+) {
+    if session.bridge_handle.is_some() {
+        return;
+    }
+
+    let Some(channel) = session.data_channel.clone() else {
+        return;
+    };
+
+    if !channel.is_open() {
+        return;
+    }
+
+    let Some(stream) = pending_stream.take() else {
+        return;
+    };
+
+    let bridge = TunnelBridge::new(channel, tunnel);
+    session.bridge_state = BridgeSessionState::Active;
+    session.bridge_handle = Some(tokio::spawn(async move { bridge.run_offer(stream).await }));
 }
 
 fn handle_answer_incoming_data_channel(
@@ -1648,6 +1867,13 @@ fn should_continue_reconnect_attempt(max_attempts: u32, attempt: u32) -> bool {
     max_attempts == 0 || attempt < max_attempts
 }
 
+fn can_attempt_same_session_ice_restart(session: &ActiveSession) -> bool {
+    session
+        .data_channel
+        .as_ref()
+        .is_some_and(|channel| channel.is_open())
+}
+
 fn apply_override_pairs(
     config: &mut AppConfig,
     overrides: impl IntoIterator<Item = (String, String)>,
@@ -1706,7 +1932,7 @@ async fn attempt_offer_reconnect<T: DaemonSignalingTransport>(
         .await;
         tokio::time::sleep(compute_backoff_delay(ctx.config, attempt)).await;
 
-        if ctx.config.webrtc.enable_ice_restart {
+        if ctx.config.webrtc.enable_ice_restart && can_attempt_same_session_ice_restart(session) {
             session.state = DaemonState::IceRestarting;
             write_daemon_status(
                 ctx,
@@ -1843,6 +2069,13 @@ async fn wait_for_offer_reconnect_response<T: DaemonSignalingTransport>(
     let deadline = tokio::time::Instant::now() + timeout;
     let mut tick = interval(Duration::from_millis(250));
     loop {
+        if session
+            .data_channel
+            .as_ref()
+            .is_some_and(|channel| channel.is_open())
+        {
+            return Ok(true);
+        }
         if tokio::time::Instant::now() >= deadline {
             return Ok(false);
         }
@@ -1880,6 +2113,13 @@ async fn wait_for_offer_reconnect_response<T: DaemonSignalingTransport>(
                         &payload,
                     )
                     .await?;
+                    if session
+                        .data_channel
+                        .as_ref()
+                        .is_some_and(|channel| channel.is_open())
+                    {
+                        return Ok(true);
+                    }
                 }
             }
             candidate = session.peer.next_local_candidate() => {
