@@ -454,9 +454,9 @@ ssh -p 2223 user@127.0.0.1
 The offer side owns recovery.
 
 - detect ICE disconnect/failure
-- if the data channel was already open, end the active session and let the offer side drive recovery
-- if ICE fails before the data channel ever opens, skip same-session ICE restart and fall back directly to full renegotiation with a new `session_id`
-- if same-session ICE restart fails after transport was already available, fall back to full renegotiation with a new `session_id`
+- if a tunnel is already active, end the current session and return the daemon to waiting/recovery
+- while negotiation is still pending for a local client, try same-session ICE restart only when the data channel is already open
+- if same-session ICE restart is unavailable or fails during negotiation, fall back to renegotiation with a new offer
 - use exponential backoff with jitter
 - do **not** preserve live TCP streams across WebRTC reconnect in v2
 
@@ -491,7 +491,7 @@ Every encrypted signaling message carries a `msg_id`, timestamps are freshness-c
 - logs can write to stdout, a local file, or both
 - secrets are always redacted
 - SDP and ICE candidates are redacted by default
-- the daemon writes a local `status.json` with peer ID, role, latest-known MQTT transport usability, session ID, and daemon state
+- the daemon writes a local `status.json` with peer ID, role, latest-known MQTT transport usability, session ID, daemon state, and configured forward IDs
 
 The daemon creates `~/.local/state/p2ptunnel/status.json` when status-file writing is enabled, so you do not normally create it by hand. `p2pctl status --config ~/.config/p2ptunnel/config.toml` expects that file to already exist, which usually means you need to start `p2p-offer run` or `p2p-answer run` first and let it write an initial status snapshot.
 

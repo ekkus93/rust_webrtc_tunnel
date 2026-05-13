@@ -366,3 +366,16 @@
 ## 2026-05-13T20:28:24Z - GPT-5.5 - Multiplexed forwarding final edge cases
 - Hardened multiplex stream dispatch so per-stream write queue overflow emits `queue_overflow` and closes only that stream.
 - Added final mux tests for OPEN ACK transition, unknown stream DATA, duplicate CLOSE, queue overflow isolation, simultaneous streams, and two forwards on one data channel.
+## 2026-05-13T20:50:31Z - GPT-5.5 - Validation passed
+- Ran `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-targets`; all passed.
+## 2026-05-13T20:51:50Z - GPT-5.5 - README audit
+- README mostly matches the v2 multiplexed forwarding implementation, but still has stale reconnect/status wording that should be corrected.
+
+## 2026-05-13T20:53:22Z - GPT-5.5 - README updated
+- Updated README reconnect and status wording so it matches the current v2 multiplexed forwarding implementation.
+
+## 2026-05-13T20:55:04Z - GPT-5.5 - RUST_WEBRTC_SPECS audit
+- `docs/RUST_WEBRTC_SPECS.md` is stale after the v2 multiplexed forwarding work; it still describes v1 single-stream config, frame, and scope details.
+
+## 2026-05-13T20:59:32Z - GPT-5.5 - RUST_WEBRTC_SPECS updated
+- Rewrote `docs/RUST_WEBRTC_SPECS.md` for the implemented v2 multiplexed forwarding model: `p2ptunnel-config-v2`, frame version 2, `[[forwards]]`, nested `[forwards.offer]`/`[forwards.answer]`, explicit allowlists, multiple logical streams, and current reconnect/status semantics.
