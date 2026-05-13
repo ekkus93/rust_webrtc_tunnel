@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use p2p_core::{
-    AppConfig, BrokerConfig, BrokerTlsConfig, HealthConfig, LoggingConfig, MessageType,
-    NodeConfig, NodeRole, PathConfig, ReconnectConfig, SecurityConfig, TunnelAnswerConfig,
-    TunnelConfig, TunnelOfferConfig, WebRtcConfig,
+    AppConfig, BrokerConfig, BrokerTlsConfig, HealthConfig, LoggingConfig, MessageType, NodeConfig,
+    NodeRole, PathConfig, ReconnectConfig, SecurityConfig, TunnelAnswerConfig, TunnelConfig,
+    TunnelOfferConfig, WebRtcConfig,
 };
 use p2p_crypto::{AuthorizedKeys, GeneratedIdentity, IdentityFile, generate_identity};
 use p2p_daemon::{
@@ -70,19 +70,14 @@ impl DaemonSignalingTransport for InMemoryTransport {
         self.trace.record(peer_id, &payload);
         if let Some(delay_ms) = self.delay_first_ms.get_mut(peer_id.as_str()) {
             if *delay_ms > 0 {
-                let delayed_payload = payload.clone();
-                let delayed_route = route.clone();
-                let delayed_peer_id = peer_id.to_string();
                 let sleep_ms = *delay_ms;
                 *delay_ms = 0;
-                tokio::spawn(async move {
-                    sleep(Duration::from_millis(sleep_ms)).await;
-                    let _ = delayed_route.send(delayed_payload).map_err(|_| {
-                        p2p_signaling::SignalingError::Protocol(format!(
-                            "in-memory delayed route for {} is closed",
-                            delayed_peer_id
-                        ))
-                    });
+                sleep(Duration::from_millis(sleep_ms)).await;
+                let _ = route.send(payload.clone()).map_err(|_| {
+                    p2p_signaling::SignalingError::Protocol(format!(
+                        "in-memory delayed route for {} is closed",
+                        peer_id
+                    ))
                 });
             } else {
                 route.send(payload.clone()).map_err(|_| {
@@ -139,7 +134,10 @@ fn transport_pair(
     let answer_transport = InMemoryTransport {
         inbox: answer_rx,
         routes: HashMap::from([("offer-home".to_owned(), offer_tx)]),
-        duplicate_first: HashMap::from([("offer-home".to_owned(), duplicate_answer_to_offer_payloads)]),
+        duplicate_first: HashMap::from([(
+            "offer-home".to_owned(),
+            duplicate_answer_to_offer_payloads,
+        )]),
         delay_first_ms: HashMap::from([("offer-home".to_owned(), delay_first_answer_to_offer_ms)]),
         trace: trace.clone(),
     };
@@ -155,7 +153,12 @@ fn unique_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("p2ptunnel-{name}-{suffix}"))
 }
 
-fn sample_config(role: NodeRole, status_file: PathBuf, listen_port: u16, target_port: u16) -> AppConfig {
+fn sample_config(
+    role: NodeRole,
+    status_file: PathBuf,
+    listen_port: u16,
+    target_port: u16,
+) -> AppConfig {
     let peer_id = match role {
         NodeRole::Offer => "offer-home".parse().expect("offer peer id"),
         NodeRole::Answer => "answer-office".parse().expect("answer peer id"),
@@ -293,7 +296,10 @@ async fn wait_for_status(path: &Path, expected_state: &str) -> serde_json::Value
                 }
             }
         }
-        assert!(tokio::time::Instant::now() < deadline, "status {expected_state} not observed in time");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "status {expected_state} not observed in time"
+        );
         sleep(Duration::from_millis(50)).await;
     }
 }
@@ -315,7 +321,10 @@ fn decode_signal_records(
             let (_envelope, message, _sender) = codec
                 .decode(payload, &mut replay_cache, None)
                 .expect("recorded signaling payload should decode");
-            DecodedSignalRecord { session_id: message.session_id, message_type: message.message_type }
+            DecodedSignalRecord {
+                session_id: message.session_id,
+                message_type: message.message_type,
+            }
         })
         .collect()
 }
@@ -345,16 +354,14 @@ async fn run_one_in_memory_session(
     let answer_status_path = unique_path("answer-status.json");
     let offer_port = unused_local_port();
 
-    let target_listener = TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .expect("target listener should bind");
-    let target_port = target_listener
-        .local_addr()
-        .expect("target local addr should exist")
-        .port();
+    let target_listener =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("target listener should bind");
+    let target_port = target_listener.local_addr().expect("target local addr should exist").port();
 
-    let mut offer_config = sample_config(NodeRole::Offer, offer_status_path.clone(), offer_port, target_port);
-    let mut answer_config = sample_config(NodeRole::Answer, answer_status_path.clone(), offer_port, target_port);
+    let mut offer_config =
+        sample_config(NodeRole::Offer, offer_status_path.clone(), offer_port, target_port);
+    let mut answer_config =
+        sample_config(NodeRole::Answer, answer_status_path.clone(), offer_port, target_port);
     offer_config.webrtc.enable_ice_restart = enable_ice_restart;
     answer_config.webrtc.enable_ice_restart = enable_ice_restart;
     let (offer_transport, answer_transport, trace) = transport_pair(
@@ -389,10 +396,11 @@ async fn run_one_in_memory_session(
 
     let mut client = connect_with_retry(offer_port).await;
     if inject_offer_disconnect {
-        let OfferSessionTestHandle { session_id, ice_state_injector } = timeout(Duration::from_secs(10), hook_rx.recv())
-            .await
-            .expect("offer session hook should arrive in time")
-            .expect("offer session hook should contain a handle");
+        let OfferSessionTestHandle { session_id, ice_state_injector } =
+            timeout(Duration::from_secs(10), hook_rx.recv())
+                .await
+                .expect("offer session hook should arrive in time")
+                .expect("offer session hook should contain a handle");
         injected_session_id = Some(session_id);
         ice_state_injector
             .inject(IceConnectionState::Disconnected)
@@ -433,8 +441,10 @@ async fn run_one_in_memory_session(
     assert_eq!(answer_status["mqtt_connected"], true);
 
     if inject_offer_disconnect {
-        let offer_to_answer = decode_signal_records(&trace.payloads_for("answer-office"), &answer_codec);
-        let answer_to_offer = decode_signal_records(&trace.payloads_for("offer-home"), &offer_codec);
+        let offer_to_answer =
+            decode_signal_records(&trace.payloads_for("answer-office"), &answer_codec);
+        let answer_to_offer =
+            decode_signal_records(&trace.payloads_for("offer-home"), &offer_codec);
         assert!(
             offer_to_answer
                 .iter()
@@ -446,18 +456,18 @@ async fn run_one_in_memory_session(
         assert!(
             !answer_to_offer.iter().any(|record| matches!(
                 record.message_type,
-                MessageType::Offer | MessageType::IceRestartRequest | MessageType::RenegotiateRequest
+                MessageType::Offer
+                    | MessageType::IceRestartRequest
+                    | MessageType::RenegotiateRequest
             )),
             "answer side must not initiate reconnect signaling"
         );
         if enable_ice_restart {
             assert!(
-                offer_to_answer
-                    .iter()
-                    .any(|record| {
-                        record.message_type == MessageType::Offer
-                            && Some(record.session_id) != injected_session_id
-                    }),
+                offer_to_answer.iter().any(|record| {
+                    record.message_type == MessageType::Offer
+                        && Some(record.session_id) != injected_session_id
+                }),
                 "offer side should fall back to a replacement session when ICE fails before the data channel opens"
             );
         }

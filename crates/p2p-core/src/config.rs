@@ -31,7 +31,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load_from_file(path: &Path) -> Result<Self, ConfigError> {
-        let content = fs::read_to_string(path)?;
+        let content =
+            fs::read_to_string(path).map_err(|error| ConfigError::io_path(path, error))?;
         let mut config: Self = toml::from_str(&content)?;
         config.expand_paths()?;
         config.validate()?;
@@ -261,18 +262,20 @@ impl AppConfig {
     }
 
     pub fn ensure_runtime_dirs(&self) -> Result<(), ConfigError> {
-        fs::create_dir_all(&self.paths.state_dir)?;
-        fs::create_dir_all(&self.paths.log_dir)?;
+        fs::create_dir_all(&self.paths.state_dir)
+            .map_err(|error| ConfigError::io_path(&self.paths.state_dir, error))?;
+        fs::create_dir_all(&self.paths.log_dir)
+            .map_err(|error| ConfigError::io_path(&self.paths.log_dir, error))?;
 
         if self.logging.file_logging {
             if let Some(parent) = self.logging.log_file.parent() {
-                fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent).map_err(|error| ConfigError::io_path(parent, error))?;
             }
         }
 
         if self.health.write_status_file {
             if let Some(parent) = self.health.status_file.parent() {
-                fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent).map_err(|error| ConfigError::io_path(parent, error))?;
             }
         }
 
@@ -472,7 +475,8 @@ fn validate_non_world_writable(path: &Path, field_name: &'static str) -> Result<
         })?;
     }
 
-    let metadata = fs::metadata(candidate)?;
+    let metadata =
+        fs::metadata(candidate).map_err(|error| ConfigError::io_path(candidate, error))?;
     if metadata.permissions().mode() & 0o002 != 0 {
         return Err(ConfigError::InvalidConfig(format!(
             "{field_name} path '{}' must not be world-writable",
@@ -837,5 +841,15 @@ status_file = "{status_file}"
             fs::write(&config_path, config).expect("write config");
             assert!(AppConfig::load_from_file(&config_path).is_err(), "{extra}");
         }
+    }
+
+    #[test]
+    fn missing_config_file_error_names_path() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("missing-config.toml");
+
+        let error = AppConfig::load_from_file(&path).expect_err("config load should fail");
+
+        assert!(error.to_string().contains(path.to_string_lossy().as_ref()));
     }
 }

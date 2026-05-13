@@ -26,7 +26,14 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let Command::Run { config, broker_url, listen_port } = Cli::parse().command;
     let mut config = load_config(config.as_deref())?;
     apply_env_overrides(&mut config);

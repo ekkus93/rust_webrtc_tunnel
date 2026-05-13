@@ -286,3 +286,15 @@
 ## 2026-05-12T23:49:33Z - GPT-5.4 - Runtime dirs startup behavior fixed
 - `p2p-offer` and `p2p-answer` now allow missing runtime artifact paths like `paths.state_dir`, `paths.log_dir`, and the parent dirs for `logging.log_file` and `health.status_file` as long as an existing ancestor passes the world-writable security check.
 - Startup now creates those runtime directories before logging/status initialization, so missing state/log trees no longer fail with a generic `Io(NotFound)` while required input files like config, identity, authorized_keys, and broker CA files still remain startup-fatal if absent.
+
+## 2026-05-13T02:50:36Z - GPT-5.4 - Context recovery after runtime-dir fix
+- The last completed and pushed change is commit `37ba200` (`Create runtime dirs before daemon startup`), which landed the missing runtime directory creation fix on `master`.
+- The current worktree has additional uncommitted edits in `crates/p2p-daemon/src/lib.rs`, `crates/p2p-daemon/tests/two_node_daemon.rs`, `crates/p2p-tunnel/src/bridge.rs`, and `crates/p2p-webrtc/src/lib.rs`; no newer saved session checkpoint was found beyond the pushed runtime-dir fix.
+
+## 2026-05-13T04:01:24Z - GPT-5.4 - Startup file-path errors clarified
+- Startup file I/O errors now carry the exact path for config loading, identity and authorized_keys reads, runtime directory creation, and MQTT password/CA/client-cert/client-key reads.
+- `p2p-offer` and `p2p-answer` now print top-level errors with `Display`, so a missing config shows as `Error: i/o error for '/path/to/config.toml': No such file or directory (os error 2)` instead of the raw enum debug output.
+
+## 2026-05-13T04:16:46Z - GPT-5.4 - Reconnect integration harness race fixed
+- The two failing `two_node_daemon` reconnect tests were tripping a harness race: the injected-disconnect path delayed only the first answer-to-offer publish, but answer-side idle offer handling sends `Ack` before `Answer`, so the `Answer` could still arrive immediately and open the data channel before the test injected `Disconnected`.
+- The in-memory test transport now applies that first-response delay inline instead of spawning a background delayed send, which serializes the answer-side response path and makes the pre-open reconnect injection deterministic again.

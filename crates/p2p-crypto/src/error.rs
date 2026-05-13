@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -14,6 +16,12 @@ pub enum CryptoError {
     Base64(#[from] base64::DecodeError),
     #[error("toml decode error: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("io error for '{path}': {source}")]
+    IoPath {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("signature error")]
@@ -24,4 +32,10 @@ pub enum CryptoError {
     Decryption,
     #[error("kdf error: {0}")]
     Kdf(String),
+}
+
+impl CryptoError {
+    pub fn io_path(path: &Path, source: std::io::Error) -> Self {
+        Self::IoPath { path: path.to_path_buf(), source }
+    }
 }

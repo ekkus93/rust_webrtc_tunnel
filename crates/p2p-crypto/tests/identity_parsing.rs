@@ -57,3 +57,13 @@ fn authorized_keys_parse_valid_and_invalid_files() {
     let duplicated = format!("{valid}\n{valid}");
     assert!(AuthorizedKeys::parse(&duplicated).is_err());
 }
+
+#[test]
+fn identity_file_missing_error_names_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("missing-identity");
+
+    let error = IdentityFile::from_file(&path).err().expect("missing identity should fail");
+
+    assert!(error.to_string().contains(path.to_string_lossy().as_ref()));
+}
