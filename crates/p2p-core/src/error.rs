@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -6,10 +8,22 @@ pub enum ConfigError {
     MissingField(&'static str),
     #[error("invalid config: {0}")]
     InvalidConfig(String),
+    #[error("i/o error for '{path}': {source}")]
+    IoPath {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("toml error: {0}")]
     Toml(#[from] toml::de::Error),
+}
+
+impl ConfigError {
+    pub fn io_path(path: &Path, source: std::io::Error) -> Self {
+        Self::IoPath { path: path.to_path_buf(), source }
+    }
 }
 
 #[derive(Debug, Error)]

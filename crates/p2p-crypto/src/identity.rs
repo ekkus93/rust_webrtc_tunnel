@@ -47,7 +47,8 @@ struct IdentityKeySection {
 impl IdentityFile {
     pub fn from_file(path: &Path) -> Result<Self, CryptoError> {
         validate_private_file_permissions(path)?;
-        let content = fs::read_to_string(path)?;
+        let content =
+            fs::read_to_string(path).map_err(|error| CryptoError::io_path(path, error))?;
         Self::from_toml(&content)
     }
 
@@ -145,7 +146,7 @@ pub fn generate_identity(peer_id: impl Into<String>) -> Result<GeneratedIdentity
 
 #[cfg(unix)]
 pub fn validate_private_file_permissions(path: &Path) -> Result<(), CryptoError> {
-    let metadata = fs::metadata(path)?;
+    let metadata = fs::metadata(path).map_err(|error| CryptoError::io_path(path, error))?;
     let mode = metadata.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
         return Err(CryptoError::Permission(format!(

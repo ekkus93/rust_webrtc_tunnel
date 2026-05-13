@@ -21,7 +21,8 @@ pub struct AuthorizedKeys {
 
 impl AuthorizedKeys {
     pub fn from_file(path: &Path) -> Result<Self, CryptoError> {
-        let content = fs::read_to_string(path)?;
+        let content =
+            fs::read_to_string(path).map_err(|error| CryptoError::io_path(path, error))?;
         Self::parse(&content)
     }
 

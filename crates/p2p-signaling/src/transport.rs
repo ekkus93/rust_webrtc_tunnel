@@ -294,7 +294,10 @@ fn build_mqtt_options(config: &AppConfig) -> Result<(MqttOptions, QoS, String), 
             options.set_credentials(config.broker.username.clone(), String::new());
         }
         (false, false) => {
-            let password = fs::read_to_string(&config.broker.password_file)?.trim().to_owned();
+            let password = fs::read_to_string(&config.broker.password_file)
+                .map_err(|error| SignalingError::io_path(&config.broker.password_file, error))?
+                .trim()
+                .to_owned();
             options.set_credentials(config.broker.username.clone(), password);
         }
         (true, false) => {
@@ -320,14 +323,19 @@ fn build_tls_transport(config: &AppConfig) -> Result<Transport, SignalingError> 
         ));
     }
 
-    let ca = fs::read(&config.broker.tls.ca_file)?;
+    let ca = fs::read(&config.broker.tls.ca_file)
+        .map_err(|error| SignalingError::io_path(&config.broker.tls.ca_file, error))?;
     let client_cert_set = !config.broker.tls.client_cert_file.as_os_str().is_empty();
     let client_key_set = !config.broker.tls.client_key_file.as_os_str().is_empty();
     let client_auth = match (client_cert_set, client_key_set) {
         (false, false) => None,
         (true, true) => Some((
-            fs::read(&config.broker.tls.client_cert_file)?,
-            fs::read(&config.broker.tls.client_key_file)?,
+            fs::read(&config.broker.tls.client_cert_file).map_err(|error| {
+                SignalingError::io_path(&config.broker.tls.client_cert_file, error)
+            })?,
+            fs::read(&config.broker.tls.client_key_file).map_err(|error| {
+                SignalingError::io_path(&config.broker.tls.client_key_file, error)
+            })?,
         )),
         _ => {
             return Err(SignalingError::Protocol(
@@ -948,5 +956,22 @@ mod tests {
             Err(SignalingError::Protocol(message))
                 if message.contains("session_expiry_secs")
         ));
+    }
+
+    #[test]
+    fn build_mqtt_options_missing_password_file_names_path() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            temp_dir.path().join("ca.pem"),
+            "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n",
+        )
+        .expect("ca");
+        let mut config = sample_config(temp_dir.path());
+        let missing_password = temp_dir.path().join("missing-password");
+        config.broker.password_file = missing_password.clone();
+
+        let error = build_mqtt_options(&config).expect_err("missing password file should fail");
+
+        assert!(error.to_string().contains(missing_password.to_string_lossy().as_ref()));
     }
 }

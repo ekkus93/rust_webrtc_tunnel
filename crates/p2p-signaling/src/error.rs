@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,6 +10,12 @@ pub enum SignalingError {
     Crypto(#[from] p2p_crypto::CryptoError),
     #[error("core protocol error: {0}")]
     CoreProtocol(#[from] p2p_core::ProtocolError),
+    #[error("io error for '{path}': {source}")]
+    IoPath {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("mqtt client error: {0}")]
@@ -18,6 +26,12 @@ pub enum SignalingError {
     Options(Box<rumqttc::OptionError>),
     #[error("cbor error: {0}")]
     Cbor(#[from] serde_cbor::Error),
+}
+
+impl SignalingError {
+    pub fn io_path(path: &Path, source: std::io::Error) -> Self {
+        Self::IoPath { path: path.to_path_buf(), source }
+    }
 }
 
 impl From<rumqttc::ClientError> for SignalingError {
