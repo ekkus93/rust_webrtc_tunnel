@@ -298,3 +298,11 @@
 ## 2026-05-13T04:16:46Z - GPT-5.4 - Reconnect integration harness race fixed
 - The two failing `two_node_daemon` reconnect tests were tripping a harness race: the injected-disconnect path delayed only the first answer-to-offer publish, but answer-side idle offer handling sends `Ack` before `Answer`, so the `Answer` could still arrive immediately and open the data channel before the test injected `Disconnected`.
 - The in-memory test transport now applies that first-response delay inline instead of spawning a background delayed send, which serializes the answer-side response path and makes the pre-open reconnect injection deterministic again.
+
+## 2026-05-13T09:09:45Z - GPT-5.4 - Offer idle MQTT polling fixed
+- The offer daemon now keeps polling the signaling transport while waiting for the next local client instead of blocking only on the TCP accept loop.
+- That fixes a real runtime gap where an idle offer process could sit on a dead MQTT connection and only discover the broker failure on the next publish, and `p2p-daemon` now has a regression test that forces an idle poll failure/recovery and checks `mqtt_connected` flips false then true while still in `waiting_for_local_client`.
+
+## 2026-05-13T09:15:00Z - GPT-5.4 - Workspace validation rerun passed after test helper hardening
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo test --workspace --all-targets` both pass again after tightening the new `p2p-daemon` test helper to retry when the status file exists but is briefly still mid-write.
+- The regression was only in test code: `wait_for_status` had assumed any visible status file was immediately parseable JSON, which could fail with EOF during concurrent status writes.

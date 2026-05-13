@@ -279,6 +279,7 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
     // clients are accepted and immediately closed instead of being left waiting
     // in the kernel backlog until the current session ends.
     let mut accepted_clients = spawn_offer_accept_loop(listener);
+    let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
     let remote =
         authorized_keys.get_by_peer_id(&config.tunnel.offer.remote_peer_id).cloned().ok_or_else(
             || DaemonError::MissingAuthorizedPeer(config.tunnel.offer.remote_peer_id.to_string()),
@@ -286,26 +287,66 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
 
     loop {
         write_steady_state_status(&ctx).await;
+        tokio::select! {
+            client = accepted_clients.recv() => {
+                let client = client
+                    .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
+                tracing::info!("accepted local client and entering busy offer session state");
+                let result =
+                    run_offer_session(
+                        &config,
+                        &codec,
+                        transport,
+                        &mut ctx,
+                        client,
+                        &remote,
+                        #[cfg(any(test, debug_assertions))]
+                        session_hook.clone(),
+                    )
+                    .await;
+                recover_daemon_after_session(&ctx, result).await;
+                tracing::info!("offer daemon returned to waiting state");
+            }
+            payload = poll_idle_signal_payload(&mut ctx, transport) => {
+                let Some(payload) = payload else {
+                    continue;
+                };
 
-        let client = accepted_clients
-            .recv()
-            .await
-            .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
-        tracing::info!("accepted local client and entering busy offer session state");
-        let result =
-            run_offer_session(
-                &config,
-                &codec,
-                transport,
-                &mut ctx,
-                client,
-                &remote,
-                #[cfg(any(test, debug_assertions))]
-                session_hook.clone(),
-            )
-            .await;
-        recover_daemon_after_session(&ctx, result).await;
-        tracing::info!("offer daemon returned to waiting state");
+                tracing::debug!(
+                    payload_len = payload.len(),
+                    role = ?config.node.role,
+                    "received signaling payload while waiting for local client"
+                );
+
+                let decode_result =
+                    decode_idle_signaling_message(&codec, &payload, &mut replay_cache);
+                let (envelope, message, sender) = match decode_result {
+                    Ok(decoded) => decoded,
+                    Err(error) => {
+                        tracing::warn!(reason = %error, "rejecting signaling message");
+                        continue;
+                    }
+                };
+
+                tracing::debug!(
+                    session_id = %message.session_id,
+                    sender_peer_id = %sender.peer_id,
+                    sender_kid = %envelope.sender_kid,
+                    message_type = ?message.message_type,
+                    role = ?config.node.role,
+                    "decoded idle signaling message"
+                );
+
+                match &message.body {
+                    MessageBody::Hello(_) => {
+                        tracing::info!("received optional hello from {}", sender.peer_id);
+                    }
+                    _ => {
+                        tracing::warn!("ignoring unexpected idle message {:?}", message.message_type);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2180,6 +2221,7 @@ fn current_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::future::pending;
     use std::path::Path;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -2198,8 +2240,8 @@ mod tests {
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::Mutex;
-    use tokio::time::timeout;
+    use tokio::sync::{Mutex, mpsc};
+    use tokio::time::{sleep, timeout};
 
     use super::{
         ActiveBusyOfferAction, ActiveBusyOfferCache, ActiveBusyOfferKey, BridgeSessionState,
@@ -2214,8 +2256,8 @@ mod tests {
         handle_offer_session_message, maybe_replace_pending_answer_session,
         process_offer_session_payload, recover_daemon_after_session,
         replayed_active_busy_offer_key, should_ack_idle_offer, should_attempt_offer_reconnect,
-        should_continue_reconnect_attempt, spawn_offer_accept_loop, steady_state_for_role,
-        write_steady_state_status,
+        run_offer_daemon_with_transport_and_test_hook, should_continue_reconnect_attempt,
+        spawn_offer_accept_loop, steady_state_for_role, write_steady_state_status,
     };
 
     type PublishedSignals = std::sync::Arc<Mutex<Vec<(PeerId, Vec<u8>)>>>;
@@ -2243,6 +2285,33 @@ mod tests {
 
         async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError> {
             Ok(None)
+        }
+    }
+
+    struct ScriptedPollingTransport {
+        outcomes: mpsc::UnboundedReceiver<Result<Option<Vec<u8>>, SignalingError>>,
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl DaemonSignalingTransport for ScriptedPollingTransport {
+        async fn subscribe_own_topic(&mut self) -> Result<(), SignalingError> {
+            Ok(())
+        }
+
+        async fn publish_signal(
+            &mut self,
+            _peer_id: &PeerId,
+            _topic_prefix: &str,
+            _payload: Vec<u8>,
+        ) -> Result<(), SignalingError> {
+            Ok(())
+        }
+
+        async fn poll_signal_payload(&mut self) -> Result<Option<Vec<u8>>, SignalingError> {
+            match self.outcomes.recv().await {
+                Some(outcome) => outcome,
+                None => pending().await,
+            }
         }
     }
 
@@ -2353,6 +2422,28 @@ mod tests {
     async fn read_status_file(path: &Path) -> Value {
         let content = tokio::fs::read_to_string(path).await.expect("status file should exist");
         serde_json::from_str(&content).expect("valid status json")
+    }
+
+    async fn wait_for_status<P>(path: &Path, predicate: P) -> Value
+    where
+        P: Fn(&Value) -> bool,
+    {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if path.exists() {
+                    if let Ok(content) = tokio::fs::read_to_string(path).await {
+                        if let Ok(status) = serde_json::from_str::<Value>(&content) {
+                            if predicate(&status) {
+                                return status;
+                            }
+                        }
+                    }
+                }
+                sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("status should reach expected state")
     }
 
     fn connected_runtime() -> DaemonRuntimeState {
@@ -3391,6 +3482,64 @@ mod tests {
             .expect("accept loop should stay alive")
             .expect("third session should be accepted");
         drop(third_session);
+    }
+
+    #[tokio::test]
+    async fn offer_waiting_state_polls_idle_transport_and_recovers_status() {
+        let mut config = sample_config();
+        config.tunnel.offer.listen_port = 0;
+        let status_path = std::env::temp_dir()
+            .join(format!("p2ptunnel-daemon-status-offer-idle-{}.json", SessionId::random()));
+        config.health.write_status_file = true;
+        config.health.status_file = status_path.clone();
+
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let authorized_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+
+        let (outcomes_tx, outcomes_rx) = mpsc::unbounded_channel();
+        let transport = ScriptedPollingTransport { outcomes: outcomes_rx };
+
+        let daemon = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+            config,
+            offer.identity,
+            authorized_keys,
+            transport,
+            None,
+        ));
+
+        let initial = wait_for_status(&status_path, |status| {
+            status["role"] == "offer"
+                && status["current_state"] == "waiting_for_local_client"
+                && status["mqtt_connected"] == true
+        })
+        .await;
+        assert_eq!(initial["mqtt_connected"], true);
+
+        outcomes_tx
+            .send(Err(SignalingError::Protocol("idle poll failed".to_owned())))
+            .expect("idle poll failure should be delivered");
+        let disconnected = wait_for_status(&status_path, |status| {
+            status["current_state"] == "waiting_for_local_client"
+                && status["mqtt_connected"] == false
+        })
+        .await;
+        assert_eq!(disconnected["mqtt_connected"], false);
+
+        outcomes_tx
+            .send(Ok(None))
+            .expect("idle transport recovery should be delivered");
+        let recovered = wait_for_status(&status_path, |status| {
+            status["current_state"] == "waiting_for_local_client"
+                && status["mqtt_connected"] == true
+        })
+        .await;
+        assert_eq!(recovered["mqtt_connected"], true);
+
+        daemon.abort();
+        let _ = daemon.await;
+        let _ = tokio::fs::remove_file(&status_path).await;
     }
 
     #[test]
