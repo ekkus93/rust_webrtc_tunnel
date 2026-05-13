@@ -170,7 +170,7 @@ Also validate:
 
 ### 1.7 Add config tests
 
-**Status:** In progress; baseline v2 config validation tests pass, but the full requested matrix will be expanded in Task 13.
+**Status:** Complete.
 
 Add tests for:
 
@@ -447,7 +447,7 @@ Add tests for:
 
 ## Task 5 — Implement central data-channel writer path
 
-**Status:** In progress.
+**Status:** Complete except explicit FIFO/overflow unit coverage remains pending under 5.4.
 
 ### 5.1 Avoid unsynchronized concurrent sends
 
@@ -476,7 +476,7 @@ The writer task:
 
 ### 5.3 Backpressure
 
-**Status:** In progress; bounded queues are in place, but stream-level overflow behavior needs explicit tests/hardening.
+**Status:** Complete for bounded queue wiring; explicit queue-overflow assertions remain under 5.4.
 
 Use bounded queues.
 
@@ -488,7 +488,7 @@ Rules:
 
 ### 5.4 Tests
 
-**Status:** Pending.
+**Status:** In progress; runtime writer behavior is covered through mux tests, but explicit FIFO/overflow unit tests remain pending.
 
 Add tests for:
 
@@ -502,7 +502,7 @@ Use mockable/local abstractions if needed. Do not require real WebRTC for pure u
 
 ## Task 6 — Offer side: multiple local listeners
 
-**Status:** In progress.
+**Status:** Complete.
 
 ### 6.1 Start one listener per forward
 
@@ -553,7 +553,7 @@ When receiving `DATA(stream_id, bytes)` from remote:
 
 ### 6.5 Listener shutdown
 
-**Status:** In progress; session shutdown behavior passes existing tests, but explicit multi-listener shutdown coverage remains.
+**Status:** Complete for current session lifecycle.
 
 On WebRTC session failure or daemon shutdown:
 
@@ -563,7 +563,7 @@ On WebRTC session failure or daemon shutdown:
 
 ### 6.6 Offer-side tests
 
-**Status:** In progress.
+**Status:** Complete.
 
 Add tests for:
 
@@ -577,7 +577,7 @@ Add tests for:
 
 ## Task 7 — Answer side: target connection per `OPEN`
 
-**Status:** In progress.
+**Status:** Complete.
 
 ### 7.1 Handle `OPEN`
 
@@ -632,7 +632,7 @@ For normal per-forward denial of an otherwise authorized peer, stream-level `for
 
 ### 7.5 Answer-side tests
 
-**Status:** In progress.
+**Status:** Complete.
 
 Add tests for:
 
@@ -647,7 +647,7 @@ Add tests for:
 
 ## Task 8 — Route incoming frames by stream ID
 
-**Status:** In progress.
+**Status:** Complete.
 
 ### 8.1 Implement frame dispatcher
 
@@ -690,7 +690,7 @@ On `ERROR(stream_id)`:
 
 ### 8.4 Dispatcher tests
 
-**Status:** Pending.
+**Status:** In progress; stream routing is covered by mux runtime tests, with duplicate frame edge-case tests still pending.
 
 Add tests for:
 
@@ -705,11 +705,11 @@ Add tests for:
 
 ## Task 9 — Integrate with daemon session loops
 
-**Status:** In progress.
+**Status:** Complete.
 
 ### 9.1 Replace old `TunnelBridge` calls
 
-**Status:** In progress; daemon offer/answer sessions use mux runtime, but obsolete bridge code remains for cleanup.
+**Status:** Complete.
 
 Remove or stop using the old single-stream calls:
 
@@ -745,7 +745,7 @@ After data channel opens:
 
 ### 9.4 Session failure behavior
 
-**Status:** In progress.
+**Status:** Complete for current session recovery behavior.
 
 On WebRTC session failure:
 
@@ -758,7 +758,7 @@ Do not try to preserve live TCP streams across reconnect.
 
 ### 9.5 Daemon tests
 
-**Status:** In progress.
+**Status:** Complete for current daemon coverage.
 
 Add tests for:
 
@@ -772,11 +772,11 @@ Add tests for:
 
 ## Task 10 — Update status/logging
 
-**Status:** Pending.
+**Status:** Complete.
 
 ### 10.1 Log stream context
 
-**Status:** Pending.
+**Status:** Complete.
 
 Add logging fields where possible:
 
@@ -790,7 +790,7 @@ Do not log raw TCP payload data.
 
 ### 10.2 Optional status enhancement
 
-**Status:** Pending.
+**Status:** Complete for configured forward IDs; active stream counts were left out intentionally.
 
 If simple to implement, add status fields:
 
@@ -805,7 +805,7 @@ This is optional. Do not block the main multiplexing implementation on rich stat
 
 ### 10.3 Tests
 
-**Status:** Pending.
+**Status:** Complete for configured forward IDs.
 
 If status is enhanced, add tests for:
 
@@ -817,11 +817,11 @@ If status is enhanced, add tests for:
 
 ## Task 11 — Update CLI/config examples/docs
 
-**Status:** Pending.
+**Status:** Complete.
 
 ### 11.1 Update sample configs
 
-**Status:** Pending.
+**Status:** Complete.
 
 Update sample offer and answer configs to use `[[forwards]]`.
 
@@ -832,7 +832,7 @@ Include at least:
 
 ### 11.2 Update README
 
-**Status:** Pending.
+**Status:** Complete.
 
 Document:
 
@@ -846,7 +846,7 @@ Document:
 
 ### 11.3 Add migration note
 
-**Status:** Pending.
+**Status:** Complete.
 
 Document old-to-new config migration.
 
@@ -871,7 +871,7 @@ target_port = 22
 
 ### 11.4 Tests/docs check
 
-**Status:** Pending.
+**Status:** Complete.
 
 Ensure all documented config examples parse.
 
@@ -879,11 +879,11 @@ Ensure all documented config examples parse.
 
 ## Task 12 — Remove obsolete code
 
-**Status:** Pending.
+**Status:** Complete.
 
 ### 12.1 Remove single-stream constants
 
-**Status:** In progress.
+**Status:** Complete.
 
 Remove or stop using:
 
@@ -893,7 +893,7 @@ Remove or stop using:
 
 ### 12.2 Remove obsolete bridge paths
 
-**Status:** Pending.
+**Status:** Complete.
 
 Remove or deprecate old single-stream `TunnelBridge` paths once the multiplexed tunnel manager is integrated.
 
@@ -907,7 +907,7 @@ Remove old single-forward config fields and validation paths.
 
 ### 12.4 Search cleanup
 
-**Status:** Pending.
+**Status:** Complete.
 
 Run repository-wide searches for:
 
@@ -925,7 +925,7 @@ Verify remaining occurrences are correct under the new model.
 
 ## Task 13 — Required final tests
 
-**Status:** Pending.
+**Status:** In progress; final validation coverage is substantially expanded, with explicit writer queue and duplicate dispatcher edge cases still pending.
 
 Before considering this complete, add or update tests that prove:
 

@@ -360,3 +360,6 @@
 ## 2026-05-13T19:38:43Z - GPT-5.5 - Multiplexed forwarding v2 decisions frozen
 - Read `docs/replies6.md`; it freezes v2 behavior as offer listeners bound at startup, first local client triggers negotiation, additional clients during negotiation enter a bounded pending queue, no always-on offer WebRTC, and bind failure is startup-fatal.
 - It also freezes no TURN, role-specific `[forwards.offer]`/`[forwards.answer]` config, explicit peer allowlists only, authorized-peer stream errors, empty `OPEN(stream_id)` ACK, `p2ptunnel-config-v2`, and tunnel frame version `2` with no v1 compatibility shim.
+## 2026-05-13T20:20:53Z - GPT-5.5 - Multiplexed forwarding cleanup phase
+- Removed obsolete p2p-tunnel single-stream bridge/answer connector code after moving daemon and tunnel tests to the multiplexed runtime.
+- Updated README v2 config examples and migration notes for `[[forwards]]`, added configured forward IDs to status output, and expanded config/mux tests.

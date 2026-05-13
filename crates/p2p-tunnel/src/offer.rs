@@ -34,7 +34,7 @@ impl OfferListener {
             client_addr = %address,
             "accepted local forward client"
         );
-        Ok(OfferClient { forward_id: self.forward_id.clone(), stream: Some(stream) })
+        Ok(OfferClient::new(self.forward_id.clone(), stream))
     }
 }
 
@@ -44,6 +44,10 @@ pub struct OfferClient {
 }
 
 impl OfferClient {
+    pub fn new(forward_id: impl Into<String>, stream: TcpStream) -> Self {
+        Self { forward_id: forward_id.into(), stream: Some(stream) }
+    }
+
     pub fn forward_id(&self) -> &str {
         &self.forward_id
     }

@@ -262,6 +262,7 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
     >,
     #[cfg(not(any(test, debug_assertions)))] _session_hook: Option<()>,
 ) -> Result<(), DaemonError> {
+    validate_config_authorized_peers(&config, &authorized_keys)?;
     let codec = SignalCodec::new(
         &local_identity,
         &authorized_keys,
@@ -367,6 +368,7 @@ pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
     authorized_keys: AuthorizedKeys,
     mut transport: T,
 ) -> Result<(), DaemonError> {
+    validate_config_authorized_peers(&config, &authorized_keys)?;
     let codec = SignalCodec::new(
         &local_identity,
         &authorized_keys,
@@ -1419,6 +1421,7 @@ async fn write_daemon_status(ctx: &RuntimeContext<'_>, snapshot: StatusSnapshot)
             ctx.runtime.mqtt_connected,
             snapshot.active_session_id,
             snapshot.current_state,
+            ctx.config.forwards.iter().map(|forward| forward.id.clone()).collect(),
         ),
     )
     .await;
@@ -1936,6 +1939,32 @@ fn offer_remote_peer_id(config: &AppConfig) -> Result<PeerId, DaemonError> {
     })
 }
 
+fn validate_config_authorized_peers(
+    config: &AppConfig,
+    authorized_keys: &AuthorizedKeys,
+) -> Result<(), DaemonError> {
+    match config.node.role {
+        NodeRole::Offer => {
+            let remote_peer_id = offer_remote_peer_id(config)?;
+            if authorized_keys.get_by_peer_id(&remote_peer_id).is_none() {
+                return Err(DaemonError::MissingAuthorizedPeer(remote_peer_id.to_string()));
+            }
+        }
+        NodeRole::Answer => {
+            for forward in &config.forwards {
+                if let Some(answer) = &forward.answer {
+                    for peer_id in &answer.allow_remote_peers {
+                        if authorized_keys.get_by_peer_id(peer_id).is_none() {
+                            return Err(DaemonError::MissingAuthorizedPeer(peer_id.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 fn first_offer_forward(config: &AppConfig) -> Result<(&str, &ForwardOfferConfig), DaemonError> {
     config
@@ -2291,7 +2320,7 @@ mod tests {
         AckBody, ErrorBody, InnerMessageBuilder, MessageBody, OfferBody, OuterEnvelope,
         ReplayCache, SignalCodec, SignalingError,
     };
-    use p2p_tunnel::TunnelBridge;
+    use p2p_tunnel::OfferClient;
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
@@ -2561,6 +2590,7 @@ mod tests {
     #[test]
     fn env_overrides_update_config() {
         let mut config = sample_config();
+
         apply_override_pairs(
             &mut config,
             [
@@ -2572,6 +2602,29 @@ mod tests {
         assert_eq!(config.broker.url, "mqtts://env");
         assert_eq!(super::first_offer_forward(&config).expect("offer").1.listen_port, 6000);
         assert_eq!(super::first_answer_forward(&config).expect("answer").target_port, 2022);
+    }
+
+    #[test]
+    fn offer_remote_peer_must_exist_in_authorized_keys() {
+        let config = sample_config();
+        let authorized_keys = AuthorizedKeys::parse("").expect("empty authorized keys");
+
+        assert!(matches!(
+            super::validate_config_authorized_peers(&config, &authorized_keys),
+            Err(DaemonError::MissingAuthorizedPeer(peer)) if peer == "answer-office"
+        ));
+    }
+
+    #[test]
+    fn answer_allowlist_peers_must_exist_in_authorized_keys() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let authorized_keys = AuthorizedKeys::parse("").expect("empty authorized keys");
+
+        assert!(matches!(
+            super::validate_config_authorized_peers(&config, &authorized_keys),
+            Err(DaemonError::MissingAuthorizedPeer(peer)) if peer == "offer-home"
+        ));
     }
 
     #[test]
@@ -2934,7 +2987,14 @@ mod tests {
         let (offer_stream, _) = local_listener.accept().await.expect("offer accept");
 
         let offer_task = tokio::spawn(async move {
-            TunnelBridge::new(offer_channel, &config.tunnel).run_offer(offer_stream).await
+            let (_tx, mut rx) = mpsc::channel(1);
+            p2p_tunnel::run_multiplex_offer(
+                offer_channel,
+                &config.tunnel,
+                OfferClient::new("ssh", offer_stream),
+                &mut rx,
+            )
+            .await
         });
 
         timeout(Duration::from_secs(10), client_task)
