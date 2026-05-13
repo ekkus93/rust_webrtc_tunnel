@@ -13,6 +13,7 @@ pub struct DaemonStatus {
     pub mqtt_connected: bool,
     pub active_session_id: Option<String>,
     pub current_state: DaemonState,
+    pub configured_forwards: Vec<String>,
 }
 
 impl DaemonStatus {
@@ -22,6 +23,7 @@ impl DaemonStatus {
         mqtt_connected: bool,
         active_session_id: Option<SessionId>,
         current_state: DaemonState,
+        configured_forwards: Vec<String>,
     ) -> Self {
         Self {
             peer_id,
@@ -29,6 +31,7 @@ impl DaemonStatus {
             mqtt_connected,
             active_session_id: active_session_id.map(|id| id.to_string()),
             current_state,
+            configured_forwards,
         }
     }
 }
@@ -77,11 +80,14 @@ mod tests {
                 true,
                 Some(p2p_core::SessionId::new([7_u8; 16])),
                 DaemonState::Idle,
+                vec!["ssh".to_owned(), "web-ui".to_owned()],
             ))
             .await
             .expect("status file should write");
         let content = tokio::fs::read_to_string(&temp_path).await.expect("status file should read");
         assert!(content.contains("\"peer_id\""));
+        assert!(content.contains("\"configured_forwards\""));
+        assert!(content.contains("\"ssh\""));
         assert!(!content.contains("private"));
         let _ = tokio::fs::remove_file(PathBuf::from(&temp_path)).await;
     }

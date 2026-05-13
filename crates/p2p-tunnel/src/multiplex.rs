@@ -617,10 +617,23 @@ fn spawn_writer_only(
 
 #[cfg(test)]
 mod tests {
-    use p2p_core::{ForwardAnswerConfig, ForwardOfferConfig, ForwardRule, ForwardTable};
+    use std::time::Duration;
 
-    use super::{StreamIdAllocator, StreamLifecycle, StreamManager, StreamState};
-    use crate::TunnelError;
+    use p2p_core::{
+        ForwardAnswerConfig, ForwardOfferConfig, ForwardRule, ForwardTable, TunnelConfig,
+        WebRtcConfig,
+    };
+    use p2p_webrtc::WebRtcPeer;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+
+    use super::{
+        StreamIdAllocator, StreamLifecycle, StreamManager, StreamState, run_multiplex_answer,
+        run_multiplex_offer,
+    };
+    use crate::{OfferClient, TunnelError};
 
     fn stream(stream_id: u32, forward_id: &str) -> StreamState {
         StreamState {
@@ -629,6 +642,87 @@ mod tests {
             lifecycle: StreamLifecycle::Opening,
             remote_peer_id: "offer-home".parse().expect("peer id"),
         }
+    }
+
+    fn sample_tunnel_config() -> TunnelConfig {
+        TunnelConfig { read_chunk_size: 16_384, local_eof_grace_ms: 250, remote_eof_grace_ms: 250 }
+    }
+
+    fn sample_webrtc_config() -> WebRtcConfig {
+        WebRtcConfig { stun_urls: Vec::new(), enable_trickle_ice: false, enable_ice_restart: true }
+    }
+
+    fn forward_table(target_port: u16) -> ForwardTable {
+        ForwardTable::new(&[ForwardRule {
+            id: "ssh".to_owned(),
+            offer: Some(ForwardOfferConfig {
+                listen_host: "127.0.0.1".to_owned(),
+                listen_port: 2223,
+            }),
+            answer: Some(ForwardAnswerConfig {
+                target_host: "127.0.0.1".to_owned(),
+                target_port,
+                allow_remote_peers: vec!["offer-home".parse().expect("peer id")],
+            }),
+        }])
+    }
+
+    fn multi_forward_table(ssh_port: u16, web_port: u16) -> ForwardTable {
+        ForwardTable::new(&[
+            ForwardRule {
+                id: "ssh".to_owned(),
+                offer: Some(ForwardOfferConfig {
+                    listen_host: "127.0.0.1".to_owned(),
+                    listen_port: 2223,
+                }),
+                answer: Some(ForwardAnswerConfig {
+                    target_host: "127.0.0.1".to_owned(),
+                    target_port: ssh_port,
+                    allow_remote_peers: vec!["offer-home".parse().expect("peer id")],
+                }),
+            },
+            ForwardRule {
+                id: "web-ui".to_owned(),
+                offer: Some(ForwardOfferConfig {
+                    listen_host: "127.0.0.1".to_owned(),
+                    listen_port: 8080,
+                }),
+                answer: Some(ForwardAnswerConfig {
+                    target_host: "127.0.0.1".to_owned(),
+                    target_port: web_port,
+                    allow_remote_peers: vec!["offer-home".parse().expect("peer id")],
+                }),
+            },
+        ])
+    }
+
+    async fn connected_channels()
+    -> (WebRtcPeer, WebRtcPeer, p2p_webrtc::DataChannelHandle, p2p_webrtc::DataChannelHandle) {
+        let offer_peer =
+            WebRtcPeer::new(&sample_webrtc_config()).await.expect("offer peer should build");
+        let answer_peer =
+            WebRtcPeer::new(&sample_webrtc_config()).await.expect("answer peer should build");
+
+        let offer_channel =
+            offer_peer.create_data_channel().await.expect("offer data channel should build");
+        let offer_sdp = offer_peer.create_offer().await.expect("offer SDP should build");
+        answer_peer.apply_remote_offer(&offer_sdp).await.expect("answer should accept offer");
+        let answer_sdp = answer_peer.create_answer().await.expect("answer SDP should build");
+        offer_peer.apply_remote_answer(&answer_sdp).await.expect("offer should accept answer");
+
+        let answer_channel =
+            timeout(Duration::from_secs(10), answer_peer.next_incoming_data_channel())
+                .await
+                .expect("incoming data channel should arrive")
+                .expect("incoming data channel stream should yield")
+                .expect("incoming data channel should be accepted");
+
+        offer_channel
+            .wait_for_open(Duration::from_secs(10))
+            .await
+            .expect("offer data channel should open");
+
+        (offer_peer, answer_peer, offer_channel, answer_channel)
     }
 
     #[test]
@@ -705,5 +799,233 @@ mod tests {
         assert_eq!(target.port, 8080);
         assert!(table.target_for("missing", &"offer-home".parse().expect("peer id")).is_err());
         assert!(table.target_for("ssh", &"other-peer".parse().expect("peer id")).is_err());
+    }
+
+    #[tokio::test]
+    async fn multiplex_open_handshake_bridges_bytes_after_target_connect() {
+        let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
+
+        let target_listener =
+            TcpListener::bind(("127.0.0.1", 0)).await.expect("target listener should bind");
+        let table = forward_table(target_listener.local_addr().expect("target local addr").port());
+
+        let target_task = tokio::spawn(async move {
+            let (mut target_stream, _) = target_listener.accept().await.expect("target accept");
+            let mut received = [0_u8; 4];
+            target_stream.read_exact(&mut received).await.expect("target read");
+            assert_eq!(&received, b"ping");
+            target_stream.write_all(b"pong").await.expect("target write");
+            target_stream.shutdown().await.expect("target shutdown");
+        });
+
+        let local_listener =
+            TcpListener::bind(("127.0.0.1", 0)).await.expect("local listener should bind");
+        let local_addr = local_listener.local_addr().expect("local addr");
+        let client_task = tokio::spawn(async move {
+            let mut client = TcpStream::connect(local_addr).await.expect("client connect");
+            client.write_all(b"ping").await.expect("client write");
+            let mut response = [0_u8; 4];
+            client.read_exact(&mut response).await.expect("client read");
+            assert_eq!(&response, b"pong");
+            client.shutdown().await.expect("client shutdown");
+        });
+        let (offer_stream, _) = local_listener.accept().await.expect("offer accept");
+
+        let answer_tunnel = sample_tunnel_config();
+        let answer_task = tokio::spawn(async move {
+            run_multiplex_answer(
+                answer_channel,
+                &answer_tunnel,
+                table,
+                "offer-home".parse().expect("peer id"),
+            )
+            .await
+        });
+        let offer_tunnel = sample_tunnel_config();
+        let offer_task = tokio::spawn(async move {
+            let (_tx, mut rx) = mpsc::channel(1);
+            run_multiplex_offer(
+                offer_channel,
+                &offer_tunnel,
+                OfferClient::new("ssh", offer_stream),
+                &mut rx,
+            )
+            .await
+        });
+
+        timeout(Duration::from_secs(10), client_task)
+            .await
+            .expect("client task should finish")
+            .expect("client task should succeed");
+        timeout(Duration::from_secs(10), target_task)
+            .await
+            .expect("target task should finish")
+            .expect("target task should succeed");
+        timeout(Duration::from_secs(10), offer_task)
+            .await
+            .expect("offer mux should finish")
+            .expect("offer mux join should succeed")
+            .expect("offer mux should succeed");
+
+        offer_peer.close().await.expect("offer peer should close");
+        answer_peer.close().await.expect("answer peer should close");
+        answer_task.abort();
+    }
+
+    #[tokio::test]
+    async fn target_connect_failure_closes_only_failed_offer_stream() {
+        let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).await.expect("probe should bind");
+        let table = forward_table(probe.local_addr().expect("probe addr").port());
+        drop(probe);
+
+        let local_listener =
+            TcpListener::bind(("127.0.0.1", 0)).await.expect("local listener should bind");
+        let local_addr = local_listener.local_addr().expect("local addr");
+        let mut client = TcpStream::connect(local_addr).await.expect("client connect");
+        let (offer_stream, _) = local_listener.accept().await.expect("offer accept");
+
+        let answer_tunnel = sample_tunnel_config();
+        let answer_task = tokio::spawn(async move {
+            run_multiplex_answer(
+                answer_channel,
+                &answer_tunnel,
+                table,
+                "offer-home".parse().expect("peer id"),
+            )
+            .await
+        });
+        let offer_tunnel = sample_tunnel_config();
+        let offer_result = timeout(Duration::from_secs(10), async move {
+            let (_tx, mut rx) = mpsc::channel(1);
+            run_multiplex_offer(
+                offer_channel,
+                &offer_tunnel,
+                OfferClient::new("ssh", offer_stream),
+                &mut rx,
+            )
+            .await
+        })
+        .await
+        .expect("offer mux should finish");
+
+        assert!(offer_result.is_ok());
+        let mut buffer = [0_u8; 1];
+        let read = timeout(Duration::from_secs(10), client.read(&mut buffer))
+            .await
+            .expect("client read should finish")
+            .expect("client read should succeed");
+        assert_eq!(read, 0);
+
+        offer_peer.close().await.expect("offer peer should close");
+        answer_peer.close().await.expect("answer peer should close");
+        answer_task.abort();
+    }
+
+    #[tokio::test]
+    async fn two_forwards_share_one_data_channel_with_isolated_streams() {
+        let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
+
+        let ssh_target = TcpListener::bind(("127.0.0.1", 0)).await.expect("ssh target should bind");
+        let web_target = TcpListener::bind(("127.0.0.1", 0)).await.expect("web target should bind");
+        let table = multi_forward_table(
+            ssh_target.local_addr().expect("ssh target addr").port(),
+            web_target.local_addr().expect("web target addr").port(),
+        );
+
+        let ssh_target_task = tokio::spawn(async move {
+            let (mut target_stream, _) = ssh_target.accept().await.expect("ssh target accept");
+            let mut received = [0_u8; 3];
+            target_stream.read_exact(&mut received).await.expect("ssh target read");
+            assert_eq!(&received, b"ssh");
+            target_stream.write_all(b"SSH").await.expect("ssh target write");
+            target_stream.shutdown().await.expect("ssh target shutdown");
+        });
+        let web_target_task = tokio::spawn(async move {
+            let (mut target_stream, _) = web_target.accept().await.expect("web target accept");
+            let mut received = [0_u8; 3];
+            target_stream.read_exact(&mut received).await.expect("web target read");
+            assert_eq!(&received, b"web");
+            target_stream.write_all(b"WEB").await.expect("web target write");
+            target_stream.shutdown().await.expect("web target shutdown");
+        });
+
+        let ssh_listener =
+            TcpListener::bind(("127.0.0.1", 0)).await.expect("ssh listener should bind");
+        let web_listener =
+            TcpListener::bind(("127.0.0.1", 0)).await.expect("web listener should bind");
+        let ssh_addr = ssh_listener.local_addr().expect("ssh local addr");
+        let web_addr = web_listener.local_addr().expect("web local addr");
+
+        let ssh_client_task = tokio::spawn(async move {
+            let mut client = TcpStream::connect(ssh_addr).await.expect("ssh client connect");
+            client.write_all(b"ssh").await.expect("ssh client write");
+            let mut response = [0_u8; 3];
+            client.read_exact(&mut response).await.expect("ssh client read");
+            assert_eq!(&response, b"SSH");
+            client.shutdown().await.expect("ssh client shutdown");
+        });
+        let web_client_task = tokio::spawn(async move {
+            let mut client = TcpStream::connect(web_addr).await.expect("web client connect");
+            client.write_all(b"web").await.expect("web client write");
+            let mut response = [0_u8; 3];
+            client.read_exact(&mut response).await.expect("web client read");
+            assert_eq!(&response, b"WEB");
+            client.shutdown().await.expect("web client shutdown");
+        });
+
+        let (ssh_stream, _) = ssh_listener.accept().await.expect("ssh accept");
+        let (web_stream, _) = web_listener.accept().await.expect("web accept");
+        let (tx, mut rx) = mpsc::channel(4);
+        tx.send(Ok(OfferClient::new("web-ui", web_stream))).await.expect("queue web client");
+        drop(tx);
+
+        let answer_tunnel = sample_tunnel_config();
+        let answer_task = tokio::spawn(async move {
+            run_multiplex_answer(
+                answer_channel,
+                &answer_tunnel,
+                table,
+                "offer-home".parse().expect("peer id"),
+            )
+            .await
+        });
+        let offer_tunnel = sample_tunnel_config();
+        let offer_task = tokio::spawn(async move {
+            run_multiplex_offer(
+                offer_channel,
+                &offer_tunnel,
+                OfferClient::new("ssh", ssh_stream),
+                &mut rx,
+            )
+            .await
+        });
+
+        timeout(Duration::from_secs(10), ssh_client_task)
+            .await
+            .expect("ssh client should finish")
+            .expect("ssh client task should succeed");
+        timeout(Duration::from_secs(10), web_client_task)
+            .await
+            .expect("web client should finish")
+            .expect("web client task should succeed");
+        timeout(Duration::from_secs(10), ssh_target_task)
+            .await
+            .expect("ssh target should finish")
+            .expect("ssh target task should succeed");
+        timeout(Duration::from_secs(10), web_target_task)
+            .await
+            .expect("web target should finish")
+            .expect("web target task should succeed");
+        timeout(Duration::from_secs(10), offer_task)
+            .await
+            .expect("offer mux should finish")
+            .expect("offer mux join should succeed")
+            .expect("offer mux should succeed");
+
+        offer_peer.close().await.expect("offer peer should close");
+        answer_peer.close().await.expect("answer peer should close");
+        answer_task.abort();
     }
 }

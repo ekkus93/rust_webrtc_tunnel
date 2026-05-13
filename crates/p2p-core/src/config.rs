@@ -759,6 +759,34 @@ status_file = "{status_file}"
         )
     }
 
+    fn offer_config(config_dir: &Path, state_dir: &Path) -> String {
+        sample_config(config_dir, state_dir)
+            .replace("peer_id = \"answer-office\"\nrole = \"answer\"", "peer_id = \"offer-home\"\nrole = \"offer\"")
+            .replace("[paths]", "[peer]\nremote_peer_id = \"answer-office\"\n\n[paths]")
+            .replace(
+                "[forwards.answer]\ntarget_host = \"127.0.0.1\"\ntarget_port = 22\nallow_remote_peers = [\"offer-home\"]",
+                "[forwards.offer]\nlisten_host = \"127.0.0.1\"\nlisten_port = 2223",
+            )
+    }
+
+    fn append_answer_forward(config: String, id: &str, target_port: u16) -> String {
+        config.replace(
+            "[reconnect]",
+            &format!(
+                "[[forwards]]\nid = \"{id}\"\n\n[forwards.answer]\ntarget_host = \"127.0.0.1\"\ntarget_port = {target_port}\nallow_remote_peers = [\"offer-home\"]\n\n[reconnect]"
+            ),
+        )
+    }
+
+    fn append_offer_forward(config: String, id: &str, listen_port: u16) -> String {
+        config.replace(
+            "[reconnect]",
+            &format!(
+                "[[forwards]]\nid = \"{id}\"\n\n[forwards.offer]\nlisten_host = \"127.0.0.1\"\nlisten_port = {listen_port}\n\n[reconnect]"
+            ),
+        )
+    }
+
     fn write_required_files(config_dir: &Path) {
         fs::write(config_dir.join("identity"), "peer_id = \"answer-office\"\n").expect("identity");
         fs::write(config_dir.join("authorized_keys"), "").expect("write auth keys");
@@ -833,6 +861,125 @@ status_file = "{status_file}"
 
         let config = sample_config(&config_dir, &state_dir)
             .replace("allow_remote_peers = [\"offer-home\"]", "allow_remote_peers = []");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_accepts_answer_config_with_two_forwards() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        let config = append_answer_forward(sample_config(&config_dir, &state_dir), "web-ui", 8080);
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+
+        let loaded = AppConfig::load_from_file(&config_path).expect("config should load");
+        assert_eq!(loaded.forwards.len(), 2);
+    }
+
+    #[test]
+    fn config_accepts_offer_config_with_two_forwards() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        let config = append_offer_forward(offer_config(&config_dir, &state_dir), "web-ui", 8080);
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+
+        let loaded = AppConfig::load_from_file(&config_path).expect("config should load");
+        assert_eq!(loaded.forwards.len(), 2);
+    }
+
+    #[test]
+    fn config_rejects_duplicate_forward_ids() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        let config = append_answer_forward(sample_config(&config_dir, &state_dir), "ssh", 8080);
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_rejects_duplicate_offer_listen_sockets() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        let config = append_offer_forward(offer_config(&config_dir, &state_dir), "web-ui", 2223);
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, config).expect("write config");
+        assert!(AppConfig::load_from_file(&config_path).is_err());
+    }
+
+    #[test]
+    fn config_rejects_invalid_forward_ids() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        for invalid in ["", "bad/id", "bad:id", "bad id", "bad\\id"] {
+            let config = sample_config(&config_dir, &state_dir)
+                .replace("id = \"ssh\"", &format!("id = \"{invalid}\""));
+            let config_path = temp_dir.path().join("config.toml");
+            fs::write(&config_path, config).expect("write config");
+            assert!(AppConfig::load_from_file(&config_path).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn config_rejects_missing_role_specific_forward_ports() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        for config in [
+            offer_config(&config_dir, &state_dir).replace("listen_port = 2223\n", ""),
+            sample_config(&config_dir, &state_dir).replace("target_port = 22\n", ""),
+        ] {
+            let config_path = temp_dir.path().join("config.toml");
+            fs::write(&config_path, config).expect("write config");
+            assert!(AppConfig::load_from_file(&config_path).is_err());
+        }
+    }
+
+    #[test]
+    fn old_single_forward_config_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_dir = temp_dir.path().join("config");
+        let state_dir = temp_dir.path().join("state");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+        write_required_files(&config_dir);
+
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "[tunnel]\nread_chunk_size = 16384",
+            "[tunnel]\nread_chunk_size = 16384\n\n[tunnel.offer]\nlisten_host = \"127.0.0.1\"\nlisten_port = 2223\nremote_peer_id = \"answer-office\"",
+        );
         let config_path = temp_dir.path().join("config.toml");
         fs::write(&config_path, config).expect("write config");
         assert!(AppConfig::load_from_file(&config_path).is_err());
