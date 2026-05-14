@@ -13,8 +13,9 @@ mod error;
 mod logging;
 mod status;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use p2p_core::{
@@ -29,13 +30,13 @@ use p2p_signaling::{
 };
 use p2p_tunnel::{OfferClient, OfferListener};
 use p2p_webrtc::{DataChannelHandle, IceCandidateSignal, IceConnectionState, WebRtcPeer};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep};
 
 pub use error::DaemonError;
 pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
-pub use status::{DaemonStatus, StatusWriter};
+pub use status::{DaemonStatus, SessionStatus, StatusWriter};
 
 #[cfg(any(test, debug_assertions))]
 #[derive(Clone)]
@@ -53,6 +54,7 @@ struct OfferSessionIo<'a> {
 }
 
 const DAEMON_RUNTIME_RETRY_DELAY: Duration = Duration::from_secs(1);
+const ANSWER_SESSION_CAPACITY: usize = 16;
 
 #[allow(async_fn_in_trait)]
 pub trait DaemonSignalingTransport {
@@ -155,6 +157,49 @@ struct StatusSnapshot {
     current_state: DaemonState,
 }
 
+#[derive(Clone, Debug)]
+struct SessionStatusSnapshot {
+    session_id: SessionId,
+    remote_peer_id: PeerId,
+    state: DaemonState,
+    data_channel_open: bool,
+    active_stream_count: usize,
+    open_forward_ids: Vec<String>,
+}
+
+impl SessionStatusSnapshot {
+    fn from_session(config: &AppConfig, session: &ActiveSession) -> Self {
+        Self {
+            session_id: session.session_id,
+            remote_peer_id: session.remote_peer_id.clone(),
+            state: session.state,
+            data_channel_open: session
+                .data_channel
+                .as_ref()
+                .is_some_and(|channel| channel.is_open()),
+            active_stream_count: 0,
+            open_forward_ids: config.forwards.iter().map(|forward| forward.id.clone()).collect(),
+        }
+    }
+
+    fn to_status(&self) -> SessionStatus {
+        SessionStatus::new(
+            self.session_id,
+            self.remote_peer_id.clone(),
+            self.state,
+            self.data_channel_open,
+            self.active_stream_count,
+            self.open_forward_ids.clone(),
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AnswerStatusSnapshot {
+    current_state: DaemonState,
+    sessions: Vec<SessionStatusSnapshot>,
+}
+
 struct RuntimeContext<'a> {
     config: &'a AppConfig,
     status: &'a StatusWriter,
@@ -164,6 +209,42 @@ struct RuntimeContext<'a> {
 struct OutgoingSignal {
     message: InnerMessage,
     response: bool,
+}
+
+struct PublishRequest {
+    recipient: AuthorizedKey,
+    outgoing: OutgoingSignal,
+    status: SessionStatusSnapshot,
+    result: oneshot::Sender<Result<PublishedSignal, DaemonError>>,
+}
+
+struct PublishedSignal {
+    msg_id: MsgId,
+    message_type: p2p_core::MessageType,
+    payload: Vec<u8>,
+}
+
+enum AnswerSessionEvent {
+    Publish(Box<PublishRequest>),
+    RawPublish {
+        peer_id: PeerId,
+        payload: Vec<u8>,
+        status: SessionStatusSnapshot,
+        result: oneshot::Sender<Result<(), DaemonError>>,
+    },
+    Status(SessionStatusSnapshot),
+    Ended {
+        session_id: SessionId,
+        remote_peer_id: PeerId,
+        result: Result<(), DaemonError>,
+    },
+}
+
+struct AnswerSessionHandle {
+    remote_peer_id: PeerId,
+    inbound: mpsc::Sender<Vec<u8>>,
+    status: SessionStatusSnapshot,
+    task: JoinHandle<()>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -370,6 +451,9 @@ pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
     mut transport: T,
 ) -> Result<(), DaemonError> {
     validate_config_authorized_peers(&config, &authorized_keys)?;
+    let config = Arc::new(config);
+    let local_identity = Arc::new(local_identity);
+    let authorized_keys = Arc::new(authorized_keys);
     let codec = SignalCodec::new(
         &local_identity,
         &authorized_keys,
@@ -380,120 +464,47 @@ pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
     let status = StatusWriter::new(&config);
     let mut runtime = DaemonRuntimeState::new_connected();
     let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
-    write_steady_state_status(&ctx).await;
+    let (event_tx, mut event_rx) = mpsc::channel(128);
+    let mut sessions_by_id: HashMap<SessionId, AnswerSessionHandle> = HashMap::new();
+    let mut session_by_peer: HashMap<PeerId, SessionId> = HashMap::new();
+    write_answer_registry_status(&ctx, &sessions_by_id).await;
 
     let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
 
     loop {
-        let Some(payload) = poll_idle_signal_payload(&mut ctx, &mut transport).await else {
-            continue;
-        };
-
-        tracing::debug!(
-            payload_len = payload.len(),
-            role = ?config.node.role,
-            "received signaling payload while idle"
-        );
-
-        let decode_result = decode_idle_signaling_message(&codec, &payload, &mut replay_cache);
-
-        let (envelope, message, sender) = match decode_result {
-            Ok(decoded) => decoded,
-            Err(error) => {
-                tracing::warn!(reason = %error, "rejecting signaling message");
-                continue;
-            }
-        };
-
-        tracing::debug!(
-            session_id = %message.session_id,
-            sender_peer_id = %sender.peer_id,
-            sender_kid = %envelope.sender_kid,
-            message_type = ?message.message_type,
-            role = ?config.node.role,
-            "decoded idle signaling message"
-        );
-
-        match &message.body {
-            MessageBody::Hello(_) => {
-                tracing::info!("received optional hello from {}", sender.peer_id);
-            }
-            MessageBody::Offer(offer) => {
-                let peer_allowed = is_peer_allowed_for_active_busy_reply(&config, &sender.peer_id);
-                tracing::debug!(
-                    session_id = %message.session_id,
-                    sender_peer_id = %sender.peer_id,
-                    peer_allowed,
-                    sdp_len = offer.sdp.len(),
-                    "received idle offer"
-                );
-                if !peer_allowed {
-                    tracing::warn!(peer_id = %sender.peer_id, "rejecting unauthorized peer");
+        tokio::select! {
+            payload = poll_idle_signal_payload(&mut ctx, &mut transport) => {
+                let Some(payload) = payload else {
                     continue;
-                }
-                let session_result = async {
-                    if should_ack_idle_offer(peer_allowed, message.message_type.requires_ack()) {
-                        publish_message(
-                            &mut ctx,
-                            &codec,
-                            &mut transport,
-                            StatusSnapshot {
-                                active_session_id: Some(message.session_id),
-                                current_state: DaemonState::Negotiating,
-                            },
-                            None,
-                            &sender,
-                            OutgoingSignal {
-                                message: codec.build_ack(
-                                    sender.peer_id.clone(),
-                                    message.session_id,
-                                    envelope.msg_id,
-                                ),
-                                response: true,
-                            },
-                        )
-                        .await?;
-                    }
-                    let peer = WebRtcPeer::new(&config.webrtc).await?;
-                    peer.apply_remote_offer(&offer.sdp).await?;
-                    let mut session = ActiveSession::new(
-                        message.session_id,
-                        sender.clone(),
-                        peer,
-                        config.security.replay_cache_size,
-                    );
-                    let answer_sdp = session.peer.create_answer().await?;
-                    publish_message(
-                        &mut ctx,
-                        &codec,
-                        &mut transport,
-                        StatusSnapshot {
-                            active_session_id: Some(session.session_id),
-                            current_state: DaemonState::Negotiating,
-                        },
-                        Some(&mut session.signaling),
-                        &session.remote_authorized,
-                        OutgoingSignal {
-                            message: InnerMessageBuilder::new(
-                                session.session_id,
-                                config.node.peer_id.clone(),
-                                session.remote_peer_id.clone(),
-                            )
-                            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
-                            response: false,
-                        },
-                    )
-                    .await?;
-
-                    session.state = DaemonState::ConnectingDataChannel;
-                    run_answer_session(&config, &codec, &mut transport, &mut ctx, session).await
-                }
+                };
+                handle_answer_daemon_payload(
+                    &config,
+                    &local_identity,
+                    &authorized_keys,
+                    &codec,
+                    &mut transport,
+                    &mut ctx,
+                    &event_tx,
+                    &mut replay_cache,
+                    &mut sessions_by_id,
+                    &mut session_by_peer,
+                    payload,
+                )
                 .await;
-                recover_daemon_after_session(&ctx, session_result).await;
-                tracing::info!("answer daemon returned to idle state");
             }
-            _ => {
-                tracing::warn!("ignoring unexpected idle message {:?}", message.message_type);
+            event = event_rx.recv() => {
+                let Some(event) = event else {
+                    return Err(DaemonError::Logging("answer session event channel closed".to_owned()));
+                };
+                handle_answer_session_event(
+                    &mut ctx,
+                    &codec,
+                    &mut transport,
+                    &mut sessions_by_id,
+                    &mut session_by_peer,
+                    event,
+                )
+                .await;
             }
         }
     }
@@ -501,6 +512,292 @@ pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
 
 pub fn apply_env_overrides(config: &mut AppConfig) -> Result<(), ConfigError> {
     apply_override_pairs(config, env::vars())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
+    config: &Arc<AppConfig>,
+    local_identity: &Arc<IdentityFile>,
+    authorized_keys: &Arc<AuthorizedKeys>,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    ctx: &mut RuntimeContext<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    replay_cache: &mut p2p_signaling::ReplayCache,
+    sessions_by_id: &mut HashMap<SessionId, AnswerSessionHandle>,
+    session_by_peer: &mut HashMap<PeerId, SessionId>,
+    payload: Vec<u8>,
+) {
+    tracing::debug!(
+        payload_len = payload.len(),
+        role = ?config.node.role,
+        "received signaling payload in answer daemon"
+    );
+
+    if let Some(sender) = OuterEnvelope::decode(&payload)
+        .ok()
+        .and_then(|envelope| authorized_keys.get_by_kid(&envelope.sender_kid).cloned())
+    {
+        if let Some(session_id) = session_by_peer.get(&sender.peer_id).copied() {
+            if let Some(handle) = sessions_by_id.get(&session_id) {
+                if let Err(error) = handle.inbound.send(payload).await {
+                    tracing::warn!(
+                        reason = %error,
+                        session_id = %session_id,
+                        peer_id = %sender.peer_id,
+                        "failed to route signaling payload to answer session"
+                    );
+                }
+                return;
+            }
+        }
+    }
+
+    let (envelope, message, sender) =
+        match decode_idle_signaling_message(codec, &payload, replay_cache) {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                tracing::warn!(reason = %error, "rejecting signaling message");
+                return;
+            }
+        };
+
+    tracing::debug!(
+        session_id = %message.session_id,
+        sender_peer_id = %sender.peer_id,
+        sender_kid = %envelope.sender_kid,
+        message_type = ?message.message_type,
+        role = ?config.node.role,
+        "decoded answer-daemon signaling message"
+    );
+
+    match &message.body {
+        MessageBody::Hello(_) => {
+            tracing::info!("received optional hello from {}", sender.peer_id);
+        }
+        MessageBody::Offer(offer) => {
+            let offer = offer.clone();
+            if !is_peer_allowed_for_active_busy_reply(config, &sender.peer_id) {
+                tracing::warn!(peer_id = %sender.peer_id, "rejecting unauthorized peer");
+                return;
+            }
+            if session_by_peer.contains_key(&sender.peer_id)
+                || sessions_by_id.len() >= ANSWER_SESSION_CAPACITY
+            {
+                let _ = publish_message(
+                    ctx,
+                    codec,
+                    transport,
+                    StatusSnapshot {
+                        active_session_id: Some(message.session_id),
+                        current_state: DaemonState::ConnectingDataChannel,
+                    },
+                    None,
+                    &sender,
+                    OutgoingSignal {
+                        message: build_error_message(
+                            &config.node.peer_id,
+                            &sender.peer_id,
+                            message.session_id,
+                            FailureCode::Busy,
+                            "answer daemon session capacity reached",
+                        ),
+                        response: true,
+                    },
+                )
+                .await;
+                return;
+            }
+            if let Err(error) = start_answer_session_from_offer(
+                config,
+                local_identity,
+                authorized_keys,
+                codec,
+                transport,
+                ctx,
+                event_tx,
+                sessions_by_id,
+                session_by_peer,
+                envelope,
+                message,
+                sender,
+                &offer,
+            )
+            .await
+            {
+                recover_daemon_after_session(ctx, Err(error)).await;
+            }
+            write_answer_registry_status(ctx, sessions_by_id).await;
+        }
+        _ => {
+            tracing::warn!("ignoring unexpected answer-daemon message {:?}", message.message_type);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn start_answer_session_from_offer<T: DaemonSignalingTransport>(
+    config: &Arc<AppConfig>,
+    local_identity: &Arc<IdentityFile>,
+    authorized_keys: &Arc<AuthorizedKeys>,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    ctx: &mut RuntimeContext<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    sessions_by_id: &mut HashMap<SessionId, AnswerSessionHandle>,
+    session_by_peer: &mut HashMap<PeerId, SessionId>,
+    envelope: OuterEnvelope,
+    message: InnerMessage,
+    sender: AuthorizedKey,
+    offer: &OfferBody,
+) -> Result<(), DaemonError> {
+    if should_ack_idle_offer(true, message.message_type.requires_ack()) {
+        publish_message(
+            ctx,
+            codec,
+            transport,
+            StatusSnapshot {
+                active_session_id: Some(message.session_id),
+                current_state: DaemonState::Negotiating,
+            },
+            None,
+            &sender,
+            OutgoingSignal {
+                message: codec.build_ack(
+                    sender.peer_id.clone(),
+                    message.session_id,
+                    envelope.msg_id,
+                ),
+                response: true,
+            },
+        )
+        .await?;
+    }
+
+    let peer = WebRtcPeer::new(&config.webrtc).await?;
+    peer.apply_remote_offer(&offer.sdp).await?;
+    let mut session = ActiveSession::new(
+        message.session_id,
+        sender.clone(),
+        peer,
+        config.security.replay_cache_size,
+    );
+    let answer_sdp = session.peer.create_answer().await?;
+    publish_message(
+        ctx,
+        codec,
+        transport,
+        StatusSnapshot {
+            active_session_id: Some(session.session_id),
+            current_state: DaemonState::Negotiating,
+        },
+        Some(&mut session.signaling),
+        &session.remote_authorized,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+            response: false,
+        },
+    )
+    .await?;
+
+    session.state = DaemonState::ConnectingDataChannel;
+    let (inbound_tx, inbound_rx) = mpsc::channel(128);
+    let status = SessionStatusSnapshot::from_session(config, &session);
+    let session_id = session.session_id;
+    let remote_peer_id = session.remote_peer_id.clone();
+    let task = tokio::spawn(run_answer_session_task(
+        Arc::clone(config),
+        Arc::clone(local_identity),
+        Arc::clone(authorized_keys),
+        event_tx.clone(),
+        inbound_rx,
+        session,
+    ));
+    sessions_by_id.insert(
+        session_id,
+        AnswerSessionHandle {
+            remote_peer_id: remote_peer_id.clone(),
+            inbound: inbound_tx,
+            status,
+            task,
+        },
+    );
+    session_by_peer.insert(remote_peer_id, session_id);
+    Ok(())
+}
+
+async fn handle_answer_session_event<T: DaemonSignalingTransport>(
+    ctx: &mut RuntimeContext<'_>,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    sessions_by_id: &mut HashMap<SessionId, AnswerSessionHandle>,
+    session_by_peer: &mut HashMap<PeerId, SessionId>,
+    event: AnswerSessionEvent,
+) {
+    match event {
+        AnswerSessionEvent::Publish(request) => {
+            publish_answer_session_request(ctx, codec, transport, *request).await;
+        }
+        AnswerSessionEvent::RawPublish { peer_id, payload, status, result } => {
+            let publish_result = match transport
+                .publish_signal(&peer_id, &ctx.config.broker.topic_prefix, payload)
+                .await
+            {
+                Ok(()) => {
+                    mark_transport_usable(
+                        ctx,
+                        StatusSnapshot {
+                            active_session_id: Some(status.session_id),
+                            current_state: status.state,
+                        },
+                    )
+                    .await;
+                    Ok(())
+                }
+                Err(error) => {
+                    mark_transport_unusable(
+                        ctx,
+                        StatusSnapshot {
+                            active_session_id: Some(status.session_id),
+                            current_state: status.state,
+                        },
+                        &error,
+                    )
+                    .await;
+                    Err(error.into())
+                }
+            };
+            let _ = result.send(publish_result);
+        }
+        AnswerSessionEvent::Status(status) => {
+            if let Some(handle) = sessions_by_id.get_mut(&status.session_id) {
+                handle.status = status;
+            } else if let Some(old_session_id) =
+                session_by_peer.get(&status.remote_peer_id).copied()
+                && let Some(mut handle) = sessions_by_id.remove(&old_session_id)
+            {
+                session_by_peer.insert(status.remote_peer_id.clone(), status.session_id);
+                handle.status = status.clone();
+                sessions_by_id.insert(status.session_id, handle);
+            }
+            write_answer_registry_status(ctx, sessions_by_id).await;
+        }
+        AnswerSessionEvent::Ended { session_id, remote_peer_id, result } => {
+            if let Some(handle) = sessions_by_id.remove(&session_id) {
+                handle.task.abort();
+                session_by_peer.remove(&handle.remote_peer_id);
+            } else {
+                session_by_peer.remove(&remote_peer_id);
+            }
+            recover_daemon_after_session(ctx, result).await;
+            write_answer_registry_status(ctx, sessions_by_id).await;
+        }
+    }
 }
 
 pub fn apply_offer_overrides(config: &mut AppConfig, broker_url: Option<String>) {
@@ -873,61 +1170,7 @@ async fn handle_answer_session_message(
     Ok(())
 }
 
-async fn handle_active_answer_offer<T: DaemonSignalingTransport>(
-    config: &AppConfig,
-    codec: &SignalCodec<'_>,
-    transport: &mut T,
-    ctx: &mut RuntimeContext<'_>,
-    session: &mut ActiveSession,
-    offer: &OfferBody,
-) -> Result<(), DaemonError> {
-    session.state = DaemonState::Negotiating;
-    write_daemon_status(
-        ctx,
-        StatusSnapshot {
-            active_session_id: Some(session.session_id),
-            current_state: session.state,
-        },
-    )
-    .await;
-
-    session.peer.apply_remote_offer(&offer.sdp).await?;
-    let answer_sdp = session.peer.create_answer().await?;
-    publish_message(
-        ctx,
-        codec,
-        transport,
-        StatusSnapshot {
-            active_session_id: Some(session.session_id),
-            current_state: session.state,
-        },
-        Some(&mut session.signaling),
-        &session.remote_authorized,
-        OutgoingSignal {
-            message: InnerMessageBuilder::new(
-                session.session_id,
-                config.node.peer_id.clone(),
-                session.remote_peer_id.clone(),
-            )
-            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
-            response: false,
-        },
-    )
-    .await?;
-
-    session.state = DaemonState::ConnectingDataChannel;
-    write_daemon_status(
-        ctx,
-        StatusSnapshot {
-            active_session_id: Some(session.session_id),
-            current_state: session.state,
-        },
-    )
-    .await;
-
-    Ok(())
-}
-
+#[cfg(test)]
 async fn maybe_replace_pending_answer_session<T: DaemonSignalingTransport>(
     config: &AppConfig,
     codec: &SignalCodec<'_>,
@@ -1027,264 +1270,164 @@ async fn maybe_replace_pending_answer_session<T: DaemonSignalingTransport>(
     Ok(true)
 }
 
-async fn run_answer_session<T: DaemonSignalingTransport>(
-    config: &AppConfig,
-    codec: &SignalCodec<'_>,
-    transport: &mut T,
-    ctx: &mut RuntimeContext<'_>,
+async fn run_answer_session_task(
+    config: Arc<AppConfig>,
+    local_identity: Arc<IdentityFile>,
+    authorized_keys: Arc<AuthorizedKeys>,
+    event_tx: mpsc::Sender<AnswerSessionEvent>,
+    mut inbound: mpsc::Receiver<Vec<u8>>,
     mut session: ActiveSession,
-) -> Result<(), DaemonError> {
-    write_daemon_status(
-        ctx,
-        StatusSnapshot {
-            active_session_id: Some(session.session_id),
-            current_state: session.state,
-        },
+) {
+    let result = run_answer_session_task_inner(
+        &config,
+        &local_identity,
+        &authorized_keys,
+        &event_tx,
+        &mut inbound,
+        &mut session,
     )
     .await;
+    if let Err(error) = &result {
+        tracing::warn!(
+            reason = %error,
+            session_id = %session.session_id,
+            remote_peer_id = %session.remote_peer_id,
+            "answer session failed"
+        );
+    }
+    cleanup_active_session(&mut session).await;
+    let _ = event_tx
+        .send(AnswerSessionEvent::Ended {
+            session_id: session.session_id,
+            remote_peer_id: session.remote_peer_id.clone(),
+            result,
+        })
+        .await;
+}
+
+async fn run_answer_session_task_inner(
+    config: &AppConfig,
+    local_identity: &IdentityFile,
+    authorized_keys: &AuthorizedKeys,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    inbound: &mut mpsc::Receiver<Vec<u8>>,
+    session: &mut ActiveSession,
+) -> Result<(), DaemonError> {
+    let codec = SignalCodec::new(
+        local_identity,
+        authorized_keys,
+        config.security.max_clock_skew_secs,
+        config.security.max_message_age_secs,
+    );
+    send_answer_session_status(config, event_tx, session).await?;
 
     let mut tick = interval(Duration::from_secs(1));
-    let result = async {
-        loop {
-            tokio::select! {
-                _ = tick.tick() => {
-                    retry_pending_acks(
-                        ctx,
-                        transport,
-                        StatusSnapshot {
-                            active_session_id: Some(session.session_id),
-                            current_state: session.state,
-                        },
-                        &mut session,
-                    )
-                    .await?;
-                    if !session.signaling.ack_tracker.expired().is_empty() {
-                        return Err(DaemonError::AckTimeout);
-                    }
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                retry_pending_answer_session_acks(config, event_tx, session).await?;
+                if !session.signaling.ack_tracker.expired().is_empty() {
+                    return Err(DaemonError::AckTimeout);
                 }
-                payload = poll_session_signal_payload(
-                    ctx,
-                    transport,
-                    StatusSnapshot {
-                        active_session_id: Some(session.session_id),
-                        current_state: session.state,
-                    },
-                ) => {
-                    if let Some(payload) = payload? {
-                        let decoded = match codec.decode(
-                            &payload,
-                            &mut session.signaling.replay_cache,
-                            Some(session.session_id),
-                        ) {
-                            Ok(decoded) => decoded,
-                            Err(error) => {
-                                if maybe_ack_duplicate_active_session_message(
-                                    ctx,
-                                    codec,
-                                    transport,
-                                    &session,
-                                    &payload,
-                                    &error,
-                                )
-                                .await?
-                                {
-                                    continue;
-                                }
-                                if maybe_replace_pending_answer_session(
-                                    config,
-                                    codec,
-                                    transport,
-                                    ctx,
-                                    &mut session,
-                                    &payload,
-                                )
-                                .await?
-                                {
-                                    continue;
-                                }
-                                if maybe_handle_active_busy_offer(
-                                    ctx,
-                                    codec,
-                                    transport,
-                                    &mut session.active_busy_offers,
-                                    &payload,
-                                    session.session_id,
-                                    config.security.replay_cache_size,
-                                )
-                                .await?
-                                {
-                                    continue;
-                                }
-                                tracing::warn!(
-                                    reason = %error,
-                                    session_id = %session.session_id,
-                                    "rejecting signaling message during active answer session"
-                                );
-                                continue;
-                            }
-                        };
-                        let (envelope, message, sender) = decoded;
-                        if sender.peer_id != session.remote_peer_id {
-                            tracing::warn!(
-                                peer_id = %sender.peer_id,
-                                expected_peer_id = %session.remote_peer_id,
-                                "ignoring message from unexpected peer"
-                            );
-                            continue;
-                        }
-                        if message.message_type.requires_ack() {
-                            publish_message(
-                                ctx,
-                                codec,
-                                transport,
-                                StatusSnapshot {
-                                    active_session_id: Some(session.session_id),
-                                    current_state: session.state,
-                                },
-                                None,
-                                &sender,
-                                OutgoingSignal {
-                                    message: codec.build_ack(
-                                        sender.peer_id.clone(),
-                                        message.session_id,
-                                        envelope.msg_id,
-                                    ),
-                                    response: true,
-                                },
-                            ).await?;
-                        }
-                        if let MessageBody::Offer(offer) = &message.body {
-                            handle_active_answer_offer(
-                                config,
-                                codec,
-                                transport,
-                                ctx,
-                                &mut session,
-                                offer,
-                            )
-                            .await?;
-                        } else {
-                            handle_answer_session_message(&message, &mut session).await?;
-                        }
-                    }
+            }
+            payload = inbound.recv() => {
+                let Some(payload) = payload else {
+                    return Ok(());
+                };
+                process_answer_session_payload(config, &codec, event_tx, session, &payload).await?;
+            }
+            candidate = session.peer.next_local_candidate() => {
+                if let Some(candidate) = candidate {
+                    send_answer_session_local_candidate(config, event_tx, session, candidate).await?;
                 }
-                candidate = session.peer.next_local_candidate() => {
-                    if let Some(candidate) = candidate {
-                        let remote = session.remote_authorized.clone();
-                        send_local_candidate(
-                            ctx,
-                            codec,
-                            transport,
-                            &mut session,
-                            &remote,
-                            candidate,
-                        ).await?;
-                    }
-                }
-                incoming = session.peer.next_incoming_data_channel(), if session.data_channel.is_none() => {
-                    handle_answer_incoming_data_channel(&mut session, incoming, config)?;
-                }
-                ice_state = session.peer.next_ice_state() => {
-                    if let Some(ice_state) = ice_state {
-                        if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
-                            publish_message(
-                                ctx,
-                                codec,
-                                transport,
-                                StatusSnapshot {
-                                    active_session_id: Some(session.session_id),
-                                    current_state: session.state,
-                                },
-                                Some(&mut session.signaling),
-                                &session.remote_authorized,
-                                OutgoingSignal {
-                                    message: build_error_message(
-                                        &config.node.peer_id,
-                                        &session.remote_peer_id,
-                                        session.session_id,
-                                        FailureCode::IceFailed,
-                                        "ice connection failed",
-                                    ),
-                                    response: false,
-                                },
-                            ).await?;
-                            if let Some(handle) = session.bridge_handle.take() {
-                                handle.abort();
-                            }
-                            session.bridge_state = BridgeSessionState::Closed;
-                            return Err(DaemonError::IceFailed(ice_state));
-                        }
-                    }
-                }
-                bridge_result = async {
-                    let handle = session.bridge_handle.as_mut().expect("guarded by select");
-                    handle.await
-                }, if session.bridge_handle.is_some() => {
-                    let result = bridge_result
-                        .map_err(|error| DaemonError::Logging(format!("bridge task join error: {error}")))?;
-                    session.bridge_handle = None;
-                    session.bridge_state = BridgeSessionState::Closed;
-                    if let Err(p2p_tunnel::TunnelError::TargetConnectFailed(message)) = &result {
-                        let _ = publish_message(
-                            ctx,
-                            codec,
-                            transport,
-                            StatusSnapshot {
-                                active_session_id: Some(session.session_id),
-                                current_state: session.state,
-                            },
-                            Some(&mut session.signaling),
-                            &session.remote_authorized,
+            }
+            incoming = session.peer.next_incoming_data_channel(), if session.data_channel.is_none() => {
+                handle_answer_incoming_data_channel(session, incoming, config)?;
+                send_answer_session_status(config, event_tx, session).await?;
+            }
+            ice_state = session.peer.next_ice_state() => {
+                if let Some(ice_state) = ice_state {
+                    if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
+                        publish_from_answer_session(
+                            config,
+                            event_tx,
+                            session,
+                            session.remote_authorized.clone(),
                             OutgoingSignal {
                                 message: build_error_message(
                                     &config.node.peer_id,
                                     &session.remote_peer_id,
                                     session.session_id,
-                                    FailureCode::TargetConnectFailed,
-                                    message,
+                                    FailureCode::IceFailed,
+                                    "ice connection failed",
                                 ),
                                 response: false,
                             },
+                            true,
                         )
-                        .await;
+                        .await?;
+                        if let Some(handle) = session.bridge_handle.take() {
+                            handle.abort();
+                        }
+                        session.bridge_state = BridgeSessionState::Closed;
+                        return Err(DaemonError::IceFailed(ice_state));
                     }
-                    let _ = publish_message(
-                        ctx,
-                        codec,
-                        transport,
-                        StatusSnapshot {
-                            active_session_id: Some(session.session_id),
-                            current_state: session.state,
-                        },
-                        Some(&mut session.signaling),
-                        &session.remote_authorized,
+                }
+            }
+            bridge_result = async {
+                let handle = session.bridge_handle.as_mut().expect("guarded by select");
+                handle.await
+            }, if session.bridge_handle.is_some() => {
+                let result = bridge_result
+                    .map_err(|error| DaemonError::Logging(format!("bridge task join error: {error}")))?;
+                session.bridge_handle = None;
+                session.bridge_state = BridgeSessionState::Closed;
+                send_answer_session_status(config, event_tx, session).await?;
+                if let Err(p2p_tunnel::TunnelError::TargetConnectFailed(message)) = &result {
+                    let _ = publish_from_answer_session(
+                        config,
+                        event_tx,
+                        session,
+                        session.remote_authorized.clone(),
                         OutgoingSignal {
-                            message: InnerMessageBuilder::new(
+                            message: build_error_message(
+                                &config.node.peer_id,
+                                &session.remote_peer_id,
                                 session.session_id,
-                                config.node.peer_id.clone(),
-                                session.remote_peer_id.clone(),
-                            )
-                            .build(MessageBody::Close(CloseBody {
-                                reason_code: "session_closed".to_owned(),
-                                message: None,
-                            })),
+                                FailureCode::TargetConnectFailed,
+                                message,
+                            ),
                             response: false,
                         },
+                        true,
                     )
                     .await;
-                    result?;
-                    return Ok(());
                 }
+                let _ = publish_from_answer_session(
+                    config,
+                    event_tx,
+                    session,
+                    session.remote_authorized.clone(),
+                    OutgoingSignal {
+                        message: InnerMessageBuilder::new(
+                            session.session_id,
+                            config.node.peer_id.clone(),
+                            session.remote_peer_id.clone(),
+                        )
+                        .build(MessageBody::Close(CloseBody {
+                            reason_code: "session_closed".to_owned(),
+                            message: None,
+                        })),
+                        response: false,
+                    },
+                    true,
+                )
+                .await;
+                result?;
+                return Ok(());
             }
         }
     }
-    .await;
-
-    if let Err(error) = &result {
-        tracing::warn!(reason = %error, session_id = %session.session_id, "answer session failed");
-    }
-    cleanup_active_session(&mut session).await;
-    result
 }
 
 async fn cleanup_active_session(session: &mut ActiveSession) {
@@ -1301,6 +1444,383 @@ async fn cleanup_active_session(session: &mut ActiveSession) {
             "failed to close session peer during cleanup"
         );
     }
+}
+
+async fn send_answer_session_status(
+    config: &AppConfig,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &ActiveSession,
+) -> Result<(), DaemonError> {
+    event_tx
+        .send(AnswerSessionEvent::Status(SessionStatusSnapshot::from_session(config, session)))
+        .await
+        .map_err(|_| DaemonError::Logging("answer session event loop stopped".to_owned()))
+}
+
+async fn publish_from_answer_session(
+    config: &AppConfig,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    recipient: AuthorizedKey,
+    outgoing: OutgoingSignal,
+    track_ack: bool,
+) -> Result<(), DaemonError> {
+    if let Some(published) = request_session_publish(
+        event_tx,
+        recipient,
+        outgoing,
+        track_ack,
+        SessionStatusSnapshot::from_session(config, session),
+    )
+    .await?
+    {
+        session.signaling.ack_tracker.register(
+            published.msg_id,
+            published.message_type,
+            published.payload,
+            current_time_ms(),
+        );
+    }
+    Ok(())
+}
+
+async fn retry_pending_answer_session_acks(
+    config: &AppConfig,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+) -> Result<(), DaemonError> {
+    let mut retries = session.signaling.ack_tracker.retry_due(current_time_ms());
+    while let Some((_msg_id, payload)) = retries.pop() {
+        request_raw_session_publish(
+            event_tx,
+            session.remote_peer_id.clone(),
+            payload,
+            SessionStatusSnapshot::from_session(config, session),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn send_answer_session_local_candidate(
+    config: &AppConfig,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    candidate: IceCandidateSignal,
+) -> Result<(), DaemonError> {
+    let body = if candidate.candidate.is_some() {
+        MessageBody::IceCandidate(IceCandidateBody {
+            candidate: candidate.candidate,
+            sdp_mid: candidate.sdp_mid,
+            sdp_mline_index: candidate.sdp_mline_index,
+        })
+    } else {
+        MessageBody::EndOfCandidates(EndOfCandidatesBody::default())
+    };
+    publish_from_answer_session(
+        config,
+        event_tx,
+        session,
+        session.remote_authorized.clone(),
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(body),
+            response: false,
+        },
+        true,
+    )
+    .await
+}
+
+async fn process_answer_session_payload(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    payload: &[u8],
+) -> Result<(), DaemonError> {
+    let decoded = match codec.decode(
+        payload,
+        &mut session.signaling.replay_cache,
+        Some(session.session_id),
+    ) {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            if maybe_ack_duplicate_answer_session_message(
+                config, codec, event_tx, session, payload, &error,
+            )
+            .await?
+            {
+                return Ok(());
+            }
+            if maybe_replace_pending_answer_session_via_events(
+                config, codec, event_tx, session, payload,
+            )
+            .await?
+            {
+                return Ok(());
+            }
+            if maybe_handle_answer_session_busy_offer(config, codec, event_tx, session, payload)
+                .await?
+            {
+                return Ok(());
+            }
+            tracing::warn!(
+                reason = %error,
+                session_id = %session.session_id,
+                remote_peer_id = %session.remote_peer_id,
+                "rejecting signaling message during active answer session"
+            );
+            return Ok(());
+        }
+    };
+    let (envelope, message, sender) = decoded;
+    if sender.peer_id != session.remote_peer_id {
+        tracing::warn!(
+            peer_id = %sender.peer_id,
+            expected_peer_id = %session.remote_peer_id,
+            session_id = %session.session_id,
+            "ignoring message from unexpected peer"
+        );
+        return Ok(());
+    }
+    if message.message_type.requires_ack() {
+        publish_from_answer_session(
+            config,
+            event_tx,
+            session,
+            sender.clone(),
+            OutgoingSignal {
+                message: codec.build_ack(
+                    sender.peer_id.clone(),
+                    message.session_id,
+                    envelope.msg_id,
+                ),
+                response: true,
+            },
+            false,
+        )
+        .await?;
+    }
+    if let MessageBody::Offer(offer) = &message.body {
+        handle_active_answer_offer_via_events(config, event_tx, session, offer).await?;
+    } else {
+        handle_answer_session_message(&message, session).await?;
+    }
+    send_answer_session_status(config, event_tx, session).await?;
+    Ok(())
+}
+
+async fn maybe_ack_duplicate_answer_session_message(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    payload: &[u8],
+    error: &SignalingError,
+) -> Result<bool, DaemonError> {
+    let Some(ack_message) = duplicate_active_session_ack_message(
+        codec,
+        session.session_id,
+        &session.remote_authorized,
+        &session.remote_peer_id,
+        payload,
+        error,
+    ) else {
+        return Ok(false);
+    };
+    let envelope = OuterEnvelope::decode(payload)
+        .map_err(|error| DaemonError::Signaling(SignalingError::Protocol(error.to_string())))?;
+    publish_from_answer_session(
+        config,
+        event_tx,
+        session,
+        session.remote_authorized.clone(),
+        OutgoingSignal { message: ack_message, response: true },
+        false,
+    )
+    .await?;
+    tracing::info!(
+        session_id = %session.session_id,
+        duplicate_msg_id = %envelope.msg_id,
+        role = ?config.node.role,
+        "re-acknowledged duplicate active-session signaling message"
+    );
+    Ok(true)
+}
+
+async fn maybe_handle_answer_session_busy_offer(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    payload: &[u8],
+) -> Result<bool, DaemonError> {
+    if let Some(key) = replayed_active_busy_offer_key(payload, &session.active_busy_offers) {
+        tracing::info!(
+            active_session_id = %session.session_id,
+            duplicate_msg_id = %key.msg_id,
+            "suppressing replayed offer before active-session busy reclassification"
+        );
+        return Ok(true);
+    }
+    let Some(action) = classify_active_busy_offer(
+        config,
+        codec,
+        payload,
+        session.session_id,
+        config.security.replay_cache_size,
+    ) else {
+        return Ok(false);
+    };
+    match action {
+        ActiveBusyOfferAction::Ignore => {}
+        ActiveBusyOfferAction::ReplyBusy { key, session_id, sender } => {
+            if !session.active_busy_offers.record_if_new(key) {
+                return Ok(true);
+            }
+            publish_from_answer_session(
+                config,
+                event_tx,
+                session,
+                *sender.clone(),
+                OutgoingSignal {
+                    message: build_error_message(
+                        &config.node.peer_id,
+                        &sender.peer_id,
+                        session_id,
+                        FailureCode::Busy,
+                        "answer daemon already has an active session for this peer",
+                    ),
+                    response: true,
+                },
+                false,
+            )
+            .await?;
+        }
+    }
+    Ok(true)
+}
+
+async fn maybe_replace_pending_answer_session_via_events(
+    config: &AppConfig,
+    codec: &SignalCodec<'_>,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    payload: &[u8],
+) -> Result<bool, DaemonError> {
+    if session.bridge_state != BridgeSessionState::Pending {
+        return Ok(false);
+    }
+
+    let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
+    let Ok((envelope, message, sender)) = codec.decode(payload, &mut replay_cache, None) else {
+        return Ok(false);
+    };
+
+    let MessageBody::Offer(offer) = &message.body else {
+        return Ok(false);
+    };
+
+    if message.session_id == session.session_id || sender.peer_id != session.remote_peer_id {
+        return Ok(false);
+    }
+
+    if message.message_type.requires_ack() {
+        publish_from_answer_session(
+            config,
+            event_tx,
+            session,
+            sender.clone(),
+            OutgoingSignal {
+                message: codec.build_ack(
+                    sender.peer_id.clone(),
+                    message.session_id,
+                    envelope.msg_id,
+                ),
+                response: true,
+            },
+            false,
+        )
+        .await?;
+    }
+
+    if let Some(handle) = session.bridge_handle.take() {
+        handle.abort();
+        let _ = handle.await;
+    }
+    session.data_channel = None;
+    let _ = session.peer.close().await;
+
+    let peer = WebRtcPeer::new(&config.webrtc).await?;
+    peer.apply_remote_offer(&offer.sdp).await?;
+    let mut replacement = ActiveSession::new(
+        message.session_id,
+        sender.clone(),
+        peer,
+        config.security.replay_cache_size,
+    );
+    let answer_sdp = replacement.peer.create_answer().await?;
+    let replacement_session_id = replacement.session_id;
+    let replacement_remote = replacement.remote_authorized.clone();
+    let replacement_remote_peer_id = replacement.remote_peer_id.clone();
+    publish_from_answer_session(
+        config,
+        event_tx,
+        &mut replacement,
+        replacement_remote,
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                replacement_session_id,
+                config.node.peer_id.clone(),
+                replacement_remote_peer_id,
+            )
+            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+            response: false,
+        },
+        true,
+    )
+    .await?;
+    replacement.state = DaemonState::ConnectingDataChannel;
+    *session = replacement;
+    send_answer_session_status(config, event_tx, session).await?;
+    Ok(true)
+}
+
+async fn handle_active_answer_offer_via_events(
+    config: &AppConfig,
+    event_tx: &mpsc::Sender<AnswerSessionEvent>,
+    session: &mut ActiveSession,
+    offer: &OfferBody,
+) -> Result<(), DaemonError> {
+    session.state = DaemonState::Negotiating;
+    send_answer_session_status(config, event_tx, session).await?;
+    session.peer.apply_remote_offer(&offer.sdp).await?;
+    let answer_sdp = session.peer.create_answer().await?;
+    publish_from_answer_session(
+        config,
+        event_tx,
+        session,
+        session.remote_authorized.clone(),
+        OutgoingSignal {
+            message: InnerMessageBuilder::new(
+                session.session_id,
+                config.node.peer_id.clone(),
+                session.remote_peer_id.clone(),
+            )
+            .build(MessageBody::Answer(AnswerBody { sdp: answer_sdp })),
+            response: false,
+        },
+        true,
+    )
+    .await?;
+    session.state = DaemonState::ConnectingDataChannel;
+    send_answer_session_status(config, event_tx, session).await?;
+    Ok(())
 }
 
 fn handle_answer_incoming_data_channel(
@@ -1402,6 +1922,38 @@ async fn write_daemon_status(ctx: &RuntimeContext<'_>, snapshot: StatusSnapshot)
         ),
     )
     .await;
+}
+
+async fn write_answer_status(ctx: &RuntimeContext<'_>, snapshot: AnswerStatusSnapshot) {
+    write_status_or_log(
+        ctx.status,
+        DaemonStatus::with_sessions(
+            ctx.config.node.peer_id.clone(),
+            ctx.config.node.role.clone(),
+            ctx.runtime.mqtt_connected,
+            snapshot.current_state,
+            ctx.config.forwards.iter().map(|forward| forward.id.clone()).collect(),
+            ANSWER_SESSION_CAPACITY,
+            snapshot.sessions.iter().map(SessionStatusSnapshot::to_status).collect(),
+        ),
+    )
+    .await;
+}
+
+async fn write_answer_registry_status(
+    ctx: &RuntimeContext<'_>,
+    sessions: &HashMap<SessionId, AnswerSessionHandle>,
+) {
+    let mut session_statuses =
+        sessions.values().map(|session| session.status.clone()).collect::<Vec<_>>();
+    session_statuses.sort_by_key(|status| status.session_id.to_string());
+    let current_state = if session_statuses.len() == 1 {
+        session_statuses[0].state
+    } else {
+        steady_state_for_role(&ctx.config.node.role)
+    };
+    write_answer_status(ctx, AnswerStatusSnapshot { current_state, sessions: session_statuses })
+        .await;
 }
 
 async fn write_steady_state_status(ctx: &RuntimeContext<'_>) {
@@ -1602,6 +2154,108 @@ async fn publish_message<T: DaemonSignalingTransport>(
     Ok(())
 }
 
+async fn publish_answer_session_request<T: DaemonSignalingTransport>(
+    ctx: &mut RuntimeContext<'_>,
+    codec: &SignalCodec<'_>,
+    transport: &mut T,
+    request: PublishRequest,
+) {
+    let message_type = request.outgoing.message.message_type;
+    let session_id = request.outgoing.message.session_id;
+    let recipient_peer_id = request.recipient.peer_id.clone();
+    let encoded = codec.encode_for_peer(
+        &request.recipient,
+        &request.outgoing.message,
+        request.outgoing.response,
+    );
+    let result = match encoded {
+        Ok((envelope, payload)) => {
+            tracing::debug!(
+                session_id = %session_id,
+                recipient_peer_id = %recipient_peer_id,
+                sender_kid = %envelope.sender_kid,
+                recipient_kid = %envelope.recipient_kid,
+                msg_id = %envelope.msg_id,
+                message_type = ?message_type,
+                payload_len = payload.len(),
+                response = request.outgoing.response,
+                "publishing answer-session signaling message"
+            );
+            match transport
+                .publish_signal(
+                    &recipient_peer_id,
+                    &ctx.config.broker.topic_prefix,
+                    payload.clone(),
+                )
+                .await
+            {
+                Ok(()) => {
+                    mark_transport_usable(
+                        ctx,
+                        StatusSnapshot {
+                            active_session_id: Some(request.status.session_id),
+                            current_state: request.status.state,
+                        },
+                    )
+                    .await;
+                    Ok(PublishedSignal { msg_id: envelope.msg_id, message_type, payload })
+                }
+                Err(error) => {
+                    mark_transport_unusable(
+                        ctx,
+                        StatusSnapshot {
+                            active_session_id: Some(request.status.session_id),
+                            current_state: request.status.state,
+                        },
+                        &error,
+                    )
+                    .await;
+                    Err(error.into())
+                }
+            }
+        }
+        Err(error) => Err(error.into()),
+    };
+    let _ = request.result.send(result);
+}
+
+async fn request_session_publish(
+    tx: &mpsc::Sender<AnswerSessionEvent>,
+    recipient: AuthorizedKey,
+    outgoing: OutgoingSignal,
+    track_ack: bool,
+    status: SessionStatusSnapshot,
+) -> Result<Option<PublishedSignal>, DaemonError> {
+    let (result_tx, result_rx) = oneshot::channel();
+    tx.send(AnswerSessionEvent::Publish(Box::new(PublishRequest {
+        recipient,
+        outgoing,
+        status,
+        result: result_tx,
+    })))
+    .await
+    .map_err(|_| DaemonError::Logging("answer session event loop stopped".to_owned()))?;
+    let published = result_rx.await.map_err(|_| {
+        DaemonError::Logging("answer session publish response dropped".to_owned())
+    })??;
+    Ok(track_ack.then_some(published))
+}
+
+async fn request_raw_session_publish(
+    tx: &mpsc::Sender<AnswerSessionEvent>,
+    peer_id: PeerId,
+    payload: Vec<u8>,
+    status: SessionStatusSnapshot,
+) -> Result<(), DaemonError> {
+    let (result_tx, result_rx) = oneshot::channel();
+    tx.send(AnswerSessionEvent::RawPublish { peer_id, payload, status, result: result_tx })
+        .await
+        .map_err(|_| DaemonError::Logging("answer session event loop stopped".to_owned()))?;
+    result_rx
+        .await
+        .map_err(|_| DaemonError::Logging("answer raw publish response dropped".to_owned()))?
+}
+
 async fn retry_pending_acks<T: DaemonSignalingTransport>(
     ctx: &mut RuntimeContext<'_>,
     transport: &mut T,
@@ -1686,77 +2340,6 @@ async fn process_offer_session_payload<T: DaemonSignalingTransport>(
     }
     handle_offer_session_message(&message, session).await?;
     Ok(OfferSessionPayloadOutcome::Handled)
-}
-
-async fn maybe_handle_active_busy_offer<T: DaemonSignalingTransport>(
-    ctx: &mut RuntimeContext<'_>,
-    codec: &SignalCodec<'_>,
-    transport: &mut T,
-    active_busy_offers: &mut ActiveBusyOfferCache,
-    payload: &[u8],
-    active_session_id: SessionId,
-    replay_cache_size: usize,
-) -> Result<bool, DaemonError> {
-    if let Some(key) = replayed_active_busy_offer_key(payload, active_busy_offers) {
-        tracing::info!(
-            active_session_id = %active_session_id,
-            duplicate_msg_id = %key.msg_id,
-            "suppressing replayed offer before active-session busy reclassification"
-        );
-        return Ok(true);
-    }
-    let Some(action) = classify_active_busy_offer(
-        ctx.config,
-        codec,
-        payload,
-        active_session_id,
-        replay_cache_size,
-    ) else {
-        return Ok(false);
-    };
-    match action {
-        ActiveBusyOfferAction::Ignore => {}
-        ActiveBusyOfferAction::ReplyBusy { key, session_id, sender } => {
-            if !active_busy_offers.record_if_new(key) {
-                tracing::info!(
-                    peer_id = %sender.peer_id,
-                    active_session_id = %active_session_id,
-                    duplicate_msg_id = %key.msg_id,
-                    "suppressing duplicate busy reply for replayed offer during active answer session"
-                );
-                return Ok(true);
-            }
-            tracing::info!(
-                peer_id = %sender.peer_id,
-                active_session_id = %active_session_id,
-                rejected_session_id = %session_id,
-                "rejecting new offer with busy because answer daemon already has an active allowed session"
-            );
-            publish_message(
-                ctx,
-                codec,
-                transport,
-                StatusSnapshot {
-                    active_session_id: Some(active_session_id),
-                    current_state: DaemonState::ConnectingDataChannel,
-                },
-                None,
-                &sender,
-                OutgoingSignal {
-                    message: build_error_message(
-                        &ctx.config.node.peer_id,
-                        &sender.peer_id,
-                        session_id,
-                        FailureCode::Busy,
-                        "answer daemon already has an active session",
-                    ),
-                    response: true,
-                },
-            )
-            .await?;
-        }
-    }
-    Ok(true)
 }
 
 async fn maybe_ack_duplicate_active_session_message<T: DaemonSignalingTransport>(

@@ -858,7 +858,12 @@ The daemon writes local status JSON when enabled. Current fields include:
 - `mqtt_connected`
 - `active_session_id`
 - `current_state`
+- `active_session_count`
+- `session_capacity`
+- `sessions`
 - `configured_forwards`
+
+Each entry in `sessions` includes the session ID, remote peer ID, session state, data-channel-open flag, active stream count, and open/configured forward IDs. The answer daemon may report multiple concurrent sessions, one per active authorized offer peer.
 
 `mqtt_connected` is a best-effort latest-known signaling transport usability flag. Recoverable poll/publish failures should flip it to `false` before retry/backoff; later successful transport activity should flip it back to `true`.
 
