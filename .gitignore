@@ -21,3 +21,5 @@ target
 #.idea/
 
 run_copilot.sh
+p2ptunnel/
+tmp/
