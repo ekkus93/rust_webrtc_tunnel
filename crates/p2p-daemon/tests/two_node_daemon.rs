@@ -145,6 +145,37 @@ fn transport_pair(
     (offer_transport, answer_transport, trace)
 }
 
+fn transport_mesh(peer_ids: &[&str]) -> HashMap<String, InMemoryTransport> {
+    let mut senders = HashMap::new();
+    let mut receivers = HashMap::new();
+    for peer_id in peer_ids {
+        let (tx, rx) = mpsc::unbounded_channel();
+        senders.insert((*peer_id).to_owned(), tx);
+        receivers.insert((*peer_id).to_owned(), rx);
+    }
+    let trace = TransportTrace::default();
+    receivers
+        .into_iter()
+        .map(|(peer_id, inbox)| {
+            let routes = senders
+                .iter()
+                .filter(|(route_peer_id, _tx)| *route_peer_id != &peer_id)
+                .map(|(route_peer_id, tx)| (route_peer_id.clone(), tx.clone()))
+                .collect();
+            (
+                peer_id,
+                InMemoryTransport {
+                    inbox,
+                    routes,
+                    duplicate_first: HashMap::new(),
+                    delay_first_ms: HashMap::new(),
+                    trace: trace.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
 fn unique_path(name: &str) -> PathBuf {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -160,13 +191,22 @@ fn sample_config(
     target_port: u16,
 ) -> AppConfig {
     let peer_id = match role {
-        NodeRole::Offer => "offer-home".parse().expect("offer peer id"),
-        NodeRole::Answer => "answer-office".parse().expect("answer peer id"),
+        NodeRole::Offer => "offer-home",
+        NodeRole::Answer => "answer-office",
     };
-    let client_id = match role {
-        NodeRole::Offer => "offer-home".to_owned(),
-        NodeRole::Answer => "answer-office".to_owned(),
-    };
+    sample_config_for(role, status_file, listen_port, target_port, peer_id, vec!["offer-home"])
+}
+
+fn sample_config_for(
+    role: NodeRole,
+    status_file: PathBuf,
+    listen_port: u16,
+    target_port: u16,
+    peer_id: &str,
+    allow_remote_peers: Vec<&str>,
+) -> AppConfig {
+    let peer_id: p2p_core::PeerId = peer_id.parse().expect("peer id");
+    let client_id = peer_id.to_string();
 
     AppConfig {
         format: "p2ptunnel-config-v2".to_owned(),
@@ -212,7 +252,10 @@ fn sample_config(
             answer: Some(ForwardAnswerConfig {
                 target_host: "127.0.0.1".to_owned(),
                 target_port,
-                allow_remote_peers: vec!["offer-home".parse().expect("offer peer id")],
+                allow_remote_peers: allow_remote_peers
+                    .into_iter()
+                    .map(|peer_id| peer_id.parse().expect("allowed peer id"))
+                    .collect(),
             }),
         }],
         reconnect: ReconnectConfig {
@@ -263,6 +306,15 @@ fn authorized_keys_for(remote: &GeneratedIdentity) -> AuthorizedKeys {
     AuthorizedKeys::parse(&remote.public_identity.render()).expect("authorized keys should parse")
 }
 
+fn authorized_keys_for_many(remotes: &[&GeneratedIdentity]) -> AuthorizedKeys {
+    let content = remotes
+        .iter()
+        .map(|identity| identity.public_identity.render())
+        .collect::<Vec<_>>()
+        .join("\n");
+    AuthorizedKeys::parse(&content).expect("authorized keys should parse")
+}
+
 fn unused_local_port() -> u16 {
     std::net::TcpListener::bind(("127.0.0.1", 0))
         .expect("port probe should bind")
@@ -298,6 +350,24 @@ async fn wait_for_status(path: &Path, expected_state: &str) -> serde_json::Value
         assert!(
             tokio::time::Instant::now() < deadline,
             "status {expected_state} not observed in time"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_session_count(path: &Path, expected_count: usize) -> serde_json::Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if json["active_session_count"] == expected_count {
+                    return json;
+                }
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "active_session_count {expected_count} not observed in time"
         );
         sleep(Duration::from_millis(50)).await;
     }
@@ -634,4 +704,261 @@ async fn offer_and_answer_daemons_handle_two_forwards_concurrently() {
     let _ = answer_task.await;
     let _ = tokio::fs::remove_file(offer_status_path).await;
     let _ = tokio::fs::remove_file(answer_status_path).await;
+}
+
+#[tokio::test]
+async fn answer_daemon_serves_two_offer_peers_concurrently() {
+    let offer_home = generate_identity("offer-home").expect("offer-home identity should build");
+    let offer_desktop =
+        generate_identity("offer-desktop").expect("offer-desktop identity should build");
+    let answer_identity = generate_identity("answer-office").expect("answer identity should build");
+
+    let offer_home_keys = authorized_keys_for(&answer_identity);
+    let offer_desktop_keys = authorized_keys_for(&answer_identity);
+    let answer_keys = authorized_keys_for_many(&[&offer_home, &offer_desktop]);
+
+    let offer_home_status = unique_path("offer-home-status.json");
+    let offer_desktop_status = unique_path("offer-desktop-status.json");
+    let answer_status = unique_path("answer-v03-status.json");
+    let offer_home_port = unused_local_port();
+    let offer_desktop_port = unused_local_port();
+    let target_listener =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("target listener should bind");
+    let target_port = target_listener.local_addr().expect("target addr").port();
+
+    let offer_home_config = sample_config_for(
+        NodeRole::Offer,
+        offer_home_status.clone(),
+        offer_home_port,
+        target_port,
+        "offer-home",
+        vec!["offer-home"],
+    );
+    let offer_desktop_config = sample_config_for(
+        NodeRole::Offer,
+        offer_desktop_status.clone(),
+        offer_desktop_port,
+        target_port,
+        "offer-desktop",
+        vec!["offer-desktop"],
+    );
+    let answer_config = sample_config_for(
+        NodeRole::Answer,
+        answer_status.clone(),
+        offer_home_port,
+        target_port,
+        "answer-office",
+        vec!["offer-home", "offer-desktop"],
+    );
+
+    let mut transports = transport_mesh(&["offer-home", "offer-desktop", "answer-office"]);
+    let offer_home_transport = transports.remove("offer-home").expect("offer-home transport");
+    let offer_desktop_transport =
+        transports.remove("offer-desktop").expect("offer-desktop transport");
+    let answer_transport = transports.remove("answer-office").expect("answer transport");
+
+    let target_task = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = target_listener.accept().await.expect("target accept");
+            tokio::spawn(async move {
+                let mut request = [0_u8; 4];
+                stream.read_exact(&mut request).await.expect("target read");
+                stream.write_all(&request).await.expect("target write");
+                stream.shutdown().await.expect("target shutdown");
+            });
+        }
+    });
+
+    let offer_home_task = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+        offer_home_config,
+        clone_identity(&offer_home.identity),
+        offer_home_keys,
+        offer_home_transport,
+        None,
+    ));
+    let offer_desktop_task = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+        offer_desktop_config,
+        clone_identity(&offer_desktop.identity),
+        offer_desktop_keys,
+        offer_desktop_transport,
+        None,
+    ));
+    let answer_task = tokio::spawn(run_answer_daemon_with_transport(
+        answer_config,
+        clone_identity(&answer_identity.identity),
+        answer_keys,
+        answer_transport,
+    ));
+
+    let home_client = tokio::spawn(async move {
+        let mut client = connect_with_retry(offer_home_port).await;
+        client.write_all(b"home").await.expect("home client write");
+        let mut response = [0_u8; 4];
+        client.read_exact(&mut response).await.expect("home client read");
+        assert_eq!(&response, b"home");
+    });
+    let desktop_client = tokio::spawn(async move {
+        let mut client = connect_with_retry(offer_desktop_port).await;
+        client.write_all(b"desk").await.expect("desktop client write");
+        let mut response = [0_u8; 4];
+        client.read_exact(&mut response).await.expect("desktop client read");
+        assert_eq!(&response, b"desk");
+    });
+
+    timeout(Duration::from_secs(20), home_client)
+        .await
+        .expect("home client should finish")
+        .expect("home client should succeed");
+    timeout(Duration::from_secs(20), desktop_client)
+        .await
+        .expect("desktop client should finish")
+        .expect("desktop client should succeed");
+
+    let status = wait_for_session_count(&answer_status, 2).await;
+    let sessions = status["sessions"].as_array().expect("sessions array");
+    assert!(sessions.iter().any(|session| session["remote_peer_id"] == "offer-home"));
+    assert!(sessions.iter().any(|session| session["remote_peer_id"] == "offer-desktop"));
+
+    target_task.abort();
+    offer_home_task.abort();
+    offer_desktop_task.abort();
+    answer_task.abort();
+    let _ = target_task.await;
+    let _ = offer_home_task.await;
+    let _ = offer_desktop_task.await;
+    let _ = answer_task.await;
+    let _ = tokio::fs::remove_file(offer_home_status).await;
+    let _ = tokio::fs::remove_file(offer_desktop_status).await;
+    let _ = tokio::fs::remove_file(answer_status).await;
+}
+
+#[tokio::test]
+async fn target_connect_failure_for_one_peer_does_not_break_another_peer() {
+    let offer_home = generate_identity("offer-home").expect("offer-home identity should build");
+    let offer_desktop =
+        generate_identity("offer-desktop").expect("offer-desktop identity should build");
+    let answer_identity = generate_identity("answer-office").expect("answer identity should build");
+
+    let offer_home_keys = authorized_keys_for(&answer_identity);
+    let offer_desktop_keys = authorized_keys_for(&answer_identity);
+    let answer_keys = authorized_keys_for_many(&[&offer_home, &offer_desktop]);
+
+    let offer_home_status = unique_path("offer-home-fail-status.json");
+    let offer_desktop_status = unique_path("offer-desktop-ok-status.json");
+    let answer_status = unique_path("answer-failure-isolation-status.json");
+    let bad_offer_port = unused_local_port();
+    let good_offer_port = unused_local_port();
+    let bad_target_port = unused_local_port();
+    let good_target =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("good target listener should bind");
+    let good_target_port = good_target.local_addr().expect("good target addr").port();
+
+    let mut bad_offer_config = sample_config_for(
+        NodeRole::Offer,
+        offer_home_status.clone(),
+        bad_offer_port,
+        bad_target_port,
+        "offer-home",
+        vec!["offer-home"],
+    );
+    bad_offer_config.forwards[0].id = "bad".to_owned();
+    let mut good_offer_config = sample_config_for(
+        NodeRole::Offer,
+        offer_desktop_status.clone(),
+        good_offer_port,
+        good_target_port,
+        "offer-desktop",
+        vec!["offer-desktop"],
+    );
+    good_offer_config.forwards[0].id = "good".to_owned();
+    let mut answer_config = sample_config_for(
+        NodeRole::Answer,
+        answer_status.clone(),
+        bad_offer_port,
+        bad_target_port,
+        "answer-office",
+        vec!["offer-home"],
+    );
+    answer_config.forwards[0].id = "bad".to_owned();
+    answer_config.forwards.push(ForwardRule {
+        id: "good".to_owned(),
+        offer: Some(ForwardOfferConfig {
+            listen_host: "127.0.0.1".to_owned(),
+            listen_port: good_offer_port,
+        }),
+        answer: Some(ForwardAnswerConfig {
+            target_host: "127.0.0.1".to_owned(),
+            target_port: good_target_port,
+            allow_remote_peers: vec!["offer-desktop".parse().expect("desktop peer id")],
+        }),
+    });
+
+    let mut transports = transport_mesh(&["offer-home", "offer-desktop", "answer-office"]);
+    let offer_home_transport = transports.remove("offer-home").expect("offer-home transport");
+    let offer_desktop_transport =
+        transports.remove("offer-desktop").expect("offer-desktop transport");
+    let answer_transport = transports.remove("answer-office").expect("answer transport");
+
+    let good_target_task = tokio::spawn(async move {
+        let (mut stream, _) = good_target.accept().await.expect("good target accept");
+        let mut request = [0_u8; 4];
+        stream.read_exact(&mut request).await.expect("good target read");
+        assert_eq!(&request, b"good");
+        stream.write_all(b"GOOD").await.expect("good target write");
+        stream.shutdown().await.expect("good target shutdown");
+    });
+
+    let bad_offer_task = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+        bad_offer_config,
+        clone_identity(&offer_home.identity),
+        offer_home_keys,
+        offer_home_transport,
+        None,
+    ));
+    let good_offer_task = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+        good_offer_config,
+        clone_identity(&offer_desktop.identity),
+        offer_desktop_keys,
+        offer_desktop_transport,
+        None,
+    ));
+    let answer_task = tokio::spawn(run_answer_daemon_with_transport(
+        answer_config,
+        clone_identity(&answer_identity.identity),
+        answer_keys,
+        answer_transport,
+    ));
+
+    let mut bad_client = connect_with_retry(bad_offer_port).await;
+    bad_client.write_all(b"fail").await.expect("bad client write");
+    let mut bad_response = [0_u8; 4];
+    let bad_error = timeout(Duration::from_secs(15), bad_client.read_exact(&mut bad_response))
+        .await
+        .expect("bad client should fail in time")
+        .expect_err("bad client should not receive bytes");
+    assert_eq!(bad_error.kind(), std::io::ErrorKind::ConnectionReset);
+
+    let mut good_client = connect_with_retry(good_offer_port).await;
+    good_client.write_all(b"good").await.expect("good client write");
+    let mut good_response = [0_u8; 4];
+    timeout(Duration::from_secs(15), good_client.read_exact(&mut good_response))
+        .await
+        .expect("good client should receive response in time")
+        .expect("good client should read response");
+    assert_eq!(&good_response, b"GOOD");
+
+    timeout(Duration::from_secs(15), good_target_task)
+        .await
+        .expect("good target should finish")
+        .expect("good target should succeed");
+
+    bad_offer_task.abort();
+    good_offer_task.abort();
+    answer_task.abort();
+    let _ = bad_offer_task.await;
+    let _ = good_offer_task.await;
+    let _ = answer_task.await;
+    let _ = tokio::fs::remove_file(offer_home_status).await;
+    let _ = tokio::fs::remove_file(offer_desktop_status).await;
+    let _ = tokio::fs::remove_file(answer_status).await;
 }

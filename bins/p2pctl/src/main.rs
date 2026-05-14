@@ -139,8 +139,49 @@ fn status(path: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let content = fs::read_to_string(status_file)?;
-    let _: serde_json::Value = serde_json::from_str(&content)?;
-    println!("{content}");
+    let status: serde_json::Value = serde_json::from_str(&content)?;
+    println!(
+        "peer_id={} role={} mqtt_connected={} state={}",
+        status["peer_id"].as_str().unwrap_or("unknown"),
+        status["role"].as_str().unwrap_or("unknown"),
+        status["mqtt_connected"].as_bool().unwrap_or(false),
+        status["current_state"].as_str().unwrap_or("unknown")
+    );
+    if let Some(count) = status["active_session_count"].as_u64() {
+        let capacity = status["session_capacity"]
+            .as_u64()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        println!("sessions={count}/{capacity}");
+    }
+    match status["sessions"].as_array() {
+        Some(sessions) if sessions.is_empty() => println!("sessions: none"),
+        None => println!("sessions: none"),
+        Some(sessions) => {
+            println!("sessions:");
+            for session in sessions {
+                let forwards = session["open_forward_ids"]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                println!(
+                    "  {} peer={} state={} data_channel_open={} active_streams={} forwards={}",
+                    session["session_id"].as_str().unwrap_or("unknown"),
+                    session["remote_peer_id"].as_str().unwrap_or("unknown"),
+                    session["state"].as_str().unwrap_or("unknown"),
+                    session["data_channel_open"].as_bool().unwrap_or(false),
+                    session["active_stream_count"].as_u64().unwrap_or(0),
+                    forwards
+                );
+            }
+        }
+    }
     Ok(())
 }
 

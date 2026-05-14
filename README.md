@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml)
 
-`rust_webrtc` is a CLI-only secure TCP tunnel that carries multiple logical TCP streams over one reliable ordered WebRTC data channel while using MQTT only as an untrusted signaling transport.
+`rust_webrtc` is a CLI-only secure TCP tunnel that carries multiple logical TCP streams over reliable ordered WebRTC data channels while using MQTT only as an untrusted signaling transport.
 
 GitHub Actions runs linting and tests for normal branch and pull request CI. Release artifacts are uploaded only for tagged pushes.
 
@@ -52,10 +52,10 @@ At runtime:
 1. The offer node binds one local TCP listener per configured forward.
 2. It creates an encrypted signaling session over MQTT.
 3. The answer node validates the sender against `authorized_keys`.
-4. Both sides establish a reliable, ordered WebRTC data channel named `tunnel`.
-5. Tunnel frames carry many logical TCP streams with explicit `stream_id` values and `OPEN`, `DATA`, `CLOSE`, `ERROR`, `PING`, and `PONG` messages.
+4. Each active offer peer establishes one reliable, ordered WebRTC data channel named `tunnel`.
+5. Tunnel frames carry many logical TCP streams with explicit `stream_id` values and `OPEN`, `DATA`, `CLOSE`, `ERROR`, `PING`, and `PONG` messages inside that peer session.
 
-The WebRTC session is persistent across logical stream closures: after the last stream closes, the data channel remains available for future local clients. Ordinary WebRTC/session failures tear down the active session and return the daemons to waiting/recovery.
+Each offer machine should use its own identity and `peer_id`. One answer daemon can serve multiple authorized offer peers concurrently, with at most one active WebRTC session per `peer_id`. Each WebRTC session is persistent across logical stream closures: after the last stream closes, the data channel remains available for future local clients from that peer. Ordinary WebRTC/session failures tear down only the affected session and leave unrelated peer sessions running.
 
 ## Trust model
 
@@ -490,7 +490,7 @@ Every encrypted signaling message carries a `msg_id`, timestamps are freshness-c
 - logs can write to stdout, a local file, or both
 - secrets are always redacted
 - SDP and ICE candidates are redacted by default
-- the daemon writes a local `status.json` with peer ID, role, latest-known MQTT transport usability, session ID, daemon state, and configured forward IDs
+- the daemon writes a local `status.json` with peer ID, role, latest-known MQTT transport usability, daemon state, configured forward IDs, active session count/capacity, and per-session records
 
 The daemon creates `~/.local/state/p2ptunnel/status.json` when status-file writing is enabled, so you do not normally create it by hand. `p2pctl status --config ~/.config/p2ptunnel/config.toml` expects that file to already exist, which usually means you need to start `p2p-offer run` or `p2p-answer run` first and let it write an initial status snapshot.
 
@@ -509,13 +509,13 @@ These are the intended end-to-end checks for operators:
 3. local SSH-style tunnel through the data channel
 4. disconnect and reconnect attempt
 
-## v2 constraints
+## Runtime constraints
 
 - CLI only
 - no GUI
 - no TURN support
 - no plaintext signaling
 - no unsigned signaling
-- one active tunnel session at a time; multiple TCP streams multiplex within that session, and the answer side rejects a second allowed peer with encrypted `busy`
+- one active tunnel session per offer peer; multiple authorized offer peers can be served concurrently by one answer daemon, and a second unrelated session from the same peer is rejected with encrypted `busy`
 - no retained MQTT signaling messages
 - no default logging of secrets, SDP, ICE candidates, or decrypted payloads

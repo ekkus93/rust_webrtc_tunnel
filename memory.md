@@ -415,3 +415,16 @@
 
 ## 2026-05-13T23:09:55Z - GPT-5.5 - Multiplexed forwarding fix3 completed
 - Implemented Fix 3: malformed answer-side OPEN is stream-local protocol_error, offer sessions persist across zero streams until accepted-client shutdown, docs/guards were updated, and Fix 3 TODO checklist was completed.
+
+## 2026-05-14T23:12:23Z - GPT-5.5 - Baseline reread refreshed
+- Re-read `README.md` and `memory.md` to refresh the current project baseline before further work.
+- The active baseline remains: CLI-only Rust secure TCP tunnel, one reliable ordered WebRTC data channel named `tunnel`, MQTT treated as untrusted signaling transport, encrypted and signed signaling, SSH-like identity plus `authorized_keys` workflow, STUN-only, v2 multiplexed forwarding over one active tunnel session, and latest-known `mqtt_connected` status semantics.
+
+## 2026-05-14T23:13:51Z - GPT-5.5 - v0.3 docs reread
+- Read `docs/V03_SPEC.md` and `docs/V03_TODO.md`.
+- v0.3 target is multiple simultaneous authorized offer-peer sessions served by one answer daemon, with one session per peer, unchanged signaling/tunnel wire formats and config shape, per-session failure isolation, centralized MQTT polling, multi-session status/logging, and preserved offer-side reconnect ownership.
+
+## 2026-05-14T23:31:44Z - GPT-5.5 - v0.3 multi-session answer implemented
+- Implemented the v0.3 answer-daemon multi-session manager with centralized MQTT polling, per-peer session routing, one active session per peer, internal session capacity, session-local task cleanup, same-peer pending replacement, multi-session status JSON, and readable `p2pctl status` output.
+- Added daemon integration coverage for two authorized offer peers served concurrently and for target-connect failure in one peer session not breaking another peer, then marked `docs/V03_TODO.md` complete.
+- Full workspace validation passed with `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-targets`.
