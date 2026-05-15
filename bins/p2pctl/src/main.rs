@@ -252,7 +252,7 @@ mod tests {
             "peer_id": "answer-office",
             "role": "answer",
             "mqtt_connected": true,
-            "current_state": "idle",
+            "current_state": "serving",
             "active_session_count": 0,
             "session_capacity": 16,
             "sessions": [],
@@ -260,7 +260,7 @@ mod tests {
         }));
 
         assert!(
-            output.contains("peer_id=answer-office role=answer mqtt_connected=true state=idle")
+            output.contains("peer_id=answer-office role=answer mqtt_connected=true state=serving")
         );
         assert!(output.contains("sessions=0/16"));
         assert!(output.contains("sessions: none"));

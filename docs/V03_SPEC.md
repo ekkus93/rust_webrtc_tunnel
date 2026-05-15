@@ -343,7 +343,7 @@ Recommended per-session status fields:
 
 `active_stream_count` is omitted until it can be populated from real multiplex-runtime state. Configured forward IDs must not be labeled as open/active forward IDs.
 
-When one or more answer-side sessions are active, daemon-level `current_state` reports `serving`; individual session lifecycle details remain in the per-session entries.
+For a healthy answer daemon, daemon-level `current_state` reports `serving` with zero or more active sessions; individual session lifecycle details remain in the per-session entries.
 
 Status output must remain local-only and must not publish plaintext status over MQTT.
 
