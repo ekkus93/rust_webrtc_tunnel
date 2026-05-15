@@ -1,3 +1,7 @@
+## 2026-05-15T20:56:02Z - GPT-5.4 - Tagged releases publish GitHub assets
+- The CI workflow now gives tagged pushes `contents: write`, builds release tarballs for the supported OS matrix, and publishes those tarballs as GitHub release assets instead of only keeping them as Actions artifacts.
+- README now states that tagged pushes build release tarballs and publish them as GitHub release assets.
+
 ## 2026-05-15T17:24:33Z - GPT-5.4 - Offer active ICE failure recovery fixed
 - The offer daemon now keeps its active multiplex bridge under the session loop instead of handing off control inline, so an active ICE disconnect or failure tears down the current client/session cleanly and returns the offer daemon to `waiting_for_local_client` instead of getting stuck.
 - Added a focused two-node regression that opens a live tunnel, injects an offer-side ICE disconnect after the tunnel is active, verifies the client is dropped, and checks that offer/answer daemons recover to `waiting_for_local_client` and `idle`.

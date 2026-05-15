@@ -4,7 +4,7 @@
 
 `rust_webrtc` is a CLI-only secure TCP tunnel that carries multiple logical TCP streams over one reliable ordered WebRTC data channel while using MQTT only as an untrusted signaling transport.
 
-GitHub Actions runs linting and tests for normal branch and pull request CI. Release artifacts are uploaded only for tagged pushes.
+GitHub Actions runs linting and tests for normal branch and pull request CI. Tagged pushes build release tarballs and publish them as GitHub release assets.
 
 ## Build
 
