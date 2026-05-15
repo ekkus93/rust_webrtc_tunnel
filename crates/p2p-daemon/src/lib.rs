@@ -15,6 +15,8 @@ mod status;
 
 use std::collections::{HashSet, VecDeque};
 use std::env;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use p2p_core::{
@@ -51,6 +53,16 @@ struct OfferSessionIo<'a> {
     #[cfg(any(test, debug_assertions))]
     session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
 }
+
+type OfferAcceptedClients<'a> =
+    &'a mut mpsc::Receiver<Result<OfferClient, p2p_tunnel::TunnelError>>;
+type OfferBridgeFuture<'a> = Pin<
+    Box<
+        dyn Future<Output = (Result<(), p2p_tunnel::TunnelError>, OfferAcceptedClients<'a>)>
+            + Send
+            + 'a,
+    >,
+>;
 
 const DAEMON_RUNTIME_RETRY_DELAY: Duration = Duration::from_secs(1);
 
@@ -536,12 +548,12 @@ pub fn compute_backoff_delay(config: &AppConfig, attempt: u32) -> Duration {
     Duration::from_millis(base_ms.saturating_add_signed(jitter))
 }
 
-async fn run_offer_session<T: DaemonSignalingTransport>(
-    config: &AppConfig,
+async fn run_offer_session<'a, T: DaemonSignalingTransport>(
+    config: &'a AppConfig,
     codec: &SignalCodec<'_>,
     transport: &mut T,
     ctx: &mut RuntimeContext<'_>,
-    io: OfferSessionIo<'_>,
+    io: OfferSessionIo<'a>,
 ) -> Result<(), DaemonError> {
     let remote = io.remote;
     let peer = WebRtcPeer::new(&config.webrtc).await?;
@@ -627,11 +639,13 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
 
     let mut tick = interval(Duration::from_secs(1));
     let mut pending_client = Some(io.client);
-    let accepted_clients = io.accepted_clients;
+    let mut accepted_clients = Some(io.accepted_clients);
+    let mut offer_bridge: Option<OfferBridgeFuture<'a>> = None;
     let result = async {
         loop {
             if pending_client.is_some()
                 && session.data_channel.as_ref().is_some_and(|channel| channel.is_open())
+                && offer_bridge.is_none()
             {
                 write_daemon_status(
                     ctx,
@@ -644,13 +658,19 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                 session.bridge_state = BridgeSessionState::Active;
                 let channel =
                     session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?;
-                return Ok(p2p_tunnel::run_multiplex_offer(
-                    channel,
-                    &config.tunnel,
-                    pending_client.take().ok_or(DaemonError::MissingDataChannel)?,
-                    accepted_clients,
-                )
-                .await?);
+                let active_clients = accepted_clients.take().ok_or_else(|| {
+                    DaemonError::Logging(
+                        "offer session lost accepted-client queue while bridge was starting"
+                            .to_owned(),
+                    )
+                })?;
+                let client = pending_client.take().ok_or(DaemonError::MissingDataChannel)?;
+                offer_bridge = Some(Box::pin(async move {
+                    let result =
+                        p2p_tunnel::run_multiplex_offer(channel, &config.tunnel, client, active_clients)
+                            .await;
+                    (result, active_clients)
+                }));
             }
             tokio::select! {
                 _ = tick.tick() => {
@@ -704,6 +724,7 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                 ice_state = session.peer.next_ice_state() => {
                     if let Some(ice_state) = ice_state {
                         if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
+                            offer_bridge = None;
                             if let Some(handle) = session.bridge_handle.take() {
                                 handle.abort();
                             }
@@ -806,6 +827,41 @@ async fn run_offer_session<T: DaemonSignalingTransport>(
                     )
                     .await;
                     result?;
+                    return Ok(());
+                }
+                bridge_result = async {
+                    let bridge = offer_bridge.as_mut().expect("guarded by select");
+                    bridge.as_mut().await
+                }, if offer_bridge.is_some() => {
+                    offer_bridge = None;
+                    let (bridge_result, returned_clients) = bridge_result;
+                    accepted_clients = Some(returned_clients);
+                    session.bridge_state = BridgeSessionState::Closed;
+                    let _ = publish_message(
+                        ctx,
+                        codec,
+                        transport,
+                        StatusSnapshot {
+                            active_session_id: Some(session.session_id),
+                            current_state: session.state,
+                        },
+                        Some(&mut session.signaling),
+                        remote,
+                        OutgoingSignal {
+                            message: InnerMessageBuilder::new(
+                                session.session_id,
+                                config.node.peer_id.clone(),
+                                session.remote_peer_id.clone(),
+                            )
+                            .build(MessageBody::Close(CloseBody {
+                                reason_code: "session_closed".to_owned(),
+                                message: None,
+                            })),
+                            response: false,
+                        },
+                    )
+                    .await;
+                    bridge_result?;
                     return Ok(());
                 }
             }
