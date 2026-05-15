@@ -480,6 +480,112 @@ async fn run_one_in_memory_session(
     let _ = tokio::fs::remove_file(answer_status_path).await;
 }
 
+async fn run_active_offer_disconnect_session() {
+    let offer_identity = generate_identity("offer-home").expect("offer identity should build");
+    let answer_identity = generate_identity("answer-office").expect("answer identity should build");
+    let offer_keys = authorized_keys_for(&answer_identity);
+    let answer_keys = authorized_keys_for(&offer_identity);
+    let offer_identity_for_task = clone_identity(&offer_identity.identity);
+    let answer_identity_for_task = clone_identity(&answer_identity.identity);
+    let offer_keys_for_task = offer_keys.clone();
+    let answer_keys_for_task = answer_keys.clone();
+
+    let offer_status_path = unique_path("offer-active-disconnect-status.json");
+    let answer_status_path = unique_path("answer-active-disconnect-status.json");
+    let offer_port = unused_local_port();
+
+    let target_listener =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("target listener should bind");
+    let target_port = target_listener.local_addr().expect("target local addr should exist").port();
+
+    let offer_config =
+        sample_config(NodeRole::Offer, offer_status_path.clone(), offer_port, target_port);
+    let answer_config =
+        sample_config(NodeRole::Answer, answer_status_path.clone(), offer_port, target_port);
+    let (offer_transport, answer_transport, _trace) = transport_pair(0, 0);
+    let (hook_tx, mut hook_rx) = mpsc::unbounded_channel();
+
+    let target_server = tokio::spawn(async move {
+        let (mut stream, _) = target_listener.accept().await.expect("target accept should succeed");
+        let mut received = [0_u8; 4];
+        stream.read_exact(&mut received).await.expect("target should read request bytes");
+        assert_eq!(&received, b"ping");
+        stream.write_all(b"pong").await.expect("target should write response bytes");
+        sleep(Duration::from_secs(30)).await;
+    });
+
+    let offer_task = tokio::spawn(run_offer_daemon_with_transport_and_test_hook(
+        offer_config,
+        offer_identity_for_task,
+        offer_keys_for_task,
+        offer_transport,
+        Some(hook_tx),
+    ));
+    let answer_task = tokio::spawn(run_answer_daemon_with_transport(
+        answer_config,
+        answer_identity_for_task,
+        answer_keys_for_task,
+        answer_transport,
+    ));
+
+    let mut client = connect_with_retry(offer_port).await;
+    let OfferSessionTestHandle { ice_state_injector, .. } =
+        timeout(Duration::from_secs(10), hook_rx.recv())
+            .await
+            .expect("offer session hook should arrive in time")
+            .expect("offer session hook should contain a handle");
+
+    client.write_all(b"ping").await.expect("client should write request bytes");
+    let mut response = [0_u8; 4];
+    timeout(Duration::from_secs(15), client.read_exact(&mut response))
+        .await
+        .expect("client should receive tunnel response in time")
+        .expect("client should read response bytes");
+    assert_eq!(&response, b"pong");
+
+    let offer_open = wait_for_status(&offer_status_path, "tunnel_open").await;
+    assert_eq!(offer_open["current_state"], "tunnel_open");
+
+    ice_state_injector
+        .inject(IceConnectionState::Disconnected)
+        .await
+        .expect("offer-side active-session ice fault injection should succeed");
+
+    let mut tail = [0_u8; 1];
+    let client_read = timeout(Duration::from_secs(15), client.read(&mut tail))
+        .await
+        .expect("client should observe closure after active-session ICE failure");
+    match client_read {
+        Ok(0) => {}
+        Ok(read) => panic!("expected tunnel closure after ICE failure, got {read} bytes"),
+        Err(error) => {
+            assert!(
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::UnexpectedEof
+                ),
+                "unexpected client read error after ICE failure: {error}"
+            );
+        }
+    }
+
+    let offer_status = wait_for_status(&offer_status_path, "waiting_for_local_client").await;
+    let answer_status = wait_for_status(&answer_status_path, "idle").await;
+    assert_eq!(offer_status["current_state"], "waiting_for_local_client");
+    assert_eq!(answer_status["current_state"], "idle");
+
+    offer_task.abort();
+    answer_task.abort();
+    target_server.abort();
+    let _ = offer_task.await;
+    let _ = answer_task.await;
+    let _ = target_server.await;
+    let _ = tokio::fs::remove_file(offer_status_path).await;
+    let _ = tokio::fs::remove_file(answer_status_path).await;
+}
+
 #[tokio::test]
 async fn offer_and_answer_daemons_complete_one_in_memory_session() {
     run_one_in_memory_session(0, false, true, true).await;
@@ -498,6 +604,11 @@ async fn offer_side_drives_reconnect_after_injected_disconnect() {
 #[tokio::test]
 async fn active_session_ice_restart_recovers_pending_local_client() {
     run_one_in_memory_session(0, true, true, true).await;
+}
+
+#[tokio::test]
+async fn active_offer_session_ice_failure_returns_daemon_to_waiting() {
+    run_active_offer_disconnect_session().await;
 }
 
 #[tokio::test]
