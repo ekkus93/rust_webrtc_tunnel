@@ -454,3 +454,7 @@
 ## 2026-05-15T06:07:08Z - GPT-5.5 - Integration test TODO implemented
 - Implemented `docs/INT_TEST1_TODO.md`: expanded the in-memory integration harness with route-scoped fault injection and added multi-session tests for transport turbulence, restart, stream churn, same-peer pressure, malformed authenticated signaling, and status-file churn.
 - Full workspace validation passed with `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-targets`.
+
+## 2026-05-15T06:55:50Z - GPT-5.5 - V03 FIX2 implemented
+- Implemented `docs/V03_FIX2_TODO.md`: unknown-session non-offer messages no longer peer-fallback route, healthy answer steady-state status reports `serving`, and canonical docs now describe current v0.3 multi-session behavior.
+- Added focused daemon, p2pctl, and canonical-doc guard tests. Full workspace validation passed with fmt, clippy `-D warnings`, and all workspace tests.

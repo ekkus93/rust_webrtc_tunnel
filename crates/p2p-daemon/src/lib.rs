@@ -590,11 +590,12 @@ async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
         return;
     }
 
-    if let Some(existing_session_id) = session_by_peer.get(&decoded.sender.peer_id).copied() {
-        if let Some(handle) = sessions_by_id.get(&existing_session_id) {
-            route_authenticated_signal(handle, decoded).await;
-            return;
-        }
+    if matches!(decoded.message.body, MessageBody::Offer(_))
+        && let Some(existing_session_id) = session_by_peer.get(&decoded.sender.peer_id).copied()
+        && let Some(handle) = sessions_by_id.get(&existing_session_id)
+    {
+        route_authenticated_signal(handle, decoded).await;
+        return;
     }
 
     match &decoded.message.body {
@@ -1947,7 +1948,7 @@ fn spawn_offer_accept_loops(
 fn steady_state_for_role(role: &NodeRole) -> DaemonState {
     match role {
         NodeRole::Offer => DaemonState::WaitingForLocalClient,
-        NodeRole::Answer => DaemonState::Idle,
+        NodeRole::Answer => DaemonState::Serving,
     }
 }
 
@@ -1989,11 +1990,7 @@ async fn write_answer_registry_status(
     let mut session_statuses =
         sessions.values().map(|session| session.status.clone()).collect::<Vec<_>>();
     session_statuses.sort_by_key(|status| status.session_id.to_string());
-    let current_state = if session_statuses.is_empty() {
-        steady_state_for_role(&ctx.config.node.role)
-    } else {
-        DaemonState::Serving
-    };
+    let current_state = DaemonState::Serving;
     write_answer_status(ctx, AnswerStatusSnapshot { current_state, sessions: session_statuses })
         .await;
 }
@@ -3583,7 +3580,30 @@ mod tests {
     #[test]
     fn steady_state_matches_v1_role_policy() {
         assert_eq!(steady_state_for_role(&NodeRole::Offer), DaemonState::WaitingForLocalClient);
-        assert_eq!(steady_state_for_role(&NodeRole::Answer), DaemonState::Idle);
+        assert_eq!(steady_state_for_role(&NodeRole::Answer), DaemonState::Serving);
+    }
+
+    #[test]
+    fn canonical_specs_do_not_present_stale_single_session_rules_as_current() {
+        let specs = include_str!("../../../docs/RUST_WEBRTC_SPECS.md");
+        assert!(
+            !specs.contains("One active peer tunnel session at a time"),
+            "canonical specs must not present the old global single-session rule as current"
+        );
+        assert!(
+            !specs.contains("Multiple simultaneous WebRTC peer sessions"),
+            "canonical specs must not list current v0.3 multi-peer sessions as out of scope"
+        );
+        assert!(
+            specs.contains("One active unrelated peer tunnel session per authenticated `peer_id`."),
+            "canonical specs should document the current per-peer session limit"
+        );
+        assert!(
+            specs.contains(
+                "daemon-level `current_state` reports `serving` with zero or more active sessions"
+            ),
+            "canonical specs should document answer Serving status semantics"
+        );
     }
 
     #[tokio::test]
@@ -3892,6 +3912,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn answer_registry_reports_serving_with_zero_sessions() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        let (path, status_writer) = status_writer_for_test(&mut config, "serving-zero-registry");
+        let config = Arc::new(config);
+        let mut runtime = connected_runtime();
+        let ctx = RuntimeContext { config: &config, status: &status_writer, runtime: &mut runtime };
+        let sessions_by_id = HashMap::new();
+
+        write_answer_registry_status(&ctx, &sessions_by_id).await;
+
+        let status = read_status_file(&path).await;
+        assert_eq!(status["current_state"], "serving");
+        assert_eq!(status["role"], "answer");
+        assert_eq!(status["active_session_count"], 0);
+        assert!(status["sessions"].as_array().expect("sessions should be an array").is_empty());
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
     async fn answer_daemon_ignores_unknown_authenticated_non_offer() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
@@ -3953,6 +3993,156 @@ mod tests {
         assert!(sessions_by_id.is_empty());
         assert!(session_by_peer.is_empty());
         assert!(transport.published.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn answer_daemon_does_not_peer_fallback_route_unknown_non_offer() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        config.node.peer_id = "answer-office".parse().expect("answer peer id");
+        config.health.write_status_file = false;
+        let config = Arc::new(config);
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let authorized_keys =
+            Arc::new(AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys"));
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let local_identity = Arc::new(answer.identity);
+        let codec = SignalCodec::new(&local_identity, &authorized_keys, 120, 300);
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let mut transport = RecordingTransport::default();
+        let status = StatusWriter::new(&config);
+        let mut runtime = connected_runtime();
+        let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
+        let (event_tx, _event_rx) = mpsc::channel(4);
+        let mut replay_cache = ReplayCache::new(64);
+        let mut sessions_by_id = HashMap::new();
+        let mut session_by_peer = HashMap::new();
+        let mut next_generation = 1_u64;
+        let active_session = SessionId::random();
+        let (handle, mut rx) = test_answer_handle(
+            active_session,
+            SessionGeneration(1),
+            offer.identity.peer_id.clone(),
+            DaemonState::TunnelOpen,
+        );
+        sessions_by_id.insert(active_session, handle);
+        session_by_peer.insert(offer.identity.peer_id.clone(), active_session);
+
+        let message = InnerMessageBuilder::new(
+            SessionId::random(),
+            offer.identity.peer_id.clone(),
+            local_identity.peer_id.clone(),
+        )
+        .build(MessageBody::Error(ErrorBody {
+            code: FailureCode::ProtocolError.as_str().to_owned(),
+            message: "unknown session must not fallback-route".to_owned(),
+            fatal: false,
+        }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&local_identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("payload encodes");
+
+        handle_answer_daemon_payload(
+            &config,
+            &local_identity,
+            &authorized_keys,
+            &codec,
+            &mut transport,
+            &mut ctx,
+            &event_tx,
+            &mut replay_cache,
+            &mut sessions_by_id,
+            &mut session_by_peer,
+            &mut next_generation,
+            payload,
+        )
+        .await;
+
+        assert!(rx.try_recv().is_err(), "unknown-session non-offer must not route by peer");
+        assert!(
+            transport.published.lock().await.is_empty(),
+            "unknown-session non-offer must not receive accepted-message ACK"
+        );
+        assert_eq!(sessions_by_id[&active_session].status.state, DaemonState::TunnelOpen);
+    }
+
+    #[tokio::test]
+    async fn answer_daemon_unknown_same_peer_offer_enters_session_policy() {
+        let mut config = sample_config();
+        config.node.role = NodeRole::Answer;
+        config.node.peer_id = "answer-office".parse().expect("answer peer id");
+        config.health.write_status_file = false;
+        let config = Arc::new(config);
+        let answer = generate_identity("answer-office").expect("answer identity");
+        let offer = generate_identity("offer-home").expect("offer identity");
+        let authorized_keys =
+            Arc::new(AuthorizedKeys::parse(&offer.public_identity.render()).expect("answer keys"));
+        let offer_keys =
+            AuthorizedKeys::parse(&answer.public_identity.render()).expect("offer keys");
+        let local_identity = Arc::new(answer.identity);
+        let codec = SignalCodec::new(&local_identity, &authorized_keys, 120, 300);
+        let offer_codec = SignalCodec::new(&offer.identity, &offer_keys, 120, 300);
+        let mut transport = RecordingTransport::default();
+        let status = StatusWriter::new(&config);
+        let mut runtime = connected_runtime();
+        let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
+        let (event_tx, _event_rx) = mpsc::channel(4);
+        let mut replay_cache = ReplayCache::new(64);
+        let mut sessions_by_id = HashMap::new();
+        let mut session_by_peer = HashMap::new();
+        let mut next_generation = 1_u64;
+        let active_session = SessionId::random();
+        let (handle, mut rx) = test_answer_handle(
+            active_session,
+            SessionGeneration(1),
+            offer.identity.peer_id.clone(),
+            DaemonState::TunnelOpen,
+        );
+        sessions_by_id.insert(active_session, handle);
+        session_by_peer.insert(offer.identity.peer_id.clone(), active_session);
+
+        let rejected_session = SessionId::random();
+        let message = InnerMessageBuilder::new(
+            rejected_session,
+            offer.identity.peer_id.clone(),
+            local_identity.peer_id.clone(),
+        )
+        .build(MessageBody::Offer(OfferBody { sdp: "unrelated second offer".to_owned() }));
+        let (_envelope, payload) = offer_codec
+            .encode_for_peer(
+                offer_keys.get_by_peer_id(&local_identity.peer_id).expect("answer key"),
+                &message,
+                false,
+            )
+            .expect("payload encodes");
+
+        handle_answer_daemon_payload(
+            &config,
+            &local_identity,
+            &authorized_keys,
+            &codec,
+            &mut transport,
+            &mut ctx,
+            &event_tx,
+            &mut replay_cache,
+            &mut sessions_by_id,
+            &mut session_by_peer,
+            &mut next_generation,
+            payload,
+        )
+        .await;
+
+        let routed = rx.try_recv().expect("same-peer offer should enter session policy handling");
+        assert_eq!(routed.message.session_id, rejected_session);
+        assert!(matches!(routed.message.body, MessageBody::Offer(_)));
+        assert!(transport.published.lock().await.is_empty());
+        assert_eq!(session_by_peer.get(&offer.identity.peer_id), Some(&active_session));
     }
 
     #[tokio::test]
@@ -4886,7 +5076,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn answer_recovery_returns_to_idle_after_target_connect_failure() {
+    async fn answer_recovery_returns_to_serving_after_target_connect_failure() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-target-connect");
@@ -4902,13 +5092,13 @@ mod tests {
         .await;
 
         let status = read_status_file(&path).await;
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         assert_eq!(status["role"], "answer");
         let _ = tokio::fs::remove_file(&path).await;
     }
 
     #[tokio::test]
-    async fn answer_recovery_returns_to_idle_after_remote_close() {
+    async fn answer_recovery_returns_to_serving_after_remote_close() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-remote-close");
@@ -4922,13 +5112,13 @@ mod tests {
         .await;
 
         let status = read_status_file(&path).await;
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         assert_eq!(status["role"], "answer");
         let _ = tokio::fs::remove_file(&path).await;
     }
 
     #[tokio::test]
-    async fn answer_recovery_returns_to_idle_after_bridge_task_failure() {
+    async fn answer_recovery_returns_to_serving_after_bridge_task_failure() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-bridge-failure");
@@ -4942,13 +5132,13 @@ mod tests {
         .await;
 
         let status = read_status_file(&path).await;
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         assert_eq!(status["role"], "answer");
         let _ = tokio::fs::remove_file(&path).await;
     }
 
     #[tokio::test]
-    async fn answer_recovery_returns_to_idle_after_ice_failure() {
+    async fn answer_recovery_returns_to_serving_after_ice_failure() {
         let mut config = sample_config();
         config.node.role = NodeRole::Answer;
         let (path, writer) = status_writer_for_test(&mut config, "answer-ice-failure");
@@ -4959,7 +5149,7 @@ mod tests {
             .await;
 
         let status = read_status_file(&path).await;
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         assert_eq!(status["role"], "answer");
         let _ = tokio::fs::remove_file(&path).await;
     }
@@ -4975,7 +5165,7 @@ mod tests {
         write_steady_state_status(&ctx).await;
 
         let status = read_status_file(&path).await;
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         assert_eq!(status["role"], "answer");
         assert_eq!(status["mqtt_connected"], true);
         let _ = tokio::fs::remove_file(&path).await;
@@ -5012,14 +5202,14 @@ mod tests {
 
         mark_transport_unusable(
             &mut ctx,
-            StatusSnapshot { active_session_id: None, current_state: DaemonState::Idle },
+            StatusSnapshot { active_session_id: None, current_state: DaemonState::Serving },
             &SignalingError::Protocol("poll failed".to_owned()),
         )
         .await;
 
         let status = read_status_file(&path).await;
         assert_eq!(status["mqtt_connected"], false);
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         let _ = tokio::fs::remove_file(&path).await;
     }
 
@@ -5066,7 +5256,7 @@ mod tests {
 
         let status = read_status_file(&path).await;
         assert_eq!(status["mqtt_connected"], false);
-        assert_eq!(status["current_state"], "idle");
+        assert_eq!(status["current_state"], "serving");
         let _ = tokio::fs::remove_file(&path).await;
     }
 
