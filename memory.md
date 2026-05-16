@@ -1,3 +1,19 @@
+## 2026-05-16T21:06:08Z - GPT-5.4 - Workspace version bumped to v0.2.0
+- Updated the root workspace package version from `0.1.0` to `0.2.0` so Cargo build output and compiled crate metadata match the `v0.2` release tag.
+- Rebuilt both dev and release workspace targets and confirmed Cargo now reports every crate and binary as `v0.2.0`.
+
+## 2026-05-16T21:01:14Z - GPT-5.4 - Duplicate active-session re-ACKs are now bounded
+- Active sessions now keep a bounded per-session cache of duplicate inbound signaling `msg_id`s that have already been re-ACKed, so the daemon only sends one re-ACK per duplicate message instead of replying to every replay while the peer is down or retrying.
+- Added a focused daemon regression that proves the same duplicate active-session message only produces one re-ACK publish.
+
+## 2026-05-15T20:56:02Z - GPT-5.4 - Tagged releases publish GitHub assets
+- The CI workflow now gives tagged pushes `contents: write`, builds release tarballs for the supported OS matrix, and publishes those tarballs as GitHub release assets instead of only keeping them as Actions artifacts.
+- README now states that tagged pushes build release tarballs and publish them as GitHub release assets.
+
+## 2026-05-15T17:24:33Z - GPT-5.4 - Offer active ICE failure recovery fixed
+- The offer daemon now keeps its active multiplex bridge under the session loop instead of handing off control inline, so an active ICE disconnect or failure tears down the current client/session cleanly and returns the offer daemon to `waiting_for_local_client` instead of getting stuck.
+- Added a focused two-node regression that opens a live tunnel, injects an offer-side ICE disconnect after the tunnel is active, verifies the client is dropped, and checks that offer/answer daemons recover to `waiting_for_local_client` and `idle`.
+
 ## 2026-04-08T01:22:52Z - GPT-5.4 - Tag-only GitHub Actions artifacts
 - The GitHub Actions workflow should run normal lint/test CI on branch and pull request builds, but only create and upload release artifacts for tagged pushes.
 
@@ -482,3 +498,16 @@
 ## 2026-05-15T09:37:02Z - GPT-5.5 - Active offer connection-loss recovery fixed
 - Added a two-node regression test proving `p2p-offer` accepts a later local client after an established tunnel sees an injected ICE disconnect, without restarting the process.
 - Fixed offer-session active tunnel handling so the offer side continues watching ICE state while `run_multiplex_offer` is active and returns to waiting after an active connection-loss failure.
+
+## 2026-05-15T09:55:39Z - GPT-5.5 - Daemon comment refreshed and validation output recorded
+- Updated the `crates/p2p-daemon/src/lib.rs` module comment to describe current v0.3 daemon lifetime semantics: answer steady state is `Serving`, offer steady state is `WaitingForLocalClient`, answer daemons can serve multiple authorized peers, and offer-side sessions can carry multiple multiplexed streams.
+- Local validation output: `cargo fmt --all --check` produced no diff/output and exited successfully; `cargo clippy --workspace --all-targets --all-features -- -D warnings` ended with `Finished dev profile [unoptimized + debuginfo] target(s) in 5.59s`; `cargo test --workspace --all-targets` ended with `Finished test profile [unoptimized + debuginfo] target(s) in 13.85s` and all test result lines were `ok` across p2p-answer, p2p-core, p2p-crypto, identity parsing, p2p-daemon lib, two_node_daemon, p2p-offer, p2p-signaling lib, mock_mqtt_roundtrip, p2p-tunnel, p2p-webrtc, and p2pctl.
+- Final rerun output at 2026-05-15T09:56:24Z: `cargo fmt --all --check`, workspace clippy with `-D warnings`, and `cargo test --workspace --all-targets` passed again; clippy ended with `Finished dev profile [unoptimized + debuginfo] target(s) in 0.62s`, tests ended with `Finished test profile [unoptimized + debuginfo] target(s) in 0.40s`, and every test result line was `ok`.
+
+## 2026-05-16T22:28:35Z - GPT-5.5 - Master merge reviewed for v0.3
+- Reviewed `master` commits before merging into `v0.3_dev`: tagged release asset publishing, workspace version bump to 0.2.0, duplicate MQTT re-ACK throttling, and offer ICE failure recovery.
+- During conflict resolution, preserved v0.3 centralized answer routing/status semantics, adapted duplicate active-session ACK throttling to v0.3 decoded answer-session dispatch, and kept the stronger v0.3 active connection-loss regression that proves a later local client works without restarting `p2p-offer`.
+
+## 2026-05-16T22:29:48Z - GPT-5.5 - Master merge validation passed
+- After resolving the `master` into `v0.3_dev` merge, full local validation passed with `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-targets`.
+- Validation output ended with `Finished dev profile [unoptimized + debuginfo] target(s) in 7.15s`, `Finished test profile [unoptimized + debuginfo] target(s) in 37.29s`, and all test result lines were `ok`, including 74 p2p-daemon lib tests and 25 two-node daemon integration tests.
