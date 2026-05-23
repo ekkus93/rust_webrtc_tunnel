@@ -544,3 +544,8 @@
 ## 2026-05-23T10:28:11Z - GPT-5.4 - Answer temp config stale path corrected
 - Re-checked `/home/phil/work/rust_webrtc/tmp/p2ptunnel_answer/p2ptunnel/config.toml` and found it still pointed `paths.identity` and `paths.authorized_keys` at a stale `/home/jovyan/...` tree.
 - Updated those two fields to `/home/phil/work/rust_webrtc/tmp/p2ptunnel_answer/p2ptunnel/...` and revalidated successfully with `cargo run --quiet --bin p2pctl -- check-config --config /home/phil/work/rust_webrtc/tmp/p2ptunnel_answer/p2ptunnel/config.toml`.
+
+## 2026-05-23T11:00:31Z - Claude Sonnet 4.6 - Added web-ui forward to offer config
+- User had port 8080 not working; answer config already had `[[forwards]] id = "web-ui"` targeting 127.0.0.1:8080, but offer config was missing the matching `[[forwards]] id = "web-ui"` with listen_port = 8080
+- Added the missing forward to `tmp/p2ptunnel_offer/p2ptunnel/config.toml`
+- Also diagnosed earlier "Address already in use" error as a stale process holding port 2223, not a code bug
