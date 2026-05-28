@@ -6,6 +6,16 @@
 
 GitHub Actions runs linting and tests for normal branch and pull request CI. Tagged pushes build release tarballs and publish them as GitHub release assets.
 
+## Validation
+
+Use these commands to lint the workspace and run the full test suite:
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets
+```
+
 ## Build
 
 This project builds with stable Rust and Cargo.
