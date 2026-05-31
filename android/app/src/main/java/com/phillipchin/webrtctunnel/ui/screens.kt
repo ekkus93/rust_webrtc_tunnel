@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phillipchin.webrtctunnel.data.SensitiveDataRedactor
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.ForwardStatus
@@ -73,6 +74,7 @@ import com.phillipchin.webrtctunnel.viewmodel.ImportExportViewModel
 import com.phillipchin.webrtctunnel.viewmodel.LogsViewModel
 import com.phillipchin.webrtctunnel.viewmodel.NetworkPolicyViewModel
 import com.phillipchin.webrtctunnel.viewmodel.SettingsViewModel
+import java.util.Locale
 
 private data class HomeStatusUi(val title: String, val description: String)
 
@@ -111,7 +113,15 @@ private fun mapForwardListenLabel(state: String): String = when (state.lowercase
     "error" -> "Error"
     "disabled" -> "Disabled"
     "paused" -> "Paused"
+    "configured" -> "Configured"
     else -> state
+}
+
+private fun formatUptime(seconds: Long): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val secs = seconds % 60
+    return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, secs)
 }
 
 private fun ForwardStatus.toConfig(): ForwardConfig = ForwardConfig(
@@ -155,11 +165,18 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
 ) {
     val status by vm.status.collectAsStateWithLifecycle()
+    val configuredForwards by vm.configuredForwards.collectAsStateWithLifecycle()
     val statusUi = mapStatusUi(status)
     val context = LocalContext.current
-    val browserForward = status.forwards.firstOrNull { isBrowserOpenable(it.toConfig()) }
+    val browserForward = (configuredForwards + status.forwards.map { it.toConfig() }).firstOrNull { isBrowserOpenable(it) }
+    val displayedForwards = configuredForwards.map { config ->
+        val runtime = status.forwards.firstOrNull { it.id == config.id }
+        config to runtime
+    }
+    var showMeteredWarningDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { vm.refreshForwards() }
     ScreenSurface(padding) {
-        SectionHeader("Tunnel Status", "Current runtime state and quick actions")
+        SectionHeader("WebRTC Tunnel", "Current runtime state and quick actions")
         Spacer(Modifier.height(12.dp))
         StatusCard {
             Row(
@@ -180,7 +197,7 @@ fun HomeScreen(
             Text("Mode: ${if (status.mode == TunnelMode.Offer) "Offer (client)" else "Answer (server)"}")
             Text("Remote peer: ${status.remotePeerId ?: "-"}")
             Text("Active sessions: ${status.activeSessionCount}")
-            status.uptimeSeconds?.let { Text("Uptime: ${it}s") }
+            status.uptimeSeconds?.let { Text("Uptime: ${formatUptime(it)}") }
         }
         Spacer(Modifier.height(12.dp))
         NetworkStatusCard {
@@ -200,19 +217,19 @@ fun HomeScreen(
         Spacer(Modifier.height(12.dp))
         StatusCard {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Forwards (${status.forwards.size})", style = MaterialTheme.typography.titleMedium)
+                Text("Forwards (${configuredForwards.size})", style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = onOpenSetup) {
                     Icon(Icons.Filled.Add, contentDescription = "Add forward")
                 }
             }
-            if (status.forwards.isEmpty()) {
+            if (configuredForwards.isEmpty()) {
                 EmptyStateCard("No forwards configured.")
             } else {
-                status.forwards.forEach { forward ->
+                displayedForwards.forEach { (forward, runtime) ->
                     ForwardSummaryRow(
                         title = forward.name,
-                        subtitle = "127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}",
-                        status = mapForwardListenLabel(forward.listenState.name),
+                        subtitle = "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
+                        status = mapForwardListenLabel(runtime?.listenState?.name ?: if (forward.enabled) "configured" else "disabled"),
                     )
                 }
             }
@@ -234,13 +251,22 @@ fun HomeScreen(
             onOpenSetup = onOpenSetup,
             onOpenLogs = onOpenLogs,
             onOpenSettings = onOpenSettings,
-            onAllowMeteredTemporary = vm::allowMeteredTemporarily,
+            onAllowMeteredTemporary = { showMeteredWarningDialog = true },
             onOpenBrowser = browserForward?.let {
                 {
                     val url = "http://127.0.0.1:${it.localPort}"
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
             },
+        )
+    }
+    if (showMeteredWarningDialog) {
+        MeteredWarningDialog(
+            onConfirm = {
+                vm.allowMeteredTemporarily()
+                showMeteredWarningDialog = false
+            },
+            onDismiss = { showMeteredWarningDialog = false },
         )
     }
 }
@@ -334,7 +360,12 @@ fun ForwardsScreen(padding: PaddingValues, vm: ForwardsViewModel, onOpenDetails:
 }
 
 @Composable
-fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardId: String) {
+fun ForwardDetailsScreen(
+    padding: PaddingValues,
+    vm: ForwardsViewModel,
+    forwardId: String,
+    onDeleteAndReturn: () -> Unit,
+) {
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
@@ -345,10 +376,10 @@ fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardI
     val forward = forwards.firstOrNull { it.id == forwardId }
     val runtime = status.forwards.firstOrNull { it.id == forwardId }
 
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         if (forward == null) {
             EmptyStateCard("Forward not found.")
-            return@ScreenSurface
+            return@ScrollableScreenSurface
         }
         SectionHeader(forward.name, "Forward details")
         Spacer(Modifier.height(12.dp))
@@ -363,7 +394,7 @@ fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardI
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.localhostUrl(forward))) }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.ContentCopy, "Copy icon")
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL")
                 Spacer(Modifier.height(0.dp))
                 Text("Copy URL")
             }
@@ -375,7 +406,7 @@ fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardI
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(Icons.Default.OpenInBrowser, "Open browser icon")
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Open browser")
                     Text("Open Browser")
                 }
             }
@@ -405,6 +436,7 @@ fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardI
                     onClick = {
                         vm.deleteForward(forward.id)
                         showDeleteDialog = false
+                        onDeleteAndReturn()
                     },
                 ) { Text("Delete") }
             },
@@ -413,6 +445,8 @@ fun ForwardDetailsScreen(padding: PaddingValues, vm: ForwardsViewModel, forwardI
     if (showEditDialog && forward != null) {
         EditForwardDialog(
             initial = forward,
+            existingForwards = forwards,
+            validateDraft = vm::validateForwardDraft,
             onDismiss = { showEditDialog = false },
             onSave = {
                 vm.saveForward(it)
@@ -439,7 +473,7 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
     LaunchedEffect(paused) { if (!paused) vm.refresh() }
     val logs = vm.filteredLogs()
 
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         SectionHeader("Logs", "Redacted runtime events")
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -449,12 +483,25 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
-                val text = logs.joinToString("\n") { "${it.unixMs} ${it.level} ${it.message}" }
-                clipboard.setText(AnnotatedString(text))
-            }) { Text("Copy Logs") }
-            OutlinedButton(onClick = vm::clearLogs) { Text("Clear Logs") }
-            OutlinedButton(onClick = { diagnosticsCreateDocumentLauncher.launch("webrtc_diagnostics_redacted.txt") }) { Text("Export Diagnostics") }
+            OutlinedButton(onClick = { paused = !paused }, modifier = Modifier.weight(1f)) {
+                Text(if (paused) "Resume Logs" else "Pause Logs")
+            }
+            OutlinedButton(onClick = vm::clearLogs, modifier = Modifier.weight(1f)) { Text("Clear Logs") }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    val text = logs
+                        .map(SensitiveDataRedactor::redactLogEvent)
+                        .joinToString("\n") { "${it.unixMs} ${it.level} ${it.message}" }
+                    clipboard.setText(AnnotatedString(text))
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("Copy Logs") }
+            OutlinedButton(onClick = { diagnosticsCreateDocumentLauncher.launch("webrtc_diagnostics_redacted.txt") }, modifier = Modifier.weight(1f)) {
+                Text("Export Diagnostics")
+            }
             OutlinedButton(
                 onClick = {
                     val share = Intent.createChooser(
@@ -463,16 +510,21 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(share)
                 },
+                modifier = Modifier.weight(1f),
             ) { Text("Share Diagnostics") }
-            OutlinedButton(onClick = { paused = !paused }) { Text(if (paused) "Resume Logs" else "Pause Logs") }
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
-        if (logs.isEmpty()) {
+        val visibleLogs = logs.filterNot { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
+        val debugHidden = logs.any { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
+        if (visibleLogs.isEmpty() && !debugHidden) {
             EmptyStateCard("No logs available.")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(logs) { event ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (debugHidden) {
+                    EmptyStateCard("Debug logs are hidden. Enable Debug logs in Advanced to see them.")
+                }
+                visibleLogs.forEach { event ->
                     val levelColor = when (event.level.lowercase()) {
                         "warn" -> Color(0xFFF59E0B)
                         "error" -> Color(0xFFD32F2F)
@@ -482,8 +534,7 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
                     StatusCard {
                         Text("${event.unixMs}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
                         Text(event.level.uppercase(), color = levelColor, style = MaterialTheme.typography.labelLarge)
-                        val msg = if (event.level.equals("debug", true) && !prefs.debugLogsEnabled) "Debug event hidden (enable Debug logs in Advanced)." else event.message
-                        Text(msg)
+                        Text(SensitiveDataRedactor.redactText(event.message))
                     }
                 }
             }
@@ -504,7 +555,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val publicIdentity = vm.publicIdentityOrNull()
-    ScreenSurface(padding) {
+    var showMeteredWarningDialog by remember { mutableStateOf(false) }
+    ScrollableScreenSurface(padding) {
         SectionHeader("Settings", "Tunnel and app behavior")
         Spacer(Modifier.height(12.dp))
         SettingsSection("Tunnel") {
@@ -519,10 +571,11 @@ fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         SettingsSection("Network Policy") {
             PreferenceSwitch("Allow cellular / metered data", prefs.allowMetered) {
-                vm.savePreferences(prefs.copy(allowMetered = it))
-            }
-            PreferenceSwitch("Show warning before metered", prefs.showMeteredWarning) {
-                vm.savePreferences(prefs.copy(showMeteredWarning = it))
+                if (it) {
+                    showMeteredWarningDialog = true
+                } else {
+                    vm.savePreferences(prefs.copy(allowMetered = false))
+                }
             }
             OutlinedButton(onClick = onOpenNetworkPolicy, modifier = Modifier.fillMaxWidth()) { Text("Open network policy details") }
         }
@@ -582,17 +635,31 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(12.dp))
         SettingsSection("Advanced") {
-            PreferenceSwitch("Enable debug logs", prefs.debugLogsEnabled) { vm.savePreferences(prefs.copy(debugLogsEnabled = it)) }
-            PreferenceSwitch("Show advanced settings", prefs.advancedSettingsEnabled) { vm.savePreferences(prefs.copy(advancedSettingsEnabled = it)) }
-            OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Edit custom topic prefix") }
-            OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Configure non-localhost bind (advanced)") }
-            Text("Answer mode: Not available in Android v1", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
+            OutlinedButton(
+                onClick = { vm.savePreferences(prefs.copy(advancedSettingsEnabled = !prefs.advancedSettingsEnabled)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (prefs.advancedSettingsEnabled) "Hide advanced settings" else "Show advanced settings") }
+            if (prefs.advancedSettingsEnabled) {
+                PreferenceSwitch("Enable debug logs", prefs.debugLogsEnabled) { vm.savePreferences(prefs.copy(debugLogsEnabled = it)) }
+                OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Edit custom topic prefix") }
+                OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Configure non-localhost bind (advanced)") }
+                Text("Answer mode: Not available in Android v1", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
+            }
         }
         Spacer(Modifier.height(12.dp))
         SettingsSection("About") {
             Text("Rust WebRTC Tunnel Android", style = MaterialTheme.typography.bodyMedium)
             Text("Version 0.1", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
+    }
+    if (showMeteredWarningDialog) {
+        MeteredWarningDialog(
+            onConfirm = {
+                vm.savePreferences(prefs.copy(allowMetered = true))
+                showMeteredWarningDialog = false
+            },
+            onDismiss = { showMeteredWarningDialog = false },
+        )
     }
 }
 
@@ -604,7 +671,7 @@ fun NetworkPolicyScreen(padding: PaddingValues, vm: NetworkPolicyViewModel) {
     val prefs by vm.preferences.collectAsStateWithLifecycle(initialValue = AndroidAppPreferences())
     var showMeteredWarningDialog by remember { mutableStateOf(false) }
 
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         SectionHeader("Network Policy", "Current network and tunnel policy")
         Spacer(Modifier.height(8.dp))
         NetworkStatusCard {
@@ -619,28 +686,19 @@ fun NetworkPolicyScreen(padding: PaddingValues, vm: NetworkPolicyViewModel) {
             title = "Allow metered/cellular",
             checked = prefs.allowMetered,
             onToggle = { checked ->
-                if (checked && prefs.showMeteredWarning) showMeteredWarningDialog = true else vm.savePreferences(prefs.copy(allowMetered = checked))
+                if (checked) showMeteredWarningDialog = true else vm.savePreferences(prefs.copy(allowMetered = false))
             },
         )
         PreferenceSwitch("Resume on unmetered", prefs.resumeOnUnmetered) { vm.savePreferences(prefs.copy(resumeOnUnmetered = it)) }
-        PreferenceSwitch("Show warning before enabling metered", prefs.showMeteredWarning) { vm.savePreferences(prefs.copy(showMeteredWarning = it)) }
     }
 
     if (showMeteredWarningDialog) {
-        AlertDialog(
-            onDismissRequest = { showMeteredWarningDialog = false },
-            title = { Text("Cellular / Metered Data Warning") },
-            text = {
-                Text(
-                    "WebRTC Tunnel can consume significant mobile data and may cause overage charges or throttling.\n\nEnable metered/cellular only if you understand and accept this risk.",
-                )
+        MeteredWarningDialog(
+            onConfirm = {
+                vm.savePreferences(prefs.copy(allowMetered = true))
+                showMeteredWarningDialog = false
             },
-            confirmButton = {
-                TextButton(onClick = { vm.savePreferences(prefs.copy(allowMetered = true)); showMeteredWarningDialog = false }) {
-                    Text("I understand")
-                }
-            },
-            dismissButton = { TextButton(onClick = { showMeteredWarningDialog = false }) { Text("Cancel") } },
+            onDismiss = { showMeteredWarningDialog = false },
         )
     }
 }
@@ -673,7 +731,7 @@ fun ImportExportScreen(padding: PaddingValues, vm: ImportExportViewModel) {
         if (uri != null) vm.exportPrivateIdentityToUri(uri, confirmRisk = true)
     }
 
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         SectionHeader("Import / Export", "Use Android document picker and share actions")
         Spacer(Modifier.height(8.dp))
         SettingsSection("Primary actions") {
@@ -683,7 +741,7 @@ fun ImportExportScreen(padding: PaddingValues, vm: ImportExportViewModel) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { openPrivateIdentityLauncher.launch(arrayOf("text/*")) }, modifier = Modifier.weight(1f)) { Text("Import identity") }
-                OutlinedButton(onClick = { exportPrivateIdentityLauncher.launch("identity-private.toml") }, modifier = Modifier.weight(1f)) { Text("Export private identity") }
+                OutlinedButton(onClick = { showPrivateExportWarning = true }, modifier = Modifier.weight(1f)) { Text("Export private identity") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { openPublicIdentityLauncher.launch(arrayOf("text/*")) }, modifier = Modifier.weight(1f)) { Text("Import public identity") }
@@ -702,12 +760,12 @@ fun ImportExportScreen(padding: PaddingValues, vm: ImportExportViewModel) {
                         context.startActivity(intent)
                     }
                 }) {
-                    Icon(Icons.Default.Share, "Share icon")
+                    Icon(Icons.Default.Share, contentDescription = "Share public identity")
                 }
                 IconButton(onClick = {
                     runCatching { clipboard.setText(AnnotatedString(vm.publicIdentityForShare())) }
                 }) {
-                    Icon(Icons.Default.ContentCopy, "Copy icon")
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy public identity")
                 }
             }
         }
@@ -757,7 +815,12 @@ fun ImportExportScreen(padding: PaddingValues, vm: ImportExportViewModel) {
             title = { Text("Private Identity Export Warning") },
             text = { Text("Anyone with this file can impersonate this device. Export only if you understand this risk.") },
             dismissButton = { TextButton(onClick = { showPrivateExportWarning = false }) { Text("Cancel") } },
-            confirmButton = { TextButton(onClick = { vm.exportPrivateIdentity(confirmRisk = true); showPrivateExportWarning = false }) { Text("Export") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    exportPrivateIdentityLauncher.launch("identity-private.toml")
+                    showPrivateExportWarning = false
+                }) { Text("Export") }
+            },
         )
     }
 }

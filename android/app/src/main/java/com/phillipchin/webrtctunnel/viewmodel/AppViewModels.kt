@@ -50,6 +50,7 @@ data class SetupWizardState(
     val brokerTestMessage: String? = null,
     val advancedExpanded: Boolean = false,
     val nonLocalhostWarningAccepted: Boolean = false,
+    val canAdvance: Boolean = false,
     val errorMessage: String? = null,
     val saveResult: String? = null,
 )
@@ -67,6 +68,8 @@ data class ImportExportState(
 
 class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     val status: StateFlow<TunnelStatus> = deps.tunnelRepository.status
+    private val _configuredForwards = MutableStateFlow(deps.configRepository.loadForwards())
+    val configuredForwards: StateFlow<List<ForwardConfig>> = _configuredForwards.asStateFlow()
 
     fun startTunnel(mode: TunnelMode): Unit {
         val action = when (mode) {
@@ -95,6 +98,10 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     }
 
     fun refresh() = deps.tunnelRepository.refreshStatus()
+
+    fun refreshForwards() {
+        _configuredForwards.value = deps.configRepository.loadForwards()
+    }
 }
 
 class SetupViewModel(
@@ -113,45 +120,85 @@ class SetupViewModel(
     val preferences = deps.configRepository.preferences
 
     init {
+        loadStoredIdentity()
         refreshForwards()
     }
 
     fun validateConfig(): ValidationResult = deps.tunnelRepository.validateConfig(deps.configRepository.configPath)
 
+    fun validateForwardDraft(draft: ForwardConfig, currentForwards: List<ForwardConfig>): String? {
+        val updated = currentForwards.map { if (it.id == draft.id) draft else it }.let { candidates ->
+            if (candidates.none { it.id == draft.id }) candidates + draft else candidates
+        }
+        return deps.configRepository.validateForwards(updated)
+    }
+
+    private fun SetupWizardState.withCanAdvance(forwards: List<ForwardConfig>): SetupWizardState {
+        return copy(canAdvance = canAdvance(this, forwards))
+    }
+
+    private fun canAdvance(state: SetupWizardState, forwards: List<ForwardConfig>): Boolean {
+        return when (state.currentStep) {
+            SetupStep.Mode -> true
+            SetupStep.Identity -> state.localPublicIdentity.isNotBlank() || state.importIdentityPath.isNotBlank()
+            SetupStep.Broker -> state.input.brokerHost.isNotBlank() && state.input.brokerPort in 1..65535
+            SetupStep.Peer -> state.input.remotePeerId.isNotBlank() && state.importPublicIdentity.isNotBlank()
+            SetupStep.Forwards -> forwards.isNotEmpty() && deps.configRepository.validateForwards(forwards) == null
+            SetupStep.NetworkPolicy -> true
+            SetupStep.Review -> {
+                state.input.brokerHost.isNotBlank() &&
+                    state.input.brokerPort in 1..65535 &&
+                    state.input.remotePeerId.isNotBlank() &&
+                    state.importPublicIdentity.isNotBlank() &&
+                    forwards.isNotEmpty() &&
+                    deps.configRepository.validateForwards(forwards) == null
+            }
+        }
+    }
+
+    private fun updateState(transform: (SetupWizardState) -> SetupWizardState) {
+        val updated = transform(_state.value)
+        _state.value = updated.copy(canAdvance = canAdvance(updated, _forwards.value))
+    }
+
     fun setInput(update: SetupConfigInput) {
-        _state.value = _state.value.copy(
-            input = update,
-            errorMessage = null,
-            saveResult = null,
-            brokerTestMessage = null,
-        )
+        updateState { current ->
+            current.copy(
+                input = update,
+                errorMessage = null,
+                saveResult = null,
+                brokerTestMessage = null,
+            )
+        }
     }
 
     fun setImportIdentityPath(path: String) {
-        _state.value = _state.value.copy(importIdentityPath = path, errorMessage = null, saveResult = null)
+        updateState { current -> current.copy(importIdentityPath = path, errorMessage = null, saveResult = null) }
     }
 
     fun setImportPublicIdentity(value: String) {
-        _state.value = _state.value.copy(
-            importPublicIdentity = value,
-            remoteIdentityPeerId = null,
-            errorMessage = null,
-        )
+        updateState { current ->
+            current.copy(
+                importPublicIdentity = value,
+                remoteIdentityPeerId = null,
+                errorMessage = null,
+            )
+        }
     }
 
     fun setAdvancedExpanded(expanded: Boolean) {
-        _state.value = _state.value.copy(advancedExpanded = expanded)
+        updateState { current -> current.copy(advancedExpanded = expanded) }
     }
 
     fun setNonLocalhostWarningAccepted(accepted: Boolean) {
-        _state.value = _state.value.copy(nonLocalhostWarningAccepted = accepted, errorMessage = null)
+        updateState { current -> current.copy(nonLocalhostWarningAccepted = accepted, errorMessage = null) }
     }
 
     fun importIdentityFromPath() {
         val current = _state.value
         val trimmed = current.importIdentityPath.trim()
         if (trimmed.isBlank()) {
-            _state.value = current.copy(errorMessage = "Choose an identity file path to import")
+            _state.value = current.copy(errorMessage = "Choose an identity file path to import").withCanAdvance(_forwards.value)
             return
         }
         val resolved = runCatching {
@@ -170,14 +217,14 @@ class SetupViewModel(
                 input = current.input.copy(localPeerId = peerId),
                 errorMessage = null,
                 saveResult = "Identity imported",
-            )
+            ).withCanAdvance(_forwards.value)
         }.onFailure {
             _state.value = current.copy(
                 identityPeerId = null,
                 localPublicIdentity = "",
                 errorMessage = it.message ?: "Invalid private identity file",
                 saveResult = null,
-            )
+            ).withCanAdvance(_forwards.value)
         }
     }
 
@@ -202,12 +249,12 @@ class SetupViewModel(
                 importIdentityPath = "",
                 errorMessage = null,
                 saveResult = "Identity imported",
-            )
+            ).withCanAdvance(_forwards.value)
         }.onFailure {
             _state.value = current.copy(
                 errorMessage = it.message ?: "Invalid private identity file",
                 saveResult = null,
-            )
+            ).withCanAdvance(_forwards.value)
         }
     }
 
@@ -215,18 +262,18 @@ class SetupViewModel(
         val current = _state.value
         val value = current.importPublicIdentity.trim()
         if (value.isBlank()) {
-            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity is required")
+            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity is required").withCanAdvance(_forwards.value)
             return
         }
 
         val validated = deps.tunnelRepository.validatePublicIdentity(value)
         if (!validated.valid) {
-            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = validated.message ?: "Invalid remote public identity")
+            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = validated.message ?: "Invalid remote public identity").withCanAdvance(_forwards.value)
             return
         }
 
         if (validated.peer_id == current.input.localPeerId) {
-            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity cannot match local identity")
+            _state.value = current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity cannot match local identity").withCanAdvance(_forwards.value)
             return
         }
         _state.value = current.copy(
@@ -234,7 +281,7 @@ class SetupViewModel(
             remoteIdentityPeerId = validated.peer_id,
             errorMessage = null,
             saveResult = "Remote public identity validated",
-        )
+        ).withCanAdvance(_forwards.value)
     }
 
     fun importPublicIdentityFromUri(uri: Uri) {
@@ -245,7 +292,7 @@ class SetupViewModel(
             setImportPublicIdentity(text)
             validateRemotePublicIdentity()
         }.onFailure {
-            _state.value = _state.value.copy(errorMessage = it.message ?: "Failed importing remote public identity")
+            _state.value = _state.value.copy(errorMessage = it.message ?: "Failed importing remote public identity").withCanAdvance(_forwards.value)
         }
     }
 
@@ -253,13 +300,13 @@ class SetupViewModel(
         val current = _state.value
         val generated = deps.tunnelRepository.generateIdentity(current.input.localPeerId)
         if (!generated.valid) {
-            _state.value = current.copy(errorMessage = generated.message ?: "Identity generation failed")
+            _state.value = current.copy(errorMessage = generated.message ?: "Identity generation failed").withCanAdvance(_forwards.value)
             return
         }
         val privateIdentity = generated.canonical_private_identity
         val publicIdentity = generated.canonical_public_identity
         if (privateIdentity.isNullOrBlank() || publicIdentity.isNullOrBlank()) {
-            _state.value = current.copy(errorMessage = "Identity generation returned incomplete data")
+            _state.value = current.copy(errorMessage = "Identity generation returned incomplete data").withCanAdvance(_forwards.value)
             return
         }
         deps.identityRepository.storeEncryptedIdentity(privateIdentity.toByteArray(), publicIdentity)
@@ -270,14 +317,14 @@ class SetupViewModel(
             identityPeerId = peerId,
             errorMessage = null,
             saveResult = "Identity generated",
-        )
+        ).withCanAdvance(_forwards.value)
     }
 
     fun goBack() {
         val current = _state.value.currentStep
         val index = steps.indexOf(current)
         if (index > 0) {
-            _state.value = _state.value.copy(currentStep = steps[index - 1], errorMessage = null)
+            _state.value = _state.value.copy(currentStep = steps[index - 1], errorMessage = null).withCanAdvance(_forwards.value)
         }
     }
 
@@ -290,41 +337,41 @@ class SetupViewModel(
         val current = _state.value
         val validationError = validateStep(current.currentStep, current)
         if (validationError != null) {
-            _state.value = current.copy(errorMessage = validationError)
+            _state.value = current.copy(errorMessage = validationError).withCanAdvance(_forwards.value)
             return
         }
         val index = steps.indexOf(current.currentStep)
         if (index < steps.lastIndex) {
-            _state.value = current.copy(currentStep = steps[index + 1], errorMessage = null)
+            _state.value = current.copy(currentStep = steps[index + 1], errorMessage = null).withCanAdvance(_forwards.value)
         }
     }
 
     fun canAdvanceFromCurrentStep(): Boolean {
-        val current = _state.value
-        return validateStep(current.currentStep, current) == null
+        return _state.value.canAdvance
     }
 
     fun loadSavedForwards(): List<ForwardConfig> = deps.configRepository.loadForwards()
 
     fun refreshForwards() {
         _forwards.value = deps.configRepository.loadForwards()
+        _state.value = _state.value.withCanAdvance(_forwards.value)
     }
 
     fun upsertForward(forward: ForwardConfig): ValidationResult {
         val result = deps.configRepository.upsertForward(forward)
         if (!result.valid) {
-            _state.value = _state.value.copy(errorMessage = result.message ?: "Forward update failed")
+            _state.value = _state.value.copy(errorMessage = result.message ?: "Forward update failed").withCanAdvance(_forwards.value)
             return result
         }
         refreshForwards()
-        _state.value = _state.value.copy(errorMessage = null, saveResult = "Forward saved")
+        _state.value = _state.value.copy(errorMessage = null, saveResult = "Forward saved").withCanAdvance(_forwards.value)
         return result
     }
 
     fun deleteForward(forwardId: String) {
         deps.configRepository.deleteForward(forwardId)
         refreshForwards()
-        _state.value = _state.value.copy(errorMessage = null, saveResult = "Forward deleted")
+        _state.value = _state.value.copy(errorMessage = null, saveResult = "Forward deleted").withCanAdvance(_forwards.value)
     }
 
     fun testBrokerConnection() {
@@ -332,7 +379,7 @@ class SetupViewModel(
         val host = current.input.brokerHost.trim()
         val port = current.input.brokerPort
         if (host.isBlank() || port !in 1..65535) {
-            _state.value = current.copy(brokerTestMessage = "Broker host/port is invalid")
+            _state.value = current.copy(brokerTestMessage = "Broker host/port is invalid").withCanAdvance(_forwards.value)
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -357,10 +404,10 @@ class SetupViewModel(
     private suspend fun saveAndApplyConfigInternal(): Boolean {
         val current = _state.value
         val input = current.input
-        val forwards = withContext(Dispatchers.IO) { deps.configRepository.loadForwards().filter { it.enabled } }
+        val forwards = _forwards.value.filter { it.enabled }
         val validationError = validateStep(SetupStep.Review, current)
         if (validationError != null) {
-            _state.value = current.copy(errorMessage = validationError, saveResult = null)
+            _state.value = current.copy(errorMessage = validationError, saveResult = null).withCanAdvance(_forwards.value)
             return false
         }
 
@@ -372,14 +419,14 @@ class SetupViewModel(
                 _state.value = current.copy(
                     errorMessage = imported.exceptionOrNull()?.message ?: "Failed importing private identity",
                     saveResult = null,
-                )
+                ).withCanAdvance(_forwards.value)
                 return false
             }
             imported.getOrNull()
         } else {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    val bytes = deps.identityRepository.readEncryptedIdentity()
+                    val bytes = deps.identityRepository.readPrivateIdentityPlaintext()
                     val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
                     require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
                     val peerId = validated.peer_id ?: throw IllegalArgumentException("Missing identity peer id")
@@ -414,7 +461,7 @@ class SetupViewModel(
             validateCandidateConfig(candidate, identityBytes)
         }
         if (!result.valid) {
-            _state.value = current.copy(errorMessage = result.message ?: "Config validation failed", saveResult = null)
+            _state.value = current.copy(errorMessage = result.message ?: "Config validation failed", saveResult = null).withCanAdvance(_forwards.value)
             return false
         }
         val persistResult = runCatching {
@@ -439,7 +486,7 @@ class SetupViewModel(
             identityPeerId = identityPeerId,
             errorMessage = null,
             saveResult = "Configuration saved",
-        )
+        ).withCanAdvance(_forwards.value)
         return true
     }
 
@@ -454,7 +501,7 @@ class SetupViewModel(
                 Intent(deps.context, TunnelForegroundService::class.java)
                     .setAction(TunnelForegroundService.ACTION_START_OFFER),
             )
-            _state.value = _state.value.copy(saveResult = "Tunnel start requested", errorMessage = null)
+            _state.value = _state.value.copy(saveResult = "Tunnel start requested", errorMessage = null).withCanAdvance(_forwards.value)
         }
     }
 
@@ -545,7 +592,14 @@ class SetupViewModel(
     }
 
     private fun repositoryError(current: SetupWizardState, message: String) {
-        _state.value = current.copy(errorMessage = SensitiveDataRedactor.redactText(message), saveResult = null)
+        _state.value = current.copy(errorMessage = SensitiveDataRedactor.redactText(message), saveResult = null).withCanAdvance(_forwards.value)
+    }
+
+    private fun loadStoredIdentity() {
+        val publicIdentity = deps.identityRepository.readPublicIdentity()
+        if (publicIdentity.isNotBlank()) {
+            _state.value = _state.value.copy(localPublicIdentity = publicIdentity).withCanAdvance(_forwards.value)
+        }
     }
 }
 
@@ -594,6 +648,13 @@ class ForwardsViewModel(private val deps: AppDependencies) : ViewModel() {
 
     fun localhostUrl(forward: ForwardConfig): String = "http://${forward.localHost}:${forward.localPort}"
 
+    fun validateForwardDraft(draft: ForwardConfig, currentForwards: List<ForwardConfig>): String? {
+        val updated = currentForwards.map { if (it.id == draft.id) draft else it }.let { candidates ->
+            if (candidates.none { it.id == draft.id }) candidates + draft else candidates
+        }
+        return deps.configRepository.validateForwards(updated)
+    }
+
     fun testLocalPort(forward: ForwardConfig) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val resultMessage = runCatching {
@@ -613,7 +674,7 @@ class ForwardsViewModel(private val deps: AppDependencies) : ViewModel() {
         val forwards = deps.configRepository.loadForwards().filter { it.enabled }
         val candidate = deps.configRepository.renderOfferConfig(input, forwards)
         val temp = File(deps.context.cacheDir, "config-forwards-candidate.toml")
-        val identity = runCatching { deps.identityRepository.readEncryptedIdentity() }.getOrNull()
+        val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
         return runCatching {
             temp.parentFile?.mkdirs()
             temp.writeText(candidate)
@@ -906,7 +967,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
     fun exportPrivateIdentityToUri(uri: Uri, confirmRisk: Boolean) {
         runCatching {
             require(confirmRisk) { "Private export requires explicit confirmation" }
-            val payload = deps.identityRepository.readEncryptedIdentity()
+            val payload = deps.identityRepository.readPrivateIdentityPlaintext()
             deps.context.contentResolver.openOutputStream(uri, "wb")?.use { stream ->
                 stream.write(payload)
             } ?: error("Unable to open destination URI")
@@ -928,7 +989,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
         temp.parentFile?.mkdirs()
         try {
             temp.writeText(candidate)
-            val identity = runCatching { deps.identityRepository.readEncryptedIdentity() }.getOrNull()
+            val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
             val validation = if (identity != null && identity.isNotEmpty()) {
                 deps.tunnelRepository.validateConfigWithIdentity(temp.absolutePath, identity)
             } else {

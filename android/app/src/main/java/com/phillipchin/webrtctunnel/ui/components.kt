@@ -5,20 +5,25 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,7 +85,12 @@ fun ForwardSummaryRow(title: String, subtitle: String, status: String) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
-        AssistChip(onClick = {}, label = { Text(status) })
+        Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -122,24 +132,55 @@ fun ErrorResolutionCard(summary: String, fix: String, details: String? = null, a
 
 @Composable
 fun WizardStepper(steps: List<String>, currentIndex: Int) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        steps.forEachIndexed { index, title ->
-            val active = index == currentIndex
-            val color = if (active) MaterialTheme.colorScheme.primary else Color(0xFFE5E7EB)
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 32.dp)
-                    .background(color, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    "${index + 1}. ${title}",
-                    color = if (active) Color.White else Color(0xFF6B7280),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            steps.forEachIndexed { index, _ ->
+                val active = index == currentIndex
+                val completed = index < currentIndex
+                val circleColor = when {
+                    active -> MaterialTheme.colorScheme.primary
+                    completed -> MaterialTheme.colorScheme.primaryContainer
+                    else -> Color(0xFFE5E7EB)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .background(circleColor, RoundedCornerShape(999.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "${index + 1}",
+                                color = if (active) Color.White else Color(0xFF374151),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        if (index < steps.lastIndex) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 2.dp)
+                                    .padding(horizontal = 4.dp)
+                                    .background(if (completed) MaterialTheme.colorScheme.primary else Color(0xFFD1D5DB)),
+                            )
+                        }
+                    }
+                }
             }
         }
+        Text(
+            "Step ${currentIndex + 1} of ${steps.size}: ${steps[currentIndex]}",
+            style = MaterialTheme.typography.titleSmall,
+        )
     }
 }
 
@@ -155,6 +196,33 @@ fun SettingsSection(title: String, content: @Composable () -> Unit) {
             content()
         }
     }
+}
+
+const val MeteredWarningMessage =
+    "WebRTC Tunnel can use significant mobile data and may incur overage charges or throttling. Enable cellular or metered use only if you understand and accept this risk."
+
+@Composable
+fun MeteredWarningDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cellular / Metered Data Warning") },
+        text = { Text(MeteredWarningMessage) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("I understand") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun ScrollableScreenSurface(padding: androidx.compose.foundation.layout.PaddingValues, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Top,
+        content = content,
+    )
 }
 
 @Composable

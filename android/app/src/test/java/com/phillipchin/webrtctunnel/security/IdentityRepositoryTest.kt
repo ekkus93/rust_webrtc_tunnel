@@ -47,17 +47,17 @@ class IdentityRepositoryTest {
     }
 
     @Test
-    fun readEncryptedIdentityRoundTrips() {
+    fun readPrivateIdentityPlaintextRoundTrips() {
         val payload = ByteArray(128) { index -> (index % 255).toByte() }
         repository.storeEncryptedIdentity(payload, "pub")
-        assertArrayEquals(payload, repository.readEncryptedIdentity())
+        assertArrayEquals(payload, repository.readPrivateIdentityPlaintext())
     }
 
     @Test(expected = Exception::class)
     fun corruptedCiphertextFailsToDecrypt() {
         repository.storeEncryptedIdentity("private".toByteArray(), "pub")
         File(context.filesDir, "identity.enc").writeBytes(byteArrayOf(1, 2, 3, 4))
-        repository.readEncryptedIdentity()
+        repository.readPrivateIdentityPlaintext()
     }
 
     @Test

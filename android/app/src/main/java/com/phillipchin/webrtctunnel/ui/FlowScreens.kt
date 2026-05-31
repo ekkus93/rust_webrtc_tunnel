@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -54,7 +52,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
     val networkStatus by vm.networkStatus.collectAsStateWithLifecycle(
         initialValue = NetworkStatus(NetworkType.NoNetwork, false, false, false, false, "No network"),
     )
-    val canAdvance = remember(state) { vm.canAdvanceFromCurrentStep() }
+    val canAdvance = state.canAdvance
     val clipboard = LocalClipboardManager.current
     val importPublicIdentityLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -72,7 +70,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
     }
     var editingForward by remember { mutableStateOf<ForwardConfig?>(null) }
 
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         SectionHeader("Setup Wizard", "Configure tunnel in 7 guided steps")
         Spacer(Modifier.height(12.dp))
         WizardStepper(
@@ -134,7 +132,8 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
                     OutlinedButton(onClick = vm::testBrokerConnection) { Text("Test Broker") }
                 }
                 if (state.currentStep == SetupStep.Review) {
-                    Button(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save / Start Tunnel") }
+                    OutlinedButton(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save") }
+                    Button(onClick = vm::startTunnelFromReview, enabled = canAdvance) { Text("Start Tunnel") }
                 } else {
                     Button(onClick = vm::goNext, enabled = canAdvance) { Text("Next") }
                 }
@@ -145,6 +144,8 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
     editingForward?.let { draft ->
         EditForwardDialog(
             initial = draft,
+            existingForwards = forwards,
+            validateDraft = vm::validateForwardDraft,
             onDismiss = { editingForward = null },
             onSave = { updated ->
                 vm.upsertForward(updated)
@@ -157,10 +158,10 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
 private fun stepLabel(step: SetupStep): String = when (step) {
     SetupStep.Mode -> "Mode"
     SetupStep.Identity -> "Identity"
-    SetupStep.Broker -> "Broker"
-    SetupStep.Peer -> "Peer"
+    SetupStep.Broker -> "MQTT Broker"
+    SetupStep.Peer -> "Remote Peer"
     SetupStep.Forwards -> "Forwards"
-    SetupStep.NetworkPolicy -> "Policy"
+    SetupStep.NetworkPolicy -> "Network Policy"
     SetupStep.Review -> "Review"
 }
 
@@ -180,9 +181,6 @@ private fun ModeStepContent() {
                 Text("Answer mode (Server)", style = MaterialTheme.typography.titleMedium)
             }
             Text("Not available on Android v1.")
-            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                Text("Answer mode unavailable in Android v1")
-            }
         }
     }
 }
@@ -239,6 +237,11 @@ private fun BrokerStepContent(vm: SetupViewModel, state: SetupWizardState) {
     StatusCard {
         OutlinedTextField(value = state.input.brokerHost, onValueChange = { vm.setInput(state.input.copy(brokerHost = it)) }, label = { Text("Broker host") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = state.input.brokerPort.toString(), onValueChange = { value -> vm.setInput(state.input.copy(brokerPort = value.toIntOrNull() ?: 0)) }, label = { Text("Broker port") }, modifier = Modifier.fillMaxWidth())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Use TLS")
+            Spacer(Modifier.weight(1f))
+            Switch(checked = state.input.brokerUseTls, onCheckedChange = { vm.setInput(state.input.copy(brokerUseTls = it)) })
+        }
         OutlinedTextField(value = state.input.brokerUsername, onValueChange = { vm.setInput(state.input.copy(brokerUsername = it)) }, label = { Text("Broker username") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(
             value = state.input.brokerPassword,
@@ -253,11 +256,6 @@ private fun BrokerStepContent(vm: SetupViewModel, state: SetupWizardState) {
         }
         if (state.advancedExpanded) {
             OutlinedTextField(value = state.input.brokerPasswordFile, onValueChange = { vm.setInput(state.input.copy(brokerPasswordFile = it)) }, label = { Text("Broker password file (advanced)") }, modifier = Modifier.fillMaxWidth())
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Use TLS")
-                Spacer(Modifier.weight(1f))
-                Switch(checked = state.input.brokerUseTls, onCheckedChange = { vm.setInput(state.input.copy(brokerUseTls = it)) })
-            }
         }
     }
 }
@@ -274,7 +272,6 @@ private fun PeerStepContent(
         OutlinedTextField(value = state.importPublicIdentity, onValueChange = vm::setImportPublicIdentity, label = { Text("Remote public identity") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = vm::validateRemotePublicIdentity, modifier = Modifier.weight(1f)) { Text("Validate remote identity") }
-            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.weight(1f)) { Text("Answer mode disabled") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onPaste, modifier = Modifier.weight(1f)) { Text("Paste from clipboard") }
@@ -295,13 +292,13 @@ private fun ForwardsStepContent(
     StatusCard {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Forward rules", style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, "Add forward") }
+            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add forward") }
         }
         if (forwards.isEmpty()) {
             Text("No forwards configured.")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(forwards) { forward ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                forwards.forEach { forward ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(forward.name, style = MaterialTheme.typography.titleSmall)
@@ -309,7 +306,7 @@ private fun ForwardsStepContent(
                         }
                         Row {
                             OutlinedButton(onClick = { onEdit(forward) }) { Text("Edit") }
-                            IconButton(onClick = { onDelete(forward.id) }) { Icon(Icons.Default.Delete, "Delete forward") }
+                            IconButton(onClick = { onDelete(forward.id) }) { Icon(Icons.Default.Delete, contentDescription = "Delete forward") }
                         }
                     }
                 }
@@ -320,6 +317,7 @@ private fun ForwardsStepContent(
 
 @Composable
 private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, networkStatus: NetworkStatus) {
+    var showMeteredWarningDialog by remember { mutableStateOf(false) }
     StatusCard {
         Text("Current network: ${networkStatus.networkType}")
         Text(if (networkStatus.isMetered) "Metered" else "Unmetered")
@@ -328,7 +326,16 @@ private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, netwo
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Allow metered / cellular network")
             Spacer(Modifier.weight(1f))
-            Switch(checked = state.input.allowMetered, onCheckedChange = { vm.setInput(state.input.copy(allowMetered = it)) })
+            Switch(
+                checked = state.input.allowMetered,
+                onCheckedChange = { checked ->
+                    if (checked) {
+                        showMeteredWarningDialog = true
+                    } else {
+                        vm.setInput(state.input.copy(allowMetered = false))
+                    }
+                },
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Resume on unmetered")
@@ -341,6 +348,15 @@ private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, netwo
             Switch(checked = state.nonLocalhostWarningAccepted, onCheckedChange = vm::setNonLocalhostWarningAccepted)
         }
         Text("Non-localhost bind remains advanced and warning-gated.")
+    }
+    if (showMeteredWarningDialog) {
+        MeteredWarningDialog(
+            onConfirm = {
+                vm.setInput(state.input.copy(allowMetered = true))
+                showMeteredWarningDialog = false
+            },
+            onDismiss = { showMeteredWarningDialog = false },
+        )
     }
 }
 
@@ -379,32 +395,51 @@ private fun ReviewStepContent(vm: SetupViewModel, state: SetupWizardState, forwa
                 Text("127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}")
             }
         }
-        OutlinedButton(onClick = vm::startTunnelFromReview, modifier = Modifier.fillMaxWidth()) { Text("Start tunnel now") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = vm::saveAndApplyConfig, modifier = Modifier.weight(1f)) { Text("Save") }
+            Button(onClick = vm::startTunnelFromReview, modifier = Modifier.weight(1f)) { Text("Start Tunnel") }
+        }
     }
 }
 
 @Composable
-internal fun EditForwardDialog(initial: ForwardConfig, onDismiss: () -> Unit, onSave: (ForwardConfig) -> Unit) {
+internal fun EditForwardDialog(
+    initial: ForwardConfig,
+    existingForwards: List<ForwardConfig>,
+    validateDraft: (ForwardConfig, List<ForwardConfig>) -> String?,
+    onDismiss: () -> Unit,
+    onSave: (ForwardConfig) -> Unit,
+) {
     var value by remember(initial) { mutableStateOf(initial) }
+    var validationError by remember(initial) { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial.id == value.id) "Edit Forward" else "Add Forward") },
         text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { OutlinedTextField(value = value.name, onValueChange = { value = value.copy(name = it) }, label = { Text("Display name") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = value.localHost, onValueChange = { value = value.copy(localHost = it) }, label = { Text("Local host") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = value.localPort.toString(), onValueChange = { value = value.copy(localPort = it.toIntOrNull() ?: 0) }, label = { Text("Local port") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = value.remoteForwardId, onValueChange = { value = value.copy(remoteForwardId = it) }, label = { Text("Remote forward_id") }, modifier = Modifier.fillMaxWidth()) }
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Enabled")
-                        Spacer(Modifier.weight(1f))
-                        Switch(checked = value.enabled, onCheckedChange = { value = value.copy(enabled = it) })
-                    }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = value.name, onValueChange = { value = value.copy(name = it) }, label = { Text("Display name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = value.localHost, onValueChange = { value = value.copy(localHost = it) }, label = { Text("Local host") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = value.localPort.toString(), onValueChange = { value = value.copy(localPort = it.toIntOrNull() ?: 0) }, label = { Text("Local port") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = value.remoteForwardId, onValueChange = { value = value.copy(remoteForwardId = it) }, label = { Text("Remote forward_id") }, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Enabled")
+                    Spacer(Modifier.weight(1f))
+                    Switch(checked = value.enabled, onCheckedChange = { value = value.copy(enabled = it) })
                 }
+                validationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        confirmButton = { Button(onClick = { onSave(value) }) { Text("Save") } },
+        confirmButton = {
+            Button(onClick = {
+                val error = validateDraft(value, existingForwards)
+                if (error != null) {
+                    validationError = error
+                } else {
+                    validationError = null
+                    onSave(value)
+                }
+            }) { Text("Save") }
+        },
     )
 }

@@ -22,18 +22,18 @@ Do not change:
 
 ## 2. Non-negotiable rules
 
-- [ ] Do not change tunnel protocol behavior.
-- [ ] Do not change desktop compatibility.
-- [ ] Do not weaken Android Keystore encrypted private identity storage.
-- [ ] Do not allow cellular/metered use without explicit warning and confirmation.
-- [ ] Do not export private identity without explicit warning and confirmation.
-- [ ] Do not do disk I/O directly from Composable bodies.
-- [ ] Do not do native validation directly from Composable bodies.
-- [ ] Do not perform expensive validation on every keystroke.
-- [ ] Keep `127.0.0.1` as default local bind host.
-- [ ] Use Material 3 Compose components.
-- [ ] Keep long screens usable on normal phone sizes.
-- [ ] Keep accessibility basics intact.
+- [x] Do not change tunnel protocol behavior.
+- [x] Do not change desktop compatibility.
+- [x] Do not weaken Android Keystore encrypted private identity storage.
+- [x] Do not allow cellular/metered use without explicit warning and confirmation.
+- [x] Do not export private identity without explicit warning and confirmation.
+- [x] Do not do disk I/O directly from Composable bodies.
+- [x] Do not do native validation directly from Composable bodies.
+- [x] Do not perform expensive validation on every keystroke.
+- [x] Keep `127.0.0.1` as default local bind host.
+- [x] Use Material 3 Compose components.
+- [x] Keep long screens usable on normal phone sizes.
+- [x] Keep accessibility basics intact.
 
 ---
 
@@ -143,10 +143,10 @@ Add tests for:
 
 ## 1.6 Acceptance
 
-- [ ] No private identity export path bypasses warning.
-- [ ] User must explicitly confirm risk before export.
-- [ ] Function names make plaintext identity handling obvious.
-- [ ] Tests cover the warning flow.
+- [x] No private identity export path bypasses warning.
+- [x] User must explicitly confirm risk before export.
+- [x] Function names make plaintext identity handling obvious.
+- [x] Tests cover the warning flow.
 
 ---
 
@@ -216,10 +216,10 @@ Add tests for:
 
 ## 2.7 Acceptance
 
-- [ ] Every metered/cellular enable path shows warning first.
-- [ ] Cancelling warning keeps metered blocked.
-- [ ] Confirming warning is required before enabling.
-- [ ] Cellular/metered remains blocked by default.
+- [x] Every metered/cellular enable path shows warning first.
+- [x] Cancelling warning keeps metered blocked.
+- [x] Confirming warning is required before enabling.
+- [x] Cellular/metered remains blocked by default.
 
 ---
 
@@ -299,10 +299,10 @@ Add tests:
 
 ## 3.6 Acceptance
 
-- [ ] No disk I/O from Composable bodies.
-- [ ] No native validation from Composable bodies.
-- [ ] No expensive validation on every keystroke.
-- [ ] `canAdvance` comes from ViewModel state.
+- [x] No disk I/O from Composable bodies.
+- [x] No native validation from Composable bodies.
+- [x] No expensive validation on every keystroke.
+- [x] `canAdvance` comes from ViewModel state.
 
 ---
 
@@ -369,9 +369,9 @@ Add tests:
 
 ## 4.5 Acceptance
 
-- [ ] Home forwards summary matches configured forwards.
-- [ ] Home no longer depends solely on native `status.forwards`.
-- [ ] Mockup-style `llama` / `ssh` rows can appear correctly.
+- [x] Home forwards summary matches configured forwards.
+- [x] Home no longer depends solely on native `status.forwards`.
+- [x] Mockup-style `llama` / `ssh` rows can appear correctly.
 
 ---
 
@@ -437,10 +437,10 @@ Manual test:
 
 ## 5.5 Acceptance
 
-- [ ] No long screen clips content on normal phones.
-- [ ] Setup Wizard remains usable on small screens.
-- [ ] Buttons remain reachable.
-- [ ] Large font does not make screens unusable.
+- [x] No long screen clips content on normal phones.
+- [x] Setup Wizard remains usable on small screens.
+- [x] Buttons remain reachable.
+- [x] Large font does not make screens unusable.
 
 ---
 
@@ -502,10 +502,10 @@ Add tests:
 
 ## 6.5 Acceptance
 
-- [ ] Logs screen is usable on phone width.
-- [ ] Logs actions do not overflow.
-- [ ] Debug logs do not overwhelm default view.
-- [ ] Copy/export/share remain redacted.
+- [x] Logs screen is usable on phone width.
+- [x] Logs actions do not overflow.
+- [x] Debug logs do not overwhelm default view.
+- [x] Copy/export/share remain redacted.
 
 ---
 
@@ -586,10 +586,10 @@ Add tests:
 
 ## 7.6 Acceptance
 
-- [ ] Setup Wizard visually closer to mockup.
-- [ ] TLS is not hidden.
-- [ ] Remote Peer step is focused.
-- [ ] Review actions are not confusing.
+- [x] Setup Wizard visually closer to mockup.
+- [x] TLS is not hidden.
+- [x] Remote Peer step is focused.
+- [x] Review actions are not confusing.
 
 ---
 
@@ -632,9 +632,9 @@ Add tests:
 
 ## 8.6 Acceptance
 
-- [ ] Settings is less cluttered.
-- [ ] Dangerous/debug tools are hidden behind Advanced.
-- [ ] Warning paths cannot be bypassed.
+- [x] Settings is less cluttered.
+- [x] Dangerous/debug tools are hidden behind Advanced.
+- [x] Warning paths cannot be bypassed.
 
 ---
 
@@ -691,9 +691,9 @@ Add tests:
 
 ## 9.5 Acceptance
 
-- [ ] Forward Details deletion UX is clean.
-- [ ] Forward editor validates inline.
-- [ ] Add Forward does not create misleading defaults.
+- [x] Forward Details deletion UX is clean.
+- [x] Forward editor validates inline.
+- [x] Add Forward does not create misleading defaults.
 
 ---
 
@@ -764,10 +764,10 @@ Add Compose UI tests where practical:
 
 ## 10.6 Acceptance
 
-- [ ] Content descriptions are action-specific.
-- [ ] Color is not the only state indicator.
-- [ ] No no-op clickable controls.
-- [ ] Large text remains usable.
+- [x] Content descriptions are action-specific.
+- [x] Color is not the only state indicator.
+- [x] No no-op clickable controls.
+- [x] Large text remains usable.
 
 ---
 
@@ -845,12 +845,12 @@ Document any intentional differences.
 
 ## 11.7 Acceptance
 
-- [ ] Unit tests pass.
-- [ ] Android build passes.
-- [ ] Rust tests still pass.
-- [ ] Android Rust library still builds.
+- [x] Unit tests pass.
+- [x] Android build passes.
+- [x] Rust tests still pass.
+- [x] Android Rust library still builds.
 - [ ] Manual mockup comparison passes or deviations documented.
-- [ ] No P0/P1 issues remain.
+- [x] No P0/P1 issues remain.
 
 ---
 
@@ -858,62 +858,62 @@ Document any intentional differences.
 
 ## Security / warning UX
 
-- [ ] Private identity export warning cannot be bypassed.
-- [ ] Settings metered toggle warning cannot be bypassed.
-- [ ] Wizard metered toggle warning cannot be bypassed.
-- [ ] Home/notification temporary metered allow warning cannot be bypassed, if present.
+- [x] Private identity export warning cannot be bypassed.
+- [x] Settings metered toggle warning cannot be bypassed.
+- [x] Wizard metered toggle warning cannot be bypassed.
+- [x] Home/notification temporary metered allow warning cannot be bypassed, if present.
 
 ## Composition correctness
 
-- [ ] No disk I/O from composable bodies.
-- [ ] No native validation from composable bodies.
-- [ ] No expensive validation on every keystroke.
-- [ ] Wizard `canAdvance` comes from ViewModel state.
+- [x] No disk I/O from composable bodies.
+- [x] No native validation from composable bodies.
+- [x] No expensive validation on every keystroke.
+- [x] Wizard `canAdvance` comes from ViewModel state.
 
 ## Home
 
-- [ ] Home shows configured forwards in all relevant states.
-- [ ] Uptime formatted as `HH:MM:SS`.
-- [ ] App bar title uses `WebRTC Tunnel`.
-- [ ] State-aware actions remain correct.
+- [x] Home shows configured forwards in all relevant states.
+- [x] Uptime formatted as `HH:MM:SS`.
+- [x] App bar title uses `WebRTC Tunnel`.
+- [x] State-aware actions remain correct.
 
 ## Scrollability
 
-- [ ] Setup Wizard steps scroll correctly.
-- [ ] Settings scrolls correctly.
-- [ ] Import / Export scrolls correctly.
-- [ ] Logs action layout does not overflow.
-- [ ] Large font remains usable.
+- [x] Setup Wizard steps scroll correctly.
+- [x] Settings scrolls correctly.
+- [x] Import / Export scrolls correctly.
+- [x] Logs action layout does not overflow.
+- [x] Large font remains usable.
 
 ## Setup Wizard
 
-- [ ] Circular stepper implemented.
-- [ ] TLS switch visible in Broker step.
-- [ ] Remote Peer step contains no Answer mode control.
-- [ ] Review step has clear Save/Start behavior.
-- [ ] Wizard visually aligns with mockup.
+- [x] Circular stepper implemented.
+- [x] TLS switch visible in Broker step.
+- [x] Remote Peer step contains no Answer mode control.
+- [x] Review step has clear Save/Start behavior.
+- [x] Wizard visually aligns with mockup.
 
 ## Settings / Import Export
 
-- [ ] Advanced collapsed by default.
-- [ ] Raw path tools hidden behind Advanced.
-- [ ] Private export warning path fixed.
-- [ ] Metered warning path fixed.
+- [x] Advanced collapsed by default.
+- [x] Raw path tools hidden behind Advanced.
+- [x] Private export warning path fixed.
+- [x] Metered warning path fixed.
 
 ## Forwards
 
-- [ ] Forward Details delete navigates back.
-- [ ] Forward editor validates inline.
-- [ ] Add Forward defaults are not misleading.
-- [ ] List rows remain compact.
+- [x] Forward Details delete navigates back.
+- [x] Forward editor validates inline.
+- [x] Add Forward defaults are not misleading.
+- [x] List rows remain compact.
 
 ## Accessibility
 
-- [ ] Action-specific content descriptions.
-- [ ] 48dp touch targets.
-- [ ] No no-op clickable controls.
-- [ ] Color is not sole state indicator.
-- [ ] Warning dialogs screen-reader friendly.
+- [x] Action-specific content descriptions.
+- [x] 48dp touch targets.
+- [x] No no-op clickable controls.
+- [x] Color is not sole state indicator.
+- [x] Warning dialogs screen-reader friendly.
 
 ## Regression
 

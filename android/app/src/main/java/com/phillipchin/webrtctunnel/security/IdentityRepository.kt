@@ -23,7 +23,11 @@ class IdentityRepository(
         publicFile.writeText(publicIdentity)
     }
 
-    fun readEncryptedIdentity(): ByteArray {
+    /**
+     * Returns plaintext private identity bytes.
+     * Never log, persist, or include in diagnostics.
+     */
+    fun readPrivateIdentityPlaintext(): ByteArray {
         return crypto.decrypt(identityFile.readBytes())
     }
 
@@ -62,7 +66,7 @@ class IdentityRepository(
         require(hasEncryptedIdentity()) { "No private identity available" }
         val output = File(outputPath)
         output.parentFile?.mkdirs()
-        output.writeBytes(readEncryptedIdentity())
+        output.writeBytes(readPrivateIdentityPlaintext())
     }
 
     fun exportPublicIdentity(outputPath: String): Result<Unit> = runCatching {

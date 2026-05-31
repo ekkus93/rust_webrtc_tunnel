@@ -134,7 +134,7 @@ class TunnelForegroundService : Service() {
             return
         }
         val identity = withContext(Dispatchers.IO) {
-            runCatching { identityRepository.readEncryptedIdentity() }
+            runCatching { identityRepository.readPrivateIdentityPlaintext() }
         }
             .getOrElse {
                 publishError(

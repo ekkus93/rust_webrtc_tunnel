@@ -44,7 +44,7 @@ import com.phillipchin.webrtctunnel.ui.theme.WebRtcTunnelTheme
 import com.phillipchin.webrtctunnel.viewmodel.AppViewModelFactory
 
 private sealed class Route(val value: String, val title: String) {
-    data object Home : Route("home", "Home")
+    data object Home : Route("home", "WebRTC Tunnel")
     data object Forwards : Route("forwards", "Forwards")
     data object Logs : Route("logs", "Logs")
     data object Settings : Route("settings", "Settings")
@@ -152,6 +152,7 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
                         padding = padding,
                         vm = forwardsViewModel,
                         forwardId = backStack.arguments?.getString("forwardId").orEmpty(),
+                        onDeleteAndReturn = { navController.navigateUp() },
                     )
                 }
             }
