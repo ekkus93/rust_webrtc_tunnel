@@ -54,8 +54,10 @@ The project is split into focused crates:
 - `p2p-webrtc`: STUN-only WebRTC wrapper with SDP, ICE, and data-channel hooks
 - `p2p-tunnel`: tunnel frame codec and TCP/data-channel bridge
 - `p2p-daemon`: offer/answer orchestration, reconnect policy, status output, and logging
+- `p2p-mobile`: JNI bridge for the Android app and mobile-facing runtime control
 - `p2pctl`: key and config management CLI
 - `p2p-offer` / `p2p-answer`: runnable daemons
+- `android/`: Kotlin + Compose Android control panel and foreground service
 
 At runtime:
 

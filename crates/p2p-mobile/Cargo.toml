@@ -1,0 +1,24 @@
+[package]
+name = "p2p-mobile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+p2p-core = { path = "../p2p-core" }
+p2p-crypto = { path = "../p2p-crypto" }
+p2p-daemon = { path = "../p2p-daemon" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+jni = "0.21.1"
+
+[dev-dependencies]
+tempfile = "3.20.0"

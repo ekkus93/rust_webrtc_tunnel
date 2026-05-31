@@ -6,6 +6,7 @@ members = [
   "crates/p2p-webrtc",
   "crates/p2p-tunnel",
   "crates/p2p-daemon",
+  "crates/p2p-mobile",
   "bins/p2p-offer",
   "bins/p2p-answer",
   "bins/p2pctl",
