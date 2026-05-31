@@ -111,4 +111,81 @@ mod tests {
         assert_eq!(tracker.expired(), vec![msg_id]);
         assert!(tracker.retry_due(retry_timeout_ms * (u64::from(ACK_RETRY_LIMIT) + 1)).is_empty());
     }
+
+    #[test]
+    fn retry_payloads_remain_byte_identical_across_attempts() {
+        let mut tracker = AckTracker::default();
+        let msg_id = MsgId::new([4_u8; 16]);
+        let original_payload = vec![0_u8, 1_u8, 2_u8, 3_u8, 255_u8];
+        let retry_timeout_ms = ACK_RETRY_TIMEOUT_SECS * 1_000;
+
+        tracker.register(msg_id, MessageType::Offer, original_payload.clone(), 0);
+
+        for attempt in 1..=u64::from(ACK_RETRY_LIMIT) {
+            let due = tracker.retry_due(retry_timeout_ms * attempt);
+            assert_eq!(due.len(), 1);
+            assert_eq!(due[0].0, msg_id);
+            assert_eq!(due[0].1, original_payload, "retry {attempt} payload changed");
+        }
+    }
+
+    #[test]
+    fn register_copies_payload_bytes_from_caller_buffer() {
+        let mut tracker = AckTracker::default();
+        let msg_id = MsgId::new([5_u8; 16]);
+        let retry_timeout_ms = ACK_RETRY_TIMEOUT_SECS * 1_000;
+        let mut source = vec![10_u8, 11_u8, 12_u8];
+
+        tracker.register(msg_id, MessageType::Answer, source.clone(), 0);
+        source.fill(99_u8);
+
+        let due = tracker.retry_due(retry_timeout_ms);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].0, msg_id);
+        assert_eq!(due[0].1, vec![10_u8, 11_u8, 12_u8]);
+    }
+
+    #[test]
+    fn mixed_pending_entries_keep_independent_payload_identity() {
+        let mut tracker = AckTracker::default();
+        let first = MsgId::new([6_u8; 16]);
+        let second = MsgId::new([7_u8; 16]);
+        let retry_timeout_ms = ACK_RETRY_TIMEOUT_SECS * 1_000;
+        let first_payload = vec![1_u8, 1_u8];
+        let second_payload = vec![2_u8, 2_u8, 2_u8];
+
+        tracker.register(first, MessageType::Offer, first_payload.clone(), 0);
+        tracker.register(second, MessageType::IceCandidate, second_payload.clone(), 0);
+
+        let due = tracker.retry_due(retry_timeout_ms);
+        assert_eq!(due.len(), 2);
+        let mut seen_first = false;
+        let mut seen_second = false;
+        for (msg_id, payload) in due {
+            if msg_id == first {
+                assert_eq!(payload, first_payload);
+                seen_first = true;
+            } else if msg_id == second {
+                assert_eq!(payload, second_payload);
+                seen_second = true;
+            } else {
+                panic!("unexpected msg_id returned from retry_due");
+            }
+        }
+        assert!(seen_first && seen_second);
+    }
+
+    #[test]
+    fn acknowledge_clears_entry_before_next_retry_window() {
+        let mut tracker = AckTracker::default();
+        let msg_id = MsgId::new([8_u8; 16]);
+        let retry_timeout_ms = ACK_RETRY_TIMEOUT_SECS * 1_000;
+
+        tracker.register(msg_id, MessageType::Close, vec![9_u8], 0);
+        assert!(tracker.acknowledge(&msg_id).is_some(), "ack should remove pending entry");
+        assert!(
+            tracker.retry_due(retry_timeout_ms).is_empty(),
+            "acked entries must not be retried"
+        );
+    }
 }

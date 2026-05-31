@@ -276,3 +276,104 @@ fn message_type_from_u8(value: u8) -> Result<MessageType, ProtocolError> {
         _ => Err(ProtocolError::InvalidMessage(format!("unknown message type {value}"))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use serde_cbor::Value;
+
+    use super::*;
+
+    fn peer_id(value: &str) -> PeerId {
+        value.parse().expect("valid peer id")
+    }
+
+    fn sample_inner_message() -> InnerMessage {
+        InnerMessage {
+            version: 1,
+            message_type: MessageType::Offer,
+            session_id: SessionId::new([9_u8; 16]),
+            sender_peer_id: peer_id("offer-home"),
+            recipient_peer_id: peer_id("answer-office"),
+            timestamp_ms: 42,
+            body: MessageBody::Offer(OfferBody { sdp: "v=0\r\n".to_owned() }),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_unknown_message_type() {
+        let mut raw = sample_inner_message().encode().expect("encode");
+        let mut decoded: RawInnerMessage = serde_cbor::from_slice(&raw).expect("decode raw");
+        decoded.t = 99;
+        raw = serde_cbor::to_vec(&decoded).expect("encode raw");
+
+        let error = InnerMessage::decode(&raw).expect_err("unknown type should fail");
+        assert!(
+            matches!(error, ProtocolError::InvalidMessage(message) if message.contains("unknown message type"))
+        );
+    }
+
+    #[test]
+    fn decode_rejects_truncated_payload() {
+        let mut encoded = sample_inner_message().encode().expect("encode");
+        encoded.pop();
+
+        let error = InnerMessage::decode(&encoded).expect_err("truncated cbor should fail");
+        assert!(matches!(error, ProtocolError::InvalidMessage(_)));
+    }
+
+    #[test]
+    fn decode_rejects_invalid_offer_body_shape() {
+        let raw = RawInnerMessage {
+            v: 1,
+            t: MessageType::Offer as u8,
+            sid: [5_u8; 16],
+            sp: "offer-home".to_owned(),
+            rp: "answer-office".to_owned(),
+            ts: 123,
+            body: Value::Map(BTreeMap::from([(
+                Value::Text("unexpected".to_owned()),
+                Value::Text("field".to_owned()),
+            )])),
+        };
+        let encoded = serde_cbor::to_vec(&raw).expect("encode raw");
+
+        let error = InnerMessage::decode(&encoded).expect_err("unknown offer field should fail");
+        assert!(
+            matches!(error, ProtocolError::InvalidMessage(message) if message.contains("unknown field"))
+        );
+    }
+
+    #[test]
+    fn inner_message_roundtrip_preserves_core_fields() {
+        let original = sample_inner_message();
+        let encoded = original.encode().expect("encode");
+        let decoded = InnerMessage::decode(&encoded).expect("decode");
+
+        assert_eq!(decoded.version, original.version);
+        assert_eq!(decoded.message_type, original.message_type);
+        assert_eq!(decoded.session_id, original.session_id);
+        assert_eq!(decoded.sender_peer_id, original.sender_peer_id);
+        assert_eq!(decoded.recipient_peer_id, original.recipient_peer_id);
+        assert_eq!(decoded.timestamp_ms, original.timestamp_ms);
+        assert_eq!(decoded.body, original.body);
+    }
+
+    #[test]
+    fn decode_rejects_known_type_with_non_map_body() {
+        let raw = RawInnerMessage {
+            v: 1,
+            t: MessageType::Offer as u8,
+            sid: [7_u8; 16],
+            sp: "offer-home".to_owned(),
+            rp: "answer-office".to_owned(),
+            ts: 123,
+            body: Value::Integer(9),
+        };
+        let encoded = serde_cbor::to_vec(&raw).expect("encode raw");
+
+        let error = InnerMessage::decode(&encoded).expect_err("non-map body should fail");
+        assert!(matches!(error, ProtocolError::InvalidMessage(_)));
+    }
+}

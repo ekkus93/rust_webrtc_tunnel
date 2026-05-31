@@ -578,3 +578,16 @@
 - Completed `docs/ANDROID_E2E_VALIDATION_CLEANUP_TODO.md` Phase 1-4 checklist updates with honest compatibility gating: manual Android↔desktop E2E remains `NOT RUN`, so compatibility acceptance items stay unchecked.
 - Added fresh top validation evidence in `docs/ANDROID_VALIDATION.md` with PASS results for Rust/Android automated commands and explicit `NOT RUN` manual E2E reason/future steps.
 - Hardened instrumentation stability by increasing `awaitStartOfferEntered` wait tolerance in `TunnelForegroundServiceInstrumentationTest` for pending-start stop/pause cases; full validation rerun is green (`cargo fmt --check`, strict workspace clippy/tests, `cargo ndk`, Android lint/unit/connected tests, assembleDebug, APK JNI check).
+
+## 2026-05-31T16:46:37Z - GPT-5.3-Codex - Full Rust+Android lint and tests pass on android-app
+- Re-ran lint and tests end-to-end from repository root with `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets`, and Android `./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest`.
+- Results were green, including connected instrumentation on `Medium_Phone_API_36.0(AVD) - 16` with 12/12 passing and no failures.
+
+## 2026-05-31T16:52:45Z - GPT-5.3-Codex - Added UNIT_TEST3 comprehensive implementation TODO
+- Created `docs/UNIT_TEST3_TODO.md` with a detailed phased checklist for five high-value coverage gaps: signaling wire codec edge cases, replay-cache eviction/prune behavior, ACK byte-identity retries, JNI boundary contract/negative behavior, and Android `TunnelRepository` answer-start failure paths.
+- Structured the TODO with guardrails, per-phase subtasks, deterministic test expectations, and both targeted and full validation gates to keep protocol/security invariants intact while expanding unit coverage.
+
+## 2026-05-31T17:10:26Z - GPT-5.3-Codex - UNIT_TEST3 phases 5-6 completed with green gates
+- Fixed Android UNIT_TEST3 Phase 5 test harness compatibility by replacing unsupported `ArrayDeque.removeFirstOrNull()` calls in `TunnelRepositoryTest.kt` with `pollFirst()` queue pops.
+- Completed UNIT_TEST3 checklist closure: marked all remaining Phase 5 and Phase 6 subtasks/acceptance items done in `docs/UNIT_TEST3_TODO.md`.
+- Re-ran full validation successfully: targeted signaling/mobile/Android unit suites plus workspace `cargo fmt --check`, strict workspace clippy/tests, and Android `lintDebug testDebugUnitTest connectedDebugAndroidTest`.

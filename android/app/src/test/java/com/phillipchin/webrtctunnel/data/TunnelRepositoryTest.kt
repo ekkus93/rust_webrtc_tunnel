@@ -9,6 +9,7 @@ import com.phillipchin.webrtctunnel.model.ServiceState
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import com.phillipchin.webrtctunnel.model.IdentityValidationResult
+import java.util.ArrayDeque
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -93,6 +94,52 @@ class TunnelRepositoryTest {
     }
 
     @Test
+    fun startAnswerFailurePropagatesActionableError() {
+        bridge.failAnswer = true
+        val result = repository.start(TunnelMode.Answer, "/tmp/config.toml")
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message?.contains("answer failed") == true)
+    }
+
+    @Test
+    fun startAnswerFailureKeepsExistingStatus() {
+        bridge.statusPayload = statusJson("running", "offer")
+        repository.refreshStatus()
+        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+
+        bridge.failAnswer = true
+        val result = repository.start(TunnelMode.Answer, "/tmp/config.toml")
+        assertTrue(result.isFailure)
+        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+    }
+
+    @Test
+    fun offerAndAnswerFailuresAreConsistent() {
+        bridge.offerResults.add(Result.failure(IllegalStateException("offer failed queued")))
+        bridge.answerResults.add(Result.failure(IllegalStateException("answer failed queued")))
+
+        val offerResult = repository.start(TunnelMode.Offer, "/tmp/offer.toml")
+        val answerResult = repository.start(TunnelMode.Answer, "/tmp/answer.toml")
+
+        assertTrue(offerResult.isFailure)
+        assertTrue(answerResult.isFailure)
+        assertEquals("/tmp/offer.toml", bridge.offerConfigPath)
+        assertEquals("/tmp/answer.toml", bridge.answerConfigPath)
+    }
+
+    @Test
+    fun answerStartSuccessStillRefreshesStatusAfterFailure() {
+        bridge.failAnswer = true
+        assertTrue(repository.start(TunnelMode.Answer, "/tmp/config.toml").isFailure)
+
+        bridge.failAnswer = false
+        bridge.statusPayload = statusJson("running", "answer")
+        val result = repository.start(TunnelMode.Answer, "/tmp/config.toml")
+        assertTrue(result.isSuccess)
+        assertEquals(ServiceState.Serving, repository.status.value.serviceState)
+    }
+
+    @Test
     fun stopFailurePropagates() {
         bridge.failStop = true
         val result = repository.stop()
@@ -143,31 +190,40 @@ class TunnelRepositoryTest {
         var answerConfigPath: String? = null
         var stopped = false
         var failOffer = false
+        var failAnswer = false
         var failStop = false
+        val offerResults: ArrayDeque<Result<Unit>> = ArrayDeque()
+        val answerResults: ArrayDeque<Result<Unit>> = ArrayDeque()
+        val stopResults: ArrayDeque<Result<Unit>> = ArrayDeque()
         var statusPayload: String = Json.encodeToString(
             NativeRuntimeStatusDto(state = "stopped", mode = "offer"),
         )
+        val statusPayloads: ArrayDeque<String> = ArrayDeque()
         var logsJson: String = "[]"
+        val logsPayloads: ArrayDeque<String> = ArrayDeque()
         var validationResult: ValidationResult = ValidationResult(true, null)
 
         override fun startOffer(configPath: String, identityBytes: ByteArray?): Result<Unit> {
             offerConfigPath = configPath
-            return if (failOffer) Result.failure(IllegalStateException("offer failed")) else Result.success(Unit)
+            return offerResults.pollFirst()
+                ?: if (failOffer) Result.failure(IllegalStateException("offer failed")) else Result.success(Unit)
         }
 
         override fun startAnswer(configPath: String): Result<Unit> {
             answerConfigPath = configPath
-            return Result.success(Unit)
+            return answerResults.pollFirst()
+                ?: if (failAnswer) Result.failure(IllegalStateException("answer failed")) else Result.success(Unit)
         }
 
         override fun stop(): Result<Unit> {
             stopped = true
-            return if (failStop) Result.failure(IllegalStateException("stop failed")) else Result.success(Unit)
+            return stopResults.pollFirst()
+                ?: if (failStop) Result.failure(IllegalStateException("stop failed")) else Result.success(Unit)
         }
 
-        override fun getStatusJson(): String = statusPayload
+        override fun getStatusJson(): String = statusPayloads.pollFirst() ?: statusPayload
 
-        override fun getRecentLogsJson(maxEvents: Int): String = logsJson
+        override fun getRecentLogsJson(maxEvents: Int): String = logsPayloads.pollFirst() ?: logsJson
 
         override fun validateConfig(configPath: String): ValidationResult = validationResult
         override fun validateConfigWithIdentity(configPath: String, identityBytes: ByteArray): ValidationResult = validationResult

@@ -148,3 +148,110 @@ impl OuterEnvelope {
         Ok(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use p2p_core::{PROTOCOL_MAGIC, PROTOCOL_SUITE, PROTOCOL_VERSION};
+
+    use super::{EnvelopeFlags, OuterEnvelope};
+    use p2p_core::{Kid, MsgId, ProtocolError};
+
+    fn sample_envelope() -> OuterEnvelope {
+        OuterEnvelope {
+            flags: EnvelopeFlags { ack_required: true, response: false },
+            sender_kid: Kid::new([2_u8; 32]),
+            recipient_kid: Kid::new([3_u8; 32]),
+            msg_id: MsgId::new([4_u8; 16]),
+            eph_x25519_pub: [5_u8; 32],
+            aead_nonce: [6_u8; 24],
+            ciphertext: vec![7_u8; 21],
+            signature: [8_u8; 64],
+        }
+    }
+
+    #[test]
+    fn decode_rejects_too_short_payload() {
+        let error = OuterEnvelope::decode(&[0_u8; 10]).expect_err("short payload must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("shorter than the minimum")
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_invalid_magic() {
+        let mut encoded = sample_envelope().encode().expect("encode");
+        encoded[0] = b'X';
+        let error = OuterEnvelope::decode(&encoded).expect_err("invalid magic must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("invalid magic")
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_invalid_version() {
+        let mut encoded = sample_envelope().encode().expect("encode");
+        encoded[4] = PROTOCOL_VERSION.saturating_add(1);
+        let error = OuterEnvelope::decode(&encoded).expect_err("invalid version must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("unsupported version")
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_unknown_suite_value() {
+        let mut encoded = sample_envelope().encode().expect("encode");
+        encoded[5] = PROTOCOL_SUITE.saturating_add(1);
+        let error = OuterEnvelope::decode(&encoded).expect_err("unknown suite must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("unsupported suite")
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_reserved_flag_bits() {
+        let mut encoded = sample_envelope().encode().expect("encode");
+        encoded[6] = 0b0000_0100;
+        let error = OuterEnvelope::decode(&encoded).expect_err("reserved bits must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("reserved flag bits")
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_ciphertext_length_mismatch() {
+        let mut encoded = sample_envelope().encode().expect("encode");
+        let wrong_len = (sample_envelope().ciphertext.len() as u32) + 1;
+        encoded[143..147].copy_from_slice(&wrong_len.to_be_bytes());
+        let error = OuterEnvelope::decode(&encoded).expect_err("length mismatch must fail");
+        assert!(matches!(
+            error,
+            ProtocolError::InvalidEnvelope(message) if message.contains("length mismatch")
+        ));
+    }
+
+    #[test]
+    fn roundtrip_preserves_authenticated_metadata_fields() {
+        let original = sample_envelope();
+        let encoded = original.encode().expect("encode");
+        let decoded = OuterEnvelope::decode(&encoded).expect("decode");
+        assert_eq!(decoded.flags, original.flags);
+        assert_eq!(decoded.sender_kid, original.sender_kid);
+        assert_eq!(decoded.recipient_kid, original.recipient_kid);
+        assert_eq!(decoded.msg_id, original.msg_id);
+        assert_eq!(decoded.eph_x25519_pub, original.eph_x25519_pub);
+        assert_eq!(decoded.aead_nonce, original.aead_nonce);
+        assert_eq!(decoded.ciphertext, original.ciphertext);
+        assert_eq!(decoded.signature, original.signature);
+    }
+
+    #[test]
+    fn encoded_envelope_starts_with_protocol_magic() {
+        let encoded = sample_envelope().encode().expect("encode");
+        assert_eq!(&encoded[..4], PROTOCOL_MAGIC);
+    }
+}
