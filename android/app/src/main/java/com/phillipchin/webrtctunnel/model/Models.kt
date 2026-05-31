@@ -97,6 +97,7 @@ data class AndroidAppPreferences(
     val showMeteredWarning: Boolean = true,
     val startTunnelWhenAppOpens: Boolean = false,
     val debugLogsEnabled: Boolean = false,
+    val advancedSettingsEnabled: Boolean = false,
 )
 
 @Serializable
@@ -140,7 +141,9 @@ data class SetupConfigInput(
     val localPeerId: String = "android-phone",
     val brokerHost: String = "",
     val brokerPort: Int = 8883,
+    val brokerUseTls: Boolean = true,
     val brokerUsername: String = "",
+    val brokerPassword: String = "",
     val brokerPasswordFile: String = "",
     val topicPrefix: String = "p2ptunnel",
     val remotePeerId: String = "",

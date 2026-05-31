@@ -8,19 +8,19 @@ This is a UI/UX pass. Do not change tunnel protocol, MQTT wire format, WebRTC be
 
 ## 2. Rules
 
-- [ ] Do not change MQTT signaling wire format.
-- [ ] Do not change tunnel frame format.
-- [ ] Do not change desktop Rust protocol semantics.
-- [ ] Do not add TURN.
-- [ ] Do not add VPN/TUN mode.
-- [ ] Do not add arbitrary remote host/port selection from Android offer side.
-- [ ] Do not weaken encrypted identity-at-rest behavior.
-- [ ] Do not weaken network policy behavior.
-- [ ] Do not weaken log/diagnostic redaction.
-- [ ] Keep cellular/metered blocked by default.
-- [ ] Keep `127.0.0.1` as the default local bind host.
-- [ ] Use Material 3 Compose components unless there is a clear reason not to.
-- [ ] Do not perform disk I/O or native validation directly in Composable bodies.
+- [x] Do not change MQTT signaling wire format.
+- [x] Do not change tunnel frame format.
+- [x] Do not change desktop Rust protocol semantics.
+- [x] Do not add TURN.
+- [x] Do not add VPN/TUN mode.
+- [x] Do not add arbitrary remote host/port selection from Android offer side.
+- [x] Do not weaken encrypted identity-at-rest behavior.
+- [x] Do not weaken network policy behavior.
+- [x] Do not weaken log/diagnostic redaction.
+- [x] Keep cellular/metered blocked by default.
+- [x] Keep `127.0.0.1` as the default local bind host.
+- [x] Use Material 3 Compose components unless there is a clear reason not to.
+- [x] Do not perform disk I/O or native validation directly in Composable bodies.
 
 ---
 
@@ -32,17 +32,17 @@ Current app should move away from generic dark theme.
 
 Implement a custom light color scheme:
 
-- [ ] App background: `#F6F8FB`
-- [ ] Card background: `#FFFFFF`
-- [ ] App bar navy: `#061A3D`
-- [ ] Primary button navy: `#08245C`
-- [ ] Accent blue: `#1D4ED8`
-- [ ] Success green: `#2E7D32`
-- [ ] Warning orange: `#F59E0B`
-- [ ] Error red: `#D32F2F`
-- [ ] Border/divider: `#E5E7EB`
-- [ ] Primary text: `#111827`
-- [ ] Secondary text: `#6B7280`
+- [x] App background: `#F6F8FB`
+- [x] Card background: `#FFFFFF`
+- [x] App bar navy: `#061A3D`
+- [x] Primary button navy: `#08245C`
+- [x] Accent blue: `#1D4ED8`
+- [x] Success green: `#2E7D32`
+- [x] Warning orange: `#F59E0B`
+- [x] Error red: `#D32F2F`
+- [x] Border/divider: `#E5E7EB`
+- [x] Primary text: `#111827`
+- [x] Secondary text: `#6B7280`
 
 ## 1.2 Typography
 
@@ -50,45 +50,45 @@ Use default Android/Material **Roboto**.
 
 Apply consistent type scale:
 
-- [ ] App bar title: 18sp, medium/semibold.
-- [ ] Screen title: 22sp, semibold.
-- [ ] Card title: 18sp, semibold.
+- [x] App bar title: 18sp, medium/semibold.
+- [x] Screen title: 22sp, semibold.
+- [x] Card title: 18sp, semibold.
 - [ ] Status title: 20sp, semibold.
-- [ ] Body text: 14–16sp.
-- [ ] Helper/meta text: 12–13sp.
-- [ ] Button text: 14sp, medium.
+- [x] Body text: 14–16sp.
+- [x] Helper/meta text: 12–13sp.
+- [x] Button text: 14sp, medium.
 
 ## 1.3 Shapes and spacing
 
 Implement shared dimensions:
 
-- [ ] screen padding: 16dp;
-- [ ] card padding: 16dp;
+- [x] screen padding: 16dp;
+- [x] card padding: 16dp;
 - [ ] card spacing: 12dp;
 - [ ] section spacing: 20dp;
-- [ ] card corner radius: 16dp;
-- [ ] button minimum height: 48dp;
-- [ ] minimum touch target: 48dp.
+- [x] card corner radius: 16dp;
+- [x] button minimum height: 48dp;
+- [x] minimum touch target: 48dp.
 
 ## 1.4 Reusable components
 
 Create or refactor reusable components:
 
-- [ ] `TunnelTopAppBar`
-- [ ] `StatusCard`
-- [ ] `NetworkStatusCard`
-- [ ] `ForwardSummaryRow`
-- [ ] `EmptyStateCard`
-- [ ] `ErrorResolutionCard`
-- [ ] `WizardStepper`
-- [ ] `SectionHeader`
-- [ ] `SettingsSection`
-- [ ] `DestructiveActionButton`
+- [x] `TunnelTopAppBar`
+- [x] `StatusCard`
+- [x] `NetworkStatusCard`
+- [x] `ForwardSummaryRow`
+- [x] `EmptyStateCard`
+- [x] `ErrorResolutionCard`
+- [x] `WizardStepper`
+- [x] `SectionHeader`
+- [x] `SettingsSection`
+- [x] `DestructiveActionButton`
 
 ## 1.5 Acceptance
 
-- [ ] App visually uses navy top bars, light background, white cards.
-- [ ] Status states use green/orange/red consistently.
+- [x] App visually uses navy top bars, light background, white cards.
+- [x] Status states use green/orange/red consistently.
 - [ ] Typography and spacing are consistent across screens.
 - [ ] UI looks closer to the original mockup image.
 
@@ -109,12 +109,12 @@ Settings
 
 Tasks:
 
-- [ ] Show bottom navigation only on main tabs.
-- [ ] Hide bottom navigation on Setup Wizard.
-- [ ] Hide bottom navigation on Forward Details.
-- [ ] Hide bottom navigation on Import / Export.
-- [ ] Hide bottom navigation on Network Policy details.
-- [ ] Secondary flows use top app bar with back arrow.
+- [x] Show bottom navigation only on main tabs.
+- [x] Hide bottom navigation on Setup Wizard.
+- [x] Hide bottom navigation on Forward Details.
+- [x] Hide bottom navigation on Import / Export.
+- [x] Hide bottom navigation on Network Policy details.
+- [x] Secondary flows use top app bar with back arrow.
 
 ## 2.2 Avoid duplicate nav stack entries
 
@@ -132,10 +132,10 @@ navController.navigate(route) {
 
 Tasks:
 
-- [ ] Home tab does not stack duplicate Home screens.
-- [ ] Forwards tab does not stack duplicate Forwards screens.
-- [ ] Logs tab does not stack duplicate Logs screens.
-- [ ] Settings tab does not stack duplicate Settings screens.
+- [x] Home tab does not stack duplicate Home screens.
+- [x] Forwards tab does not stack duplicate Forwards screens.
+- [x] Logs tab does not stack duplicate Logs screens.
+- [x] Settings tab does not stack duplicate Settings screens.
 
 ## 2.3 Tests / manual checks
 
@@ -154,23 +154,23 @@ Replace raw enum names with user-facing labels.
 
 Map examples:
 
-- [ ] `Stopped` -> `Stopped`
-- [ ] `Starting` -> `Starting`
-- [ ] `Connected` -> `Connected`
-- [ ] `Listening` -> `Listening`
-- [ ] `PausedMeteredBlocked` -> `Paused`
-- [ ] `NoNetwork` -> `No network`
-- [ ] `Error` -> `Error`
-- [ ] `ConfigInvalid` -> `Configuration needs attention`
-- [ ] `Stopping` -> `Stopping`
+- [x] `Stopped` -> `Stopped`
+- [x] `Starting` -> `Starting`
+- [x] `Connected` -> `Connected`
+- [x] `Listening` -> `Listening`
+- [x] `PausedMeteredBlocked` -> `Paused`
+- [x] `NoNetwork` -> `No network`
+- [x] `Error` -> `Error`
+- [x] `ConfigInvalid` -> `Configuration needs attention`
+- [x] `Stopping` -> `Stopping`
 
 Add friendly descriptions:
 
-- [ ] Connected: `Tunnel is active and ready to use.`
-- [ ] Paused: `Cellular/metered network blocked.`
-- [ ] Stopped: `Tunnel service is not running.`
-- [ ] No network: `Connect to Wi-Fi to start the tunnel.`
-- [ ] Config invalid: `Open setup to fix configuration.`
+- [x] Connected: `Tunnel is active and ready to use.`
+- [x] Paused: `Cellular/metered network blocked.`
+- [x] Stopped: `Tunnel service is not running.`
+- [x] No network: `Connect to Wi-Fi to start the tunnel.`
+- [x] Config invalid: `Open setup to fix configuration.`
 
 ## 3.2 State-aware action row
 
@@ -178,13 +178,13 @@ Do not always show both Start and Stop.
 
 Implement:
 
-- [ ] Stopped: `Start Tunnel`, `Setup`
+- [x] Stopped: `Start Tunnel`, `Setup`
 - [ ] Starting: `Stop`, `View Logs`, spinner
 - [ ] Connected/Listening: `Stop Tunnel`, `View Logs`, optional `Open URL`
 - [ ] PausedMeteredBlocked: `Settings`, `Stop`, optional `Allow Temporarily`
-- [ ] NoNetwork: `Retry`, `Settings`
-- [ ] Error: `Retry`, `View Logs`, contextual fix action
-- [ ] ConfigInvalid: `Open Setup`, `View Logs`
+- [x] NoNetwork: `Retry`, `Settings`
+- [x] Error: `Retry`, `View Logs`, contextual fix action
+- [x] ConfigInvalid: `Open Setup`, `View Logs`
 
 ## 3.3 Improve cards
 
@@ -241,23 +241,23 @@ Tasks:
 
 Tasks:
 
-- [ ] Make Setup Wizard a secondary flow with back arrow top app bar.
-- [ ] Hide bottom navigation during wizard.
-- [ ] Add numbered horizontal `WizardStepper`.
-- [ ] Show current step number and title.
-- [ ] Add Cancel action.
-- [ ] Use Back/Next bottom row.
-- [ ] Disable Next until current step is valid when practical.
+- [x] Make Setup Wizard a secondary flow with back arrow top app bar.
+- [x] Hide bottom navigation during wizard.
+- [x] Add numbered horizontal `WizardStepper`.
+- [x] Show current step number and title.
+- [x] Add Cancel action.
+- [x] Use Back/Next bottom row.
+- [x] Disable Next until current step is valid when practical.
 - [ ] Review step uses Back / Save / Start Tunnel.
 
 ## 4.2 Step 1 — Choose Mode
 
 Implement selectable cards:
 
-- [ ] Offer/client card with icon and description.
-- [ ] Answer/server card marked Advanced or Not available yet.
-- [ ] Offer selected by default.
-- [ ] If answer unsupported, answer card disabled with explanation.
+- [x] Offer/client card with icon and description.
+- [x] Answer/server card marked Advanced or Not available yet.
+- [x] Offer selected by default.
+- [x] If answer unsupported, answer card disabled with explanation.
 - [ ] Do not show only plain text.
 
 ## 4.3 Step 2 — Identity
@@ -266,42 +266,42 @@ Local identity only.
 
 Tasks:
 
-- [ ] Generate new identity action.
+- [x] Generate new identity action.
 - [ ] Import existing identity using Android file picker if possible.
 - [ ] Hide raw path import behind Advanced/debug.
-- [ ] Show local peer ID.
-- [ ] Show public identity.
-- [ ] Copy Public Key action.
-- [ ] Share Public Key action.
-- [ ] Do not show remote public identity here.
-- [ ] Do not validate identity file on every keystroke.
-- [ ] Private identity export warning remains intact.
+- [x] Show local peer ID.
+- [x] Show public identity.
+- [x] Copy Public Key action.
+- [x] Share Public Key action.
+- [x] Do not show remote public identity here.
+- [x] Do not validate identity file on every keystroke.
+- [x] Private identity export warning remains intact.
 
 ## 4.4 Step 3 — MQTT Broker
 
 Tasks:
 
-- [ ] Broker host field.
-- [ ] Port field.
-- [ ] TLS enabled switch.
-- [ ] Username optional field.
-- [ ] Password field or password-file-path field clearly labeled.
-- [ ] Topic prefix optional field.
-- [ ] Test Connection action.
-- [ ] Password hidden if actual password.
-- [ ] No password/secrets in logs.
+- [x] Broker host field.
+- [x] Port field.
+- [x] TLS enabled switch.
+- [x] Username optional field.
+- [x] Password field or password-file-path field clearly labeled.
+- [x] Topic prefix optional field.
+- [x] Test Connection action.
+- [x] Password hidden if actual password.
+- [x] No password/secrets in logs.
 
 ## 4.5 Step 4 — Remote Peer
 
 Tasks:
 
-- [ ] Remote peer ID field.
-- [ ] Remote public identity field.
-- [ ] Paste from Clipboard button.
-- [ ] Import File button.
-- [ ] Validate peer ID/public identity match.
-- [ ] Reject local identity as remote peer.
-- [ ] Helper text explaining answer side must authorize this phone.
+- [x] Remote peer ID field.
+- [x] Remote public identity field.
+- [x] Paste from Clipboard button.
+- [x] Import File button.
+- [x] Validate peer ID/public identity match.
+- [x] Reject local identity as remote peer.
+- [x] Helper text explaining answer side must authorize this phone.
 
 ## 4.6 Step 5 — Forwards
 
@@ -309,32 +309,32 @@ The wizard must support forward editing directly.
 
 Tasks:
 
-- [ ] List current forwards inside wizard.
-- [ ] Add Forward button.
-- [ ] Edit Forward action.
-- [ ] Delete Forward action.
-- [ ] Enable/disable forward.
-- [ ] Inline forward editor or dialog.
+- [x] List current forwards inside wizard.
+- [x] Add Forward button.
+- [x] Edit Forward action.
+- [x] Delete Forward action.
+- [x] Enable/disable forward.
+- [x] Inline forward editor or dialog.
 - [ ] Validate name required.
 - [ ] Validate local port 1-65535.
 - [ ] Reject duplicate enabled local ports.
 - [ ] Validate remote forward_id required.
 - [ ] Reject duplicate enabled remote forward_id.
-- [ ] Hide non-localhost bind behind Advanced warning.
-- [ ] User does not need to leave wizard to configure forwards.
+- [x] Hide non-localhost bind behind Advanced warning.
+- [x] User does not need to leave wizard to configure forwards.
 
 ## 4.7 Step 6 — Network Policy
 
 Tasks:
 
-- [ ] Show current network type.
-- [ ] Show metered/unmetered.
-- [ ] Show tunnel allowed/blocked.
-- [ ] Show blocked reason.
-- [ ] Allow cellular/metered toggle.
-- [ ] Show warning before enabling cellular/metered.
-- [ ] Resume when Wi-Fi returns toggle.
-- [ ] Explain Unknown network is blocked.
+- [x] Show current network type.
+- [x] Show metered/unmetered.
+- [x] Show tunnel allowed/blocked.
+- [x] Show blocked reason.
+- [x] Allow cellular/metered toggle.
+- [x] Show warning before enabling cellular/metered.
+- [x] Resume when Wi-Fi returns toggle.
+- [x] Explain Unknown network is blocked.
 
 ## 4.8 Step 7 — Review
 
@@ -373,21 +373,21 @@ inside Composables.
 
 Tasks:
 
-- [ ] Move forwards loading into `SetupViewModel`.
-- [ ] Expose forwards as `StateFlow`.
-- [ ] Use `collectAsStateWithLifecycle()`.
-- [ ] No file I/O from Composable body.
+- [x] Move forwards loading into `SetupViewModel`.
+- [x] Expose forwards as `StateFlow`.
+- [x] Use `collectAsStateWithLifecycle()`.
+- [x] No file I/O from Composable body.
 
 ## 5.2 Stop validating files on every keystroke
 
 Tasks:
 
-- [ ] Text field changes update only text state.
-- [ ] Import Identity button performs file read/validation.
-- [ ] Import Public Identity button performs validation.
-- [ ] Paste action validates pasted text.
-- [ ] Next button validates final values.
-- [ ] Native validation is not called on every keystroke.
+- [x] Text field changes update only text state.
+- [x] Import Identity button performs file read/validation.
+- [x] Import Public Identity button performs validation.
+- [x] Paste action validates pasted text.
+- [x] Next button validates final values.
+- [x] Native validation is not called on every keystroke.
 
 ## 5.3 Tests
 
@@ -398,9 +398,9 @@ Tasks:
 
 ## 5.4 Acceptance
 
-- [ ] Setup Wizard is responsive.
-- [ ] No disk/native work happens directly in composition.
-- [ ] No expensive validation on every keystroke.
+- [x] Setup Wizard is responsive.
+- [x] No disk/native work happens directly in composition.
+- [x] No expensive validation on every keystroke.
 
 ---
 
@@ -416,44 +416,44 @@ forwardDetails/{forwardId}
 
 Tasks:
 
-- [ ] Forwards row tap navigates to details.
-- [ ] Details screen has top app bar with back arrow.
-- [ ] Bottom nav hidden on details screen.
+- [x] Forwards row tap navigates to details.
+- [x] Details screen has top app bar with back arrow.
+- [x] Bottom nav hidden on details screen.
 
 ## 6.2 Details layout
 
 Show:
 
-- [ ] forward name;
-- [ ] status;
-- [ ] local address;
-- [ ] local URL;
-- [ ] remote forward_id;
+- [x] forward name;
+- [x] status;
+- [x] local address;
+- [x] local URL;
+- [x] remote forward_id;
 - [ ] bytes sent if available;
 - [ ] bytes received if available;
 - [ ] open connections if available;
-- [ ] last error.
+- [x] last error.
 
 ## 6.3 Actions
 
 Implement:
 
-- [ ] Copy URL.
-- [ ] Open Browser.
-- [ ] Test Local Port.
-- [ ] Edit.
-- [ ] Disable/Enable.
-- [ ] Delete with confirmation.
+- [x] Copy URL.
+- [x] Open Browser.
+- [x] Test Local Port.
+- [x] Edit.
+- [x] Disable/Enable.
+- [x] Delete with confirmation.
 
 ## 6.4 Forwards list cleanup
 
 List row should be concise:
 
-- [ ] status dot/icon;
-- [ ] name;
-- [ ] local address -> remote ID;
-- [ ] status text;
-- [ ] chevron.
+- [x] status dot/icon;
+- [x] name;
+- [x] local address -> remote ID;
+- [x] status text;
+- [x] chevron.
 
 Do not cram all details/actions into the list row.
 
@@ -471,11 +471,11 @@ Do not cram all details/actions into the list row.
 
 Tasks:
 
-- [ ] Top app bar title `Logs`.
-- [ ] Filter chips: All / Info / Warn / Error / Debug.
-- [ ] Log rows with timestamp and message.
-- [ ] Action row: Copy Logs / Clear Logs / Export Diagnostics / Pause Logs.
-- [ ] Empty state when no logs.
+- [x] Top app bar title `Logs`.
+- [x] Filter chips: All / Info / Warn / Error / Debug.
+- [x] Log rows with timestamp and message.
+- [x] Action row: Copy Logs / Clear Logs / Export Diagnostics / Pause Logs.
+- [x] Empty state when no logs.
 
 ## 7.2 Presentation
 
@@ -492,10 +492,10 @@ Tasks:
 
 Confirm:
 
-- [ ] displayed logs are redacted;
-- [ ] copied logs are redacted;
-- [ ] exported diagnostics are redacted;
-- [ ] secrets do not appear in UI.
+- [x] displayed logs are redacted;
+- [x] copied logs are redacted;
+- [x] exported diagnostics are redacted;
+- [x] secrets do not appear in UI.
 
 ## 7.4 Acceptance
 
@@ -510,58 +510,58 @@ Confirm:
 
 Implement sections:
 
-- [ ] Tunnel
-- [ ] Network Policy
-- [ ] Identity
-- [ ] Configuration
-- [ ] Diagnostics
-- [ ] Advanced
-- [ ] About
+- [x] Tunnel
+- [x] Network Policy
+- [x] Identity
+- [x] Configuration
+- [x] Diagnostics
+- [x] Advanced
+- [x] About
 
 ## 8.2 Tunnel section
 
 Include:
 
-- [ ] Start tunnel automatically when app opens.
-- [ ] Resume tunnel when Wi-Fi returns.
-- [ ] Run setup wizard again.
+- [x] Start tunnel automatically when app opens.
+- [x] Resume tunnel when Wi-Fi returns.
+- [x] Run setup wizard again.
 
 ## 8.3 Network Policy section
 
 Include:
 
-- [ ] Allow cellular / metered data.
-- [ ] Show warning before allowing cellular / metered data.
-- [ ] Open Network Policy details.
+- [x] Allow cellular / metered data.
+- [x] Show warning before allowing cellular / metered data.
+- [x] Open Network Policy details.
 
 ## 8.4 Identity section
 
 Include:
 
-- [ ] View public identity.
-- [ ] Copy public identity.
-- [ ] Share public identity.
-- [ ] Import identity.
-- [ ] Export public identity.
-- [ ] Export private identity with warning.
+- [x] View public identity.
+- [x] Copy public identity.
+- [x] Share public identity.
+- [x] Import identity.
+- [x] Export public identity.
+- [x] Export private identity with warning.
 
 ## 8.5 Configuration section
 
 Include:
 
-- [ ] Import configuration.
-- [ ] Export configuration with warning.
-- [ ] Validate configuration.
+- [x] Import configuration.
+- [x] Export configuration with warning.
+- [x] Validate configuration.
 - [ ] Reset configuration.
 
 ## 8.6 Diagnostics section
 
 Include:
 
-- [ ] Export diagnostics.
+- [x] Export diagnostics.
 - [ ] Share diagnostics.
-- [ ] Copy status JSON.
-- [ ] Copy redacted config.
+- [x] Copy status JSON.
+- [x] Copy redacted config.
 
 ## 8.7 Advanced section
 
@@ -569,8 +569,8 @@ Collapsed by default.
 
 Include:
 
-- [ ] Debug logs.
-- [ ] Developer/debug raw path import/export.
+- [x] Debug logs.
+- [x] Developer/debug raw path import/export.
 - [ ] Custom topic prefix if supported.
 - [ ] Non-localhost bind controls, if supported.
 - [ ] Answer mode, if present.
@@ -589,22 +589,22 @@ Include:
 
 Use Android-safe flows as the primary UI:
 
-- [ ] Import config: document picker.
-- [ ] Export config: create document with warning.
-- [ ] Import identity: document picker.
-- [ ] Export public identity: create document/share.
-- [ ] Export private identity: create document with private identity warning.
-- [ ] Import remote public identity: document picker/paste.
+- [x] Import config: document picker.
+- [x] Export config: create document with warning.
+- [x] Import identity: document picker.
+- [x] Export public identity: create document/share.
+- [x] Export private identity: create document with private identity warning.
+- [x] Import remote public identity: document picker/paste.
 - [ ] Export/share diagnostics: create document/share.
 
 ## 9.2 Hide raw paths
 
 Tasks:
 
-- [ ] Move raw path fields to Advanced / Developer fallback.
-- [ ] Collapse Advanced by default.
-- [ ] Label raw path fallback as developer/debug only.
-- [ ] Do not show raw path fields in normal first-run setup.
+- [x] Move raw path fields to Advanced / Developer fallback.
+- [x] Collapse Advanced by default.
+- [x] Label raw path fallback as developer/debug only.
+- [x] Do not show raw path fields in normal first-run setup.
 
 ## 9.3 Acceptance
 
@@ -622,11 +622,11 @@ Implement runtime notification permission flow for Android 13+.
 
 Tasks:
 
-- [ ] Detect if `POST_NOTIFICATIONS` permission is needed.
-- [ ] Show explanation before request.
-- [ ] Request permission.
-- [ ] Handle denied state.
-- [ ] Show Settings action if permission denied.
+- [x] Detect if `POST_NOTIFICATIONS` permission is needed.
+- [x] Show explanation before request.
+- [x] Request permission.
+- [x] Handle denied state.
+- [x] Show Settings action if permission denied.
 
 Explanation text:
 

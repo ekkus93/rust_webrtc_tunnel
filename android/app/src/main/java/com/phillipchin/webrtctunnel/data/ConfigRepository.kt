@@ -36,6 +36,7 @@ class ConfigRepository(private val context: Context) {
             prefs[Keys.showMeteredWarning] = update.showMeteredWarning
             prefs[Keys.startTunnelWhenAppOpens] = update.startTunnelWhenAppOpens
             prefs[Keys.debugLogsEnabled] = update.debugLogsEnabled
+            prefs[Keys.advancedSettingsEnabled] = update.advancedSettingsEnabled
             prefs.remove(Keys.pauseOnMetered)
         }
     }
@@ -263,7 +264,8 @@ class ConfigRepository(private val context: Context) {
             """.trimIndent()
         }
         val username = input.brokerUsername
-        val passwordFile = input.brokerPasswordFile
+        val passwordFile = resolveBrokerPasswordFile(input)
+        val scheme = if (input.brokerUseTls) "mqtts" else "mqtt"
         return """
             format = "p2ptunnel-config-v3"
 
@@ -278,7 +280,7 @@ class ConfigRepository(private val context: Context) {
             log_dir = ${tomlString(File(context.filesDir, "state/log").absolutePath)}
 
             [broker]
-            url = ${tomlString("mqtts://${input.brokerHost}:${input.brokerPort}")}
+            url = ${tomlString("$scheme://${input.brokerHost}:${input.brokerPort}")}
             client_id = ${tomlString(input.localPeerId)}
             topic_prefix = ${tomlString(input.topicPrefix)}
             username = ${tomlString(username)}
@@ -363,6 +365,7 @@ class ConfigRepository(private val context: Context) {
         val showMeteredWarning = booleanPreferencesKey("show_metered_warning")
         val startTunnelWhenAppOpens = booleanPreferencesKey("start_tunnel_when_app_opens")
         val debugLogsEnabled = booleanPreferencesKey("debug_logs_enabled")
+        val advancedSettingsEnabled = booleanPreferencesKey("advanced_settings_enabled")
     }
 
     private fun Preferences.toAppPreferences() = AndroidAppPreferences(
@@ -371,7 +374,23 @@ class ConfigRepository(private val context: Context) {
         showMeteredWarning = this[Keys.showMeteredWarning] ?: true,
         startTunnelWhenAppOpens = this[Keys.startTunnelWhenAppOpens] ?: false,
         debugLogsEnabled = this[Keys.debugLogsEnabled] ?: false,
+        advancedSettingsEnabled = this[Keys.advancedSettingsEnabled] ?: false,
     )
+
+    private fun resolveBrokerPasswordFile(input: SetupConfigInput): String {
+        val advancedPath = input.brokerPasswordFile.trim()
+        if (advancedPath.isNotBlank()) {
+            return advancedPath
+        }
+        val password = input.brokerPassword
+        if (password.isBlank()) {
+            return ""
+        }
+        val passwordFile = File(context.filesDir, "runtime/mqtt_password.txt")
+        passwordFile.parentFile?.mkdirs()
+        passwordFile.writeText(password)
+        return passwordFile.absolutePath
+    }
 
     private fun tomlString(value: String): String {
         val escaped = buildString(value.length + 2) {

@@ -603,3 +603,12 @@
 ## 2026-05-31T17:51:43Z - GPT-5.3-Codex - Shared UI polish clarification questions with user
 - Added `docs/responses12.md` containing the six unresolved clarification questions/issues from review of the new Android UI polish spec and TODO.
 - Questions focus on credential UX, answer-mode visibility, non-HTTP forward UX, MQTT test-connection semantics, non-localhost bind exposure, and settings default/migration policy.
+
+## 2026-05-31T18:06:56Z - GPT-5.3-Codex - UI polish implementation decisions received
+- Read `docs/replies12.md` with authoritative decisions for Android UI polish scope: normal-flow username/password fields with advanced password-file path, answer mode shown disabled (not startable), broker test semantics limited to authenticated MQTT connect, and non-localhost bind behind advanced with explicit warning.
+- Captured defaults/migration guidance: `startTunnelWhenAppOpens=false`, `allowMetered=false`, `resumeOnUnmetered=true`, `showMeteredWarning=true`, `debugLogsEnabled=false`, `advancedSettingsEnabled=false`, preserving existing metered/resume values and never silently enabling metered tunnels.
+
+## 2026-05-31T18:31:51Z - GPT-5.3-Codex - UI polish compile stabilization and full validation rerun
+- Fixed Android UI integration regressions introduced during the polish pass: moved `NotificationPermissionGate` to a proper top-level composable, wired `SettingsScreen` logs navigation callback, added setup peer clipboard/file import actions, added setup cancel/next gating methods in `SetupViewModel`, and aligned forward-details edit dialog wiring.
+- Completed full validation reruns at current tip: Rust `cargo fmt --check`, strict workspace clippy, workspace tests with `--test-threads=1`, plus Android `./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest` (12/12 connected tests passing on API 36 emulator).
+- Updated `docs/ANDROID_UI_POLISH_TODO.md` progress checkboxes for implemented sections while leaving unresolved/manual items unchecked.
