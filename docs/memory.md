@@ -60,3 +60,9 @@
 - Finalized TODO2 implementation across Rust mobile/runtime validation paths and Android setup/forwards/network/import-export/diagnostics flows.
 - Added `docs/ANDROID_VALIDATION.md` with recorded command results and environment details.
 - Validation pass succeeded for Rust workspace checks/tests, Android native `cargo ndk` build, and Android `lintDebug`, `testDebugUnitTest`, and `connectedDebugAndroidTest`; APK confirms both `arm64-v8a` and `x86_64` `libp2p_mobile.so`.
+
+## 2026-05-31T07:26:40Z - GPT-5.3-Codex - Stabilized flaky connected stop-action test
+- Investigated intermittent `connectedDebugAndroidTest` failure in `TunnelForegroundServiceInstrumentationTest.stopActionStopsTunnel`.
+- Root cause was assertion timing/race in instrumentation scheduling during full-suite execution, not deterministic service logic failure.
+- Hardened the test with a bounded polling helper (`waitForCondition`) that waits for `bridge.stopCalls >= 1` instead of asserting immediately after a single `waitForIdleSync`.
+- Re-ran `./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest`; all Android lint/unit/connected tests pass.

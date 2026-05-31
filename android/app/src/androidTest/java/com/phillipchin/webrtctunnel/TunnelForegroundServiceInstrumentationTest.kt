@@ -2,6 +2,7 @@ package com.phillipchin.webrtctunnel
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -41,8 +42,7 @@ class TunnelForegroundServiceInstrumentationTest {
     fun stopActionStopsTunnel() {
         context.startForegroundService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER))
         context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-        assertTrue(TestTunnelHooks.bridge.stopCalls >= 1)
+        assertTrue(waitForCondition(timeoutMs = 3_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
     }
 
     @Test
@@ -59,5 +59,17 @@ class TunnelForegroundServiceInstrumentationTest {
     private fun stopService() {
         context.stopService(Intent(context, TunnelForegroundService::class.java))
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+    }
+
+    private fun waitForCondition(timeoutMs: Long, condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            if (condition()) {
+                return true
+            }
+            SystemClock.sleep(50)
+        }
+        return condition()
     }
 }
