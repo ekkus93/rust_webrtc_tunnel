@@ -47,3 +47,6 @@
 - Added redacted diagnostics export path and log/config redaction coverage.
 - Added/updated Android unit tests for config rendering/forwards validation, setup viewmodel flow validation, private export confirmation, authorized-key dedupe, and diagnostics redaction.
 - Re-ran full validation successfully: Rust `fmt/clippy/test` + Android `lintDebug assembleDebug testDebugUnitTest connectedDebugAndroidTest`.
+
+## 2026-05-31T06:52:21Z - GPT-5.3-Codex - Added responses11 handoff questions
+- Reviewed `docs/ANDROID_FIX_SPEC_2.md` and `docs/ANDROID_FIX_TODO_2.md` and captured open implementation questions/issues in `docs/responses11.md` for ChatGPT 5.5 alignment.
