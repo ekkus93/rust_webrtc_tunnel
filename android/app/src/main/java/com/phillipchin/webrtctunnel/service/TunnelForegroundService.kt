@@ -87,7 +87,7 @@ class TunnelForegroundService : Service() {
 
     private fun loadingNotification(body: String): Notification =
         NotificationCompat.Builder(this, NotificationController.CHANNEL_STATUS)
-            .setSmallIcon(android.R.drawable.stat_sys_data_sync)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("WebRTC Tunnel starting")
             .setContentText(body)
             .setOngoing(true)

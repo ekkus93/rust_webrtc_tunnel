@@ -3,6 +3,7 @@ package com.phillipchin.webrtctunnel
 import com.phillipchin.webrtctunnel.model.LogEvent
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import com.phillipchin.webrtctunnel.model.TunnelStatus
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 interface TunnelNativeBridge {
@@ -80,7 +81,8 @@ class FakeTunnelBridge : TunnelNativeBridge {
     override fun getStatusJson(): String = Json.encodeToString(TunnelStatus.serializer(), status)
 
     override fun getRecentLogsJson(maxEvents: Int): String =
-        Json.encodeToString<List<LogEvent>>(
+        Json.encodeToString(
+            ListSerializer(LogEvent.serializer()),
             List(maxEvents.coerceAtMost(3)) { LogEvent(0L, "info", "fake log $it") }
         )
 

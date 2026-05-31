@@ -1,17 +1,23 @@
 package com.phillipchin.webrtctunnel.notification
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.pm.PackageManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.phillipchin.webrtctunnel.MainActivity
 import com.phillipchin.webrtctunnel.model.ServiceState
 
 class NotificationController(private val context: Context) {
     companion object {
+        private const val TAG = "NotificationController"
         const val CHANNEL_STATUS = "tunnel_status"
         const val CHANNEL_ERRORS = "tunnel_errors"
         const val NOTIFICATION_ID = 1001
@@ -45,7 +51,7 @@ class NotificationController(private val context: Context) {
             else -> "WebRTC Tunnel running"
         }
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
-            .setSmallIcon(android.R.drawable.stat_sys_data_sync)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(openIntent)
@@ -55,6 +61,16 @@ class NotificationController(private val context: Context) {
     }
 
     fun show(notification: android.app.Notification) {
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        val notificationsAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!notificationsAllowed) {
+            return
+        }
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to show notification", error)
+        }
     }
 }

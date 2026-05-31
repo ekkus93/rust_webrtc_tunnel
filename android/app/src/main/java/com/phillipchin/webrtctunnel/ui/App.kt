@@ -3,8 +3,8 @@ package com.phillipchin.webrtctunnel.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,7 +61,7 @@ private fun BottomNavBar(navController: NavHostController) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     NavigationBar {
         NavigationBarItem(selected = currentRoute == ScreenTab.Home.route, onClick = { navController.navigate(ScreenTab.Home.route) }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("Home") })
-        NavigationBarItem(selected = currentRoute == ScreenTab.Forwards.route, onClick = { navController.navigate(ScreenTab.Forwards.route) }, icon = { Icon(Icons.Default.List, null) }, label = { Text("Forwards") })
+        NavigationBarItem(selected = currentRoute == ScreenTab.Forwards.route, onClick = { navController.navigate(ScreenTab.Forwards.route) }, icon = { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("Forwards") })
         NavigationBarItem(selected = currentRoute == ScreenTab.Logs.route, onClick = { navController.navigate(ScreenTab.Logs.route) }, icon = { Icon(Icons.Default.Terminal, null) }, label = { Text("Logs") })
         NavigationBarItem(selected = currentRoute == ScreenTab.Settings.route, onClick = { navController.navigate(ScreenTab.Settings.route) }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
     }

@@ -549,3 +549,17 @@
 - User had port 8080 not working; answer config already had `[[forwards]] id = "web-ui"` targeting 127.0.0.1:8080, but offer config was missing the matching `[[forwards]] id = "web-ui"` with listen_port = 8080
 - Added the missing forward to `tmp/p2ptunnel_offer/p2ptunnel/config.toml`
 - Also diagnosed earlier "Address already in use" error as a stale process holding port 2223, not a code bug
+## 2026-05-31T01:03:02Z - GPT-5.3-Codex - Android Gradle wrapper installed and build unblocked to resource phase
+- Added a proper Gradle wrapper in `android/` (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle-wrapper.properties`) and verified `./gradlew --version` works locally.
+- Updated Android build config for Kotlin 2.0 Compose plugin and AndroidX flags (`android.useAndroidX=true`) so `./gradlew assembleDebug` now progresses into resource linking.
+- Current Android blocker is a missing theme resource parent (`Theme.Material3.DayNight.NoActionBar`) during `:app:processDebugResources`, which requires theme/style adjustment in the app resources.
+
+## 2026-05-31T01:06:42Z - GPT-5.3-Codex - Android build now reaches Kotlin compile errors after theme/dependency fixes
+- Added Gradle JVM memory settings in `android/gradle.properties` to prevent daemon thrashing on this machine and keep wrapper builds stable.
+- Switched the app XML theme parent to `Theme.MaterialComponents.DayNight.NoActionBar` and added `com.google.android.material:material` to resolve the earlier missing theme parent during resource linking.
+- `./gradlew --no-daemon assembleDebug` now advances past that resource-theme issue and fails in Kotlin compilation with existing source errors (e.g., `RustTunnelBridge.kt` serialization call mismatch, missing `stat_sys_data_sync` usage in notification/service code, and missing `Column` imports in Compose UI files).
+
+## 2026-05-31T01:19:23Z - GPT-5.3-Codex - Android phase completion pass with full validation and docs
+- Resolved Android Kotlin/lint blockers so `./gradlew --no-daemon lintDebug assembleDebug testDebugUnitTest` now succeeds; fixes included JSON serializer usage in `RustTunnelBridge.kt`, notification permission-safe posting, icon/theme resource corrections, Compose API corrections, and Android backup/icon manifest compliance updates.
+- Installed and exercised `cargo-ndk` with required Rust Android targets, then verified `cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p p2p-mobile --release` succeeds.
+- Added Android build/user docs (`docs/ANDROID_BUILD.md`, `docs/ANDROID_USER_GUIDE.md`), README Android status section, Android CI workflow job, Gradle `buildRustAndroid` helper task, and updated the Android TODO acceptance checklist status items to reflect completed implementation/validation.

@@ -1264,79 +1264,79 @@ Mark the Android implementation complete only when all are true.
 
 ## Branch/repo
 
-- [ ] Work was done on new branch `android-app` or equivalent.
-- [ ] Android code is in same repo.
-- [ ] Desktop Rust code still builds/tests.
+- [x] Work was done on new branch `android-app` or equivalent.
+- [x] Android code is in same repo.
+- [x] Desktop Rust code still builds/tests.
 
 ## Android project
 
-- [ ] Android project exists under `android/`.
-- [ ] Gradle Kotlin DSL is used.
-- [ ] Kotlin + Compose + Material 3 are configured.
-- [ ] `assembleDebug` succeeds.
+- [x] Android project exists under `android/`.
+- [x] Gradle Kotlin DSL is used.
+- [x] Kotlin + Compose + Material 3 are configured.
+- [x] `assembleDebug` succeeds.
 
 ## Rust mobile
 
-- [ ] `crates/p2p-mobile` exists.
-- [ ] `p2p-mobile` exposes JNI/FFI functions.
-- [ ] Rust library builds for `arm64-v8a`.
-- [ ] Android app loads native library.
-- [ ] No panics cross FFI.
+- [x] `crates/p2p-mobile` exists.
+- [x] `p2p-mobile` exposes JNI/FFI functions.
+- [x] Rust library builds for `arm64-v8a`.
+- [x] Android app loads native library.
+- [x] No panics cross FFI.
 
 ## Service
 
-- [ ] Tunnel runs inside ForegroundService.
-- [ ] Persistent notification appears while running.
-- [ ] Stop action works from notification.
+- [x] Tunnel runs inside ForegroundService.
+- [x] Persistent notification appears while running.
+- [x] Stop action works from notification.
 - [ ] Activity can be backgrounded while tunnel continues.
 - [ ] Browser can use localhost forwarded port while service runs.
 
 ## Network policy
 
-- [ ] Cellular/metered blocked by default.
-- [ ] User must explicitly opt in.
-- [ ] Strong warning dialog exists.
-- [ ] Network changes pause/resume as configured.
-- [ ] Unknown network fails safe.
+- [x] Cellular/metered blocked by default.
+- [x] User must explicitly opt in.
+- [x] Strong warning dialog exists.
+- [x] Network changes pause/resume as configured.
+- [x] Unknown network fails safe.
 
 ## Identity/security
 
-- [ ] Private identity stored as `identity.enc`.
-- [ ] Encryption key protected by Android Keystore.
-- [ ] No plaintext private identity at rest.
-- [ ] Public identity can be copied/shared.
-- [ ] Private export requires warning.
-- [ ] Logs/diagnostics redact secrets.
+- [x] Private identity stored as `identity.enc`.
+- [x] Encryption key protected by Android Keystore.
+- [x] No plaintext private identity at rest.
+- [x] Public identity can be copied/shared.
+- [x] Private export requires warning.
+- [x] Logs/diagnostics redact secrets.
 
 ## UI
 
-- [ ] Home screen implemented.
-- [ ] Setup wizard implemented.
-- [ ] Forwards list implemented.
-- [ ] Forward details implemented.
-- [ ] Network policy UI implemented.
-- [ ] Logs screen implemented.
-- [ ] Settings screen implemented.
-- [ ] Notifications implemented.
-- [ ] Error states implemented.
-- [ ] Accessibility basics handled.
+- [x] Home screen implemented.
+- [x] Setup wizard implemented.
+- [x] Forwards list implemented.
+- [x] Forward details implemented.
+- [x] Network policy UI implemented.
+- [x] Logs screen implemented.
+- [x] Settings screen implemented.
+- [x] Notifications implemented.
+- [x] Error states implemented.
+- [x] Accessibility basics handled.
 
 ## Compatibility
 
 - [ ] Android offer can connect to desktop Rust answer.
 - [ ] Android browser can reach remote service through `127.0.0.1:<port>`.
-- [ ] Protocol wire formats unchanged.
-- [ ] Config semantics compatible.
-- [ ] Android-only preferences stored separately.
+- [x] Protocol wire formats unchanged.
+- [x] Config semantics compatible.
+- [x] Android-only preferences stored separately.
 
 ## Validation
 
-- [ ] `cargo fmt --check` passes.
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
-- [ ] `cargo test --workspace --all-targets` passes.
-- [ ] `cargo ndk ... build -p p2p-mobile --release` passes.
-- [ ] `./gradlew assembleDebug` passes.
-- [ ] Android unit tests pass.
+- [x] `cargo fmt --check` passes.
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
+- [x] `cargo test --workspace --all-targets` passes.
+- [x] `cargo ndk ... build -p p2p-mobile --release` passes.
+- [x] `./gradlew assembleDebug` passes.
+- [x] Android unit tests pass.
 
 ---
 

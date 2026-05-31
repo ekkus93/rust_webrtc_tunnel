@@ -44,6 +44,16 @@ Or, in release mode:
 - `target/release/p2p-offer`
 - `target/release/p2p-answer`
 
+## Android app
+
+Status: **experimental (offer mode first)**.
+
+- Native Kotlin + Jetpack Compose + Material 3 app under `android/`
+- Tunnel runtime is hosted in a ForegroundService
+- Android talks to shared Rust code through `crates/p2p-mobile` JNI exports
+- Cellular/metered tunnels are blocked by default unless user opts in
+- Private identity is stored encrypted at rest with Android Keystore-backed key material
+
 ## Architecture
 
 The project is split into focused crates:

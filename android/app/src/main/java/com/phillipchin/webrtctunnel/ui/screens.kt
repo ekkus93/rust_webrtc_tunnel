@@ -2,6 +2,7 @@ package com.phillipchin.webrtctunnel.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -98,7 +99,7 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel, setupVm: Setup
 }
 
 @Composable
-fun ScreenSurface(padding: PaddingValues, content: @Composable Column.() -> Unit) {
+fun ScreenSurface(padding: PaddingValues, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
         verticalArrangement = Arrangement.Top,

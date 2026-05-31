@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -55,7 +56,26 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.icons)
+    implementation(libs.google.material)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit4)
+}
+
+val cargoExecutable = if (System.getProperty("os.name").startsWith("Windows")) "cargo.exe" else "cargo"
+
+tasks.register<Exec>("buildRustAndroid") {
+    group = "build"
+    description = "Builds p2p-mobile for Android ABIs and copies .so files into jniLibs."
+    workingDir = rootDir.parentFile
+    commandLine(
+        cargoExecutable,
+        "ndk",
+        "-t", "arm64-v8a",
+        "-t", "x86_64",
+        "-o", "android/app/src/main/jniLibs",
+        "build",
+        "-p", "p2p-mobile",
+        "--release",
+    )
 }

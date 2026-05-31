@@ -23,3 +23,8 @@ target
 run_copilot.sh
 p2ptunnel/
 tmp/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/app/src/main/jniLibs/
+android/*.hprof
