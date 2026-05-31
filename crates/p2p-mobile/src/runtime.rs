@@ -58,6 +58,21 @@ struct RuntimeInner {
     runtime: Option<Runtime>,
 }
 
+fn record_start_error(inner: &mut RuntimeInner, message: String) -> String {
+    inner.state.state = AndroidRuntimeState::Error;
+    inner.state.active = false;
+    inner.state.last_error = Some(message.clone());
+    inner.logs.push_back(AndroidLogEvent {
+        unix_ms: unix_ms(),
+        level: "error".to_owned(),
+        message: message.clone(),
+    });
+    while inner.logs.len() > 256 {
+        inner.logs.pop_front();
+    }
+    message
+}
+
 impl Default for RuntimeInner {
     fn default() -> Self {
         Self {
@@ -99,28 +114,35 @@ impl AndroidTunnelController {
     fn start(&self, mode: AndroidTunnelMode, config_path: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|_| "runtime mutex poisoned".to_owned())?;
         if inner.state.active {
-            return Err("runtime already running".to_owned());
+            return Err(record_start_error(&mut inner, "runtime already running".to_owned()));
         }
 
         let config_path = config_path.to_owned();
         let config = AppConfig::load_from_file(Path::new(&config_path))
-            .map_err(|error| error.to_string())?;
-        let identity =
-            IdentityFile::from_file(&config.paths.identity).map_err(|error| error.to_string())?;
+            .map_err(|error| record_start_error(&mut inner, error.to_string()))?;
+        let identity = IdentityFile::from_file(&config.paths.identity)
+            .map_err(|error| record_start_error(&mut inner, error.to_string()))?;
         let authorized_keys = AuthorizedKeys::from_file(&config.paths.authorized_keys)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| record_start_error(&mut inner, error.to_string()))?;
         match (mode, &config.node.role) {
             (AndroidTunnelMode::Offer, NodeRole::Offer)
             | (AndroidTunnelMode::Answer, NodeRole::Answer) => {}
             (AndroidTunnelMode::Offer, NodeRole::Answer) => {
-                return Err("config role is answer but offer mode was requested".to_owned());
+                return Err(record_start_error(
+                    &mut inner,
+                    "config role is answer but offer mode was requested".to_owned(),
+                ));
             }
             (AndroidTunnelMode::Answer, NodeRole::Offer) => {
-                return Err("config role is offer but answer mode was requested".to_owned());
+                return Err(record_start_error(
+                    &mut inner,
+                    "config role is offer but answer mode was requested".to_owned(),
+                ));
             }
         }
 
-        let runtime = Runtime::new().map_err(|error| error.to_string())?;
+        let runtime =
+            Runtime::new().map_err(|error| record_start_error(&mut inner, error.to_string()))?;
         let log_state = Arc::clone(&self.inner);
         let config_clone = config.clone();
         let task = runtime.spawn(async move {

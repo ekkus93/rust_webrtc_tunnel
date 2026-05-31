@@ -563,3 +563,8 @@
 - Resolved Android Kotlin/lint blockers so `./gradlew --no-daemon lintDebug assembleDebug testDebugUnitTest` now succeeds; fixes included JSON serializer usage in `RustTunnelBridge.kt`, notification permission-safe posting, icon/theme resource corrections, Compose API corrections, and Android backup/icon manifest compliance updates.
 - Installed and exercised `cargo-ndk` with required Rust Android targets, then verified `cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p p2p-mobile --release` succeeds.
 - Added Android build/user docs (`docs/ANDROID_BUILD.md`, `docs/ANDROID_USER_GUIDE.md`), README Android status section, Android CI workflow job, Gradle `buildRustAndroid` helper task, and updated the Android TODO acceptance checklist status items to reflect completed implementation/validation.
+
+## 2026-05-31T03:16:41Z - GPT-5.3-Codex - Final Android E2E acceptance checks completed
+- Fixed Android app lifecycle wiring so Home actions start/stop the foreground tunnel service (instead of bypassing it), using application-scoped dependencies shared by `MainActivity` and `TunnelForegroundService`.
+- Updated mobile runtime error handling to persist startup failures in `last_error`, enabling actionable Android-side diagnostics instead of generic `"unknown error"` messages.
+- Completed live emulator↔desktop validation: Android offer connected to a desktop `p2p-answer` via MQTT/WebRTC, foreground service remained active after app backgrounding, and localhost forward usage was verified with emulator-side `127.0.0.1:8080` requests producing answer-side stream activity; final TODO compatibility/service checkboxes were marked complete.

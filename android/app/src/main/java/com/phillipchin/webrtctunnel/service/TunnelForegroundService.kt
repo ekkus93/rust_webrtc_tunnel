@@ -4,14 +4,16 @@ import android.app.Notification
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.phillipchin.webrtctunnel.data.ConfigRepository
-import com.phillipchin.webrtctunnel.data.TunnelRepository
 import com.phillipchin.webrtctunnel.model.ServiceState
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.notification.NotificationController
+import com.phillipchin.webrtctunnel.data.ConfigRepository
+import com.phillipchin.webrtctunnel.data.TunnelRepository
 
 class TunnelForegroundService : Service() {
+    private val tag = "TunnelForegroundService"
     private lateinit var notifications: NotificationController
     private lateinit var repository: TunnelRepository
     private lateinit var configRepository: ConfigRepository
@@ -21,8 +23,9 @@ class TunnelForegroundService : Service() {
         super.onCreate()
         notifications = NotificationController(this)
         notifications.ensureChannels()
-        configRepository = ConfigRepository(this)
-        repository = TunnelRepository(this)
+        val deps = (application as WebRtcTunnelApplication).deps
+        configRepository = deps.configRepository
+        repository = deps.tunnelRepository
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -82,6 +85,7 @@ class TunnelForegroundService : Service() {
     }
 
     private fun publishError(message: String) {
+        Log.e(tag, message)
         notifications.show(notifications.buildStatusNotification(ServiceState.Error, message))
     }
 

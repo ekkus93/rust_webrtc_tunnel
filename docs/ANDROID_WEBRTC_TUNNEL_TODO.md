@@ -1288,8 +1288,8 @@ Mark the Android implementation complete only when all are true.
 - [x] Tunnel runs inside ForegroundService.
 - [x] Persistent notification appears while running.
 - [x] Stop action works from notification.
-- [ ] Activity can be backgrounded while tunnel continues.
-- [ ] Browser can use localhost forwarded port while service runs.
+- [x] Activity can be backgrounded while tunnel continues.
+- [x] Browser can use localhost forwarded port while service runs.
 
 ## Network policy
 
@@ -1323,8 +1323,8 @@ Mark the Android implementation complete only when all are true.
 
 ## Compatibility
 
-- [ ] Android offer can connect to desktop Rust answer.
-- [ ] Android browser can reach remote service through `127.0.0.1:<port>`.
+- [x] Android offer can connect to desktop Rust answer.
+- [x] Android browser can reach remote service through `127.0.0.1:<port>`.
 - [x] Protocol wire formats unchanged.
 - [x] Config semantics compatible.
 - [x] Android-only preferences stored separately.

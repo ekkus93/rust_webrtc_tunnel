@@ -1,6 +1,9 @@
 package com.phillipchin.webrtctunnel.viewmodel
 
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
+import com.phillipchin.webrtctunnel.TunnelForegroundService
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.model.LogEvent
 import com.phillipchin.webrtctunnel.model.TunnelMode
@@ -10,8 +13,24 @@ import kotlinx.coroutines.flow.StateFlow
 
 class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     val status: StateFlow<TunnelStatus> = deps.tunnelRepository.status
-    fun startTunnel(mode: TunnelMode) = deps.tunnelRepository.start(mode, deps.configRepository.configPath)
-    fun stopTunnel() = deps.tunnelRepository.stop()
+    fun startTunnel(mode: TunnelMode): Unit {
+        val action = when (mode) {
+            TunnelMode.Offer -> TunnelForegroundService.ACTION_START_OFFER
+            TunnelMode.Answer -> TunnelForegroundService.ACTION_START_ANSWER
+        }
+        ContextCompat.startForegroundService(
+            deps.context,
+            Intent(deps.context, TunnelForegroundService::class.java).setAction(action),
+        )
+    }
+
+    fun stopTunnel(): Unit {
+        deps.context.startService(
+            Intent(deps.context, TunnelForegroundService::class.java)
+                .setAction(TunnelForegroundService.ACTION_STOP),
+        )
+    }
+
     fun refresh() = deps.tunnelRepository.refreshStatus()
 }
 

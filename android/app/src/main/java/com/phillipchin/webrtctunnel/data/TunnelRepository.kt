@@ -1,7 +1,6 @@
 package com.phillipchin.webrtctunnel.data
 
 import android.content.Context
-import com.phillipchin.webrtctunnel.FakeTunnelBridge
 import com.phillipchin.webrtctunnel.RustTunnelBridge
 import com.phillipchin.webrtctunnel.TunnelNativeBridge
 import com.phillipchin.webrtctunnel.model.LogEvent
@@ -14,12 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 
 class TunnelRepository(
-    context: Context,
-    private val bridge: TunnelNativeBridge = if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-        FakeTunnelBridge()
-    } else {
-        RustTunnelBridge()
-    },
+    @Suppress("UNUSED_PARAMETER") context: Context,
+    private val bridge: TunnelNativeBridge = RustTunnelBridge(),
 ) {
     private val _status = MutableStateFlow(
         TunnelStatus(
