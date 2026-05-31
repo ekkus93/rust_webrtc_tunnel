@@ -86,6 +86,14 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
         )
     }
 
+    fun allowMeteredTemporarily() {
+        viewModelScope.launch {
+            val current = deps.configRepository.preferences.first()
+            deps.configRepository.savePreferences(current.copy(allowMetered = true))
+            startTunnel(TunnelMode.Offer)
+        }
+    }
+
     fun refresh() = deps.tunnelRepository.refreshStatus()
 }
 
@@ -167,6 +175,36 @@ class SetupViewModel(
             _state.value = current.copy(
                 identityPeerId = null,
                 localPublicIdentity = "",
+                errorMessage = it.message ?: "Invalid private identity file",
+                saveResult = null,
+            )
+        }
+    }
+
+    fun importIdentityFromUri(uri: Uri) {
+        val current = _state.value
+        val resolved = runCatching {
+            val privateIdentity = deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                ?: error("Unable to read private identity from selected URI")
+            val validated = deps.tunnelRepository.validatePrivateIdentity(privateIdentity)
+            require(validated.valid) { validated.message ?: "Invalid private identity" }
+            val canonicalPrivate = validated.canonical_private_identity ?: privateIdentity
+            val canonicalPublic = validated.canonical_public_identity ?: ""
+            val peerId = validated.peer_id ?: throw IllegalArgumentException("Missing identity peer id")
+            deps.identityRepository.storeEncryptedIdentity(canonicalPrivate.toByteArray(), canonicalPublic)
+            Triple(peerId, canonicalPublic, canonicalPrivate)
+        }
+        resolved.onSuccess { (peerId, canonicalPublic, _) ->
+            _state.value = current.copy(
+                identityPeerId = peerId,
+                localPublicIdentity = canonicalPublic,
+                input = current.input.copy(localPeerId = peerId),
+                importIdentityPath = "",
+                errorMessage = null,
+                saveResult = "Identity imported",
+            )
+        }.onFailure {
+            _state.value = current.copy(
                 errorMessage = it.message ?: "Invalid private identity file",
                 saveResult = null,
             )
@@ -683,6 +721,37 @@ class SettingsViewModel(private val deps: AppDependencies) : ViewModel() {
         val raw = File(configPath).takeIf { it.exists() }?.readText() ?: return@runCatching ""
         SensitiveDataRedactor.redactText(raw)
     }.getOrDefault("")
+
+    fun resetConfiguration() {
+        runCatching {
+            deps.configRepository.writeConfigAtomically(deps.configRepository.defaultConfigTemplate())
+            deps.configRepository.saveSetupInput(SetupConfigInput())
+            deps.configRepository.saveForwards(
+                listOf(
+                    ForwardConfig(
+                        id = "llama",
+                        name = "Llama server",
+                        localHost = "127.0.0.1",
+                        localPort = 8080,
+                        remoteForwardId = "llama",
+                        enabled = true,
+                    ),
+                ),
+            )
+        }
+    }
+
+    fun diagnosticsShareIntent(): Intent {
+        val payload = buildString {
+            appendLine("status_json=${statusJson()}")
+            appendLine("config_redacted=${redactedConfigOrEmpty()}")
+        }
+        return Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "WebRTC Tunnel diagnostics (redacted)")
+            putExtra(Intent.EXTRA_TEXT, payload)
+        }
+    }
 }
 
 class NetworkPolicyViewModel(private val deps: AppDependencies) : ViewModel() {

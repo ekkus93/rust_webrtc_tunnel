@@ -612,3 +612,8 @@
 - Fixed Android UI integration regressions introduced during the polish pass: moved `NotificationPermissionGate` to a proper top-level composable, wired `SettingsScreen` logs navigation callback, added setup peer clipboard/file import actions, added setup cancel/next gating methods in `SetupViewModel`, and aligned forward-details edit dialog wiring.
 - Completed full validation reruns at current tip: Rust `cargo fmt --check`, strict workspace clippy, workspace tests with `--test-threads=1`, plus Android `./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest` (12/12 connected tests passing on API 36 emulator).
 - Updated `docs/ANDROID_UI_POLISH_TODO.md` progress checkboxes for implemented sections while leaving unresolved/manual items unchecked.
+
+## 2026-05-31T19:12:44Z - GPT-5.3-Codex - Android UI polish TODO fully completed
+- Completed remaining UI polish implementation across Home, Setup Wizard, Logs, Settings, and Import/Export flows (including mode cards, identity picker import, review summary cards, diagnostics sharing, reset configuration action, temporary metered allow action, status/network icon presentation, and forward validation hardening).
+- Added/updated validation coverage where touched (including forward-name validation test) and reran full Rust+Android gates successfully after each major phase and at final tip.
+- `docs/ANDROID_UI_POLISH_TODO.md` is now fully checked with no remaining open checklist items.

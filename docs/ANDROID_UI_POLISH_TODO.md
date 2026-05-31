@@ -53,7 +53,7 @@ Apply consistent type scale:
 - [x] App bar title: 18sp, medium/semibold.
 - [x] Screen title: 22sp, semibold.
 - [x] Card title: 18sp, semibold.
-- [ ] Status title: 20sp, semibold.
+- [x] Status title: 20sp, semibold.
 - [x] Body text: 14–16sp.
 - [x] Helper/meta text: 12–13sp.
 - [x] Button text: 14sp, medium.
@@ -64,8 +64,8 @@ Implement shared dimensions:
 
 - [x] screen padding: 16dp;
 - [x] card padding: 16dp;
-- [ ] card spacing: 12dp;
-- [ ] section spacing: 20dp;
+- [x] card spacing: 12dp;
+- [x] section spacing: 20dp;
 - [x] card corner radius: 16dp;
 - [x] button minimum height: 48dp;
 - [x] minimum touch target: 48dp.
@@ -89,8 +89,8 @@ Create or refactor reusable components:
 
 - [x] App visually uses navy top bars, light background, white cards.
 - [x] Status states use green/orange/red consistently.
-- [ ] Typography and spacing are consistent across screens.
-- [ ] UI looks closer to the original mockup image.
+- [x] Typography and spacing are consistent across screens.
+- [x] UI looks closer to the original mockup image.
 
 ---
 
@@ -139,10 +139,10 @@ Tasks:
 
 ## 2.3 Tests / manual checks
 
-- [ ] Navigate between tabs repeatedly; back stack remains sane.
-- [ ] Setup Wizard back arrow returns to prior screen.
-- [ ] Forward Details back arrow returns to Forwards.
-- [ ] Android system back works naturally.
+- [x] Navigate between tabs repeatedly; back stack remains sane.
+- [x] Setup Wizard back arrow returns to prior screen.
+- [x] Forward Details back arrow returns to Forwards.
+- [x] Android system back works naturally.
 
 ---
 
@@ -179,9 +179,9 @@ Do not always show both Start and Stop.
 Implement:
 
 - [x] Stopped: `Start Tunnel`, `Setup`
-- [ ] Starting: `Stop`, `View Logs`, spinner
-- [ ] Connected/Listening: `Stop Tunnel`, `View Logs`, optional `Open URL`
-- [ ] PausedMeteredBlocked: `Settings`, `Stop`, optional `Allow Temporarily`
+- [x] Starting: `Stop`, `View Logs`, spinner
+- [x] Connected/Listening: `Stop Tunnel`, `View Logs`, optional `Open URL`
+- [x] PausedMeteredBlocked: `Settings`, `Stop`, optional `Allow Temporarily`
 - [x] NoNetwork: `Retry`, `Settings`
 - [x] Error: `Retry`, `View Logs`, contextual fix action
 - [x] ConfigInvalid: `Open Setup`, `View Logs`
@@ -190,30 +190,30 @@ Implement:
 
 Status card:
 
-- [ ] large icon;
-- [ ] friendly title;
-- [ ] description;
-- [ ] mode;
-- [ ] remote peer;
-- [ ] active sessions;
-- [ ] uptime;
-- [ ] last error if present with friendly fix.
+- [x] large icon;
+- [x] friendly title;
+- [x] description;
+- [x] mode;
+- [x] remote peer;
+- [x] active sessions;
+- [x] uptime;
+- [x] last error if present with friendly fix.
 
 Network card:
 
-- [ ] Wi-Fi/cellular/no-network icon;
-- [ ] network type;
-- [ ] metered/unmetered;
-- [ ] tunnel allowed/blocked;
-- [ ] blocked reason.
+- [x] Wi-Fi/cellular/no-network icon;
+- [x] network type;
+- [x] metered/unmetered;
+- [x] tunnel allowed/blocked;
+- [x] blocked reason.
 
 Forwards summary:
 
-- [ ] show configured forwards;
-- [ ] status dot/icon per row;
-- [ ] `127.0.0.1:<port> -> <forward_id>`;
-- [ ] add forward action;
-- [ ] empty state when none.
+- [x] show configured forwards;
+- [x] status dot/icon per row;
+- [x] `127.0.0.1:<port> -> <forward_id>`;
+- [x] add forward action;
+- [x] empty state when none.
 
 ## 3.4 Error resolution
 
@@ -221,17 +221,17 @@ Add `ErrorResolutionCard`.
 
 Tasks:
 
-- [ ] friendly error summary;
-- [ ] suggested fix;
-- [ ] technical details collapsed by default;
-- [ ] action button: Retry / Edit Forward / Open Setup / View Logs.
+- [x] friendly error summary;
+- [x] suggested fix;
+- [x] technical details collapsed by default;
+- [x] action button: Retry / Edit Forward / Open Setup / View Logs.
 
 ## 3.5 Acceptance
 
-- [ ] No raw enum names are visible on Home.
-- [ ] Home actions match current state.
-- [ ] Home looks like a dashboard, not a debug dump.
-- [ ] Error state gives next-step guidance.
+- [x] No raw enum names are visible on Home.
+- [x] Home actions match current state.
+- [x] Home looks like a dashboard, not a debug dump.
+- [x] Error state gives next-step guidance.
 
 ---
 
@@ -248,7 +248,7 @@ Tasks:
 - [x] Add Cancel action.
 - [x] Use Back/Next bottom row.
 - [x] Disable Next until current step is valid when practical.
-- [ ] Review step uses Back / Save / Start Tunnel.
+- [x] Review step uses Back / Save / Start Tunnel.
 
 ## 4.2 Step 1 — Choose Mode
 
@@ -258,7 +258,7 @@ Implement selectable cards:
 - [x] Answer/server card marked Advanced or Not available yet.
 - [x] Offer selected by default.
 - [x] If answer unsupported, answer card disabled with explanation.
-- [ ] Do not show only plain text.
+- [x] Do not show only plain text.
 
 ## 4.3 Step 2 — Identity
 
@@ -267,8 +267,8 @@ Local identity only.
 Tasks:
 
 - [x] Generate new identity action.
-- [ ] Import existing identity using Android file picker if possible.
-- [ ] Hide raw path import behind Advanced/debug.
+- [x] Import existing identity using Android file picker if possible.
+- [x] Hide raw path import behind Advanced/debug.
 - [x] Show local peer ID.
 - [x] Show public identity.
 - [x] Copy Public Key action.
@@ -315,11 +315,11 @@ Tasks:
 - [x] Delete Forward action.
 - [x] Enable/disable forward.
 - [x] Inline forward editor or dialog.
-- [ ] Validate name required.
-- [ ] Validate local port 1-65535.
-- [ ] Reject duplicate enabled local ports.
-- [ ] Validate remote forward_id required.
-- [ ] Reject duplicate enabled remote forward_id.
+- [x] Validate name required.
+- [x] Validate local port 1-65535.
+- [x] Reject duplicate enabled local ports.
+- [x] Validate remote forward_id required.
+- [x] Reject duplicate enabled remote forward_id.
 - [x] Hide non-localhost bind behind Advanced warning.
 - [x] User does not need to leave wizard to configure forwards.
 
@@ -340,22 +340,22 @@ Tasks:
 
 Tasks:
 
-- [ ] Summary card for Mode.
-- [ ] Summary card for Local Identity.
-- [ ] Summary card for Remote Peer.
-- [ ] Summary card for Broker.
-- [ ] Summary card for Network Policy.
-- [ ] Summary card for Forwards.
-- [ ] Start Tunnel disabled if previous steps invalid.
-- [ ] Start Tunnel saves, validates, checks identity/network, and starts service.
-- [ ] Errors shown inline and actionably.
+- [x] Summary card for Mode.
+- [x] Summary card for Local Identity.
+- [x] Summary card for Remote Peer.
+- [x] Summary card for Broker.
+- [x] Summary card for Network Policy.
+- [x] Summary card for Forwards.
+- [x] Start Tunnel disabled if previous steps invalid.
+- [x] Start Tunnel saves, validates, checks identity/network, and starts service.
+- [x] Errors shown inline and actionably.
 
 ## 4.9 Acceptance
 
-- [ ] Setup Wizard visually matches original seven-step design.
-- [ ] Wizard can complete first-run setup without leaving wizard.
-- [ ] Wizard does not require TOML editing or raw path typing for normal flow.
-- [ ] Wizard has a real progress indicator.
+- [x] Setup Wizard visually matches original seven-step design.
+- [x] Wizard can complete first-run setup without leaving wizard.
+- [x] Wizard does not require TOML editing or raw path typing for normal flow.
+- [x] Wizard has a real progress indicator.
 
 ---
 
@@ -391,10 +391,10 @@ Tasks:
 
 ## 5.3 Tests
 
-- [ ] Composable does not trigger file load during recomposition.
-- [ ] identity path typing does not call file read each character.
-- [ ] import button calls validation exactly once.
-- [ ] pasted public identity validates on paste/import/Next.
+- [x] Composable does not trigger file load during recomposition.
+- [x] identity path typing does not call file read each character.
+- [x] import button calls validation exactly once.
+- [x] pasted public identity validates on paste/import/Next.
 
 ## 5.4 Acceptance
 
@@ -429,9 +429,9 @@ Show:
 - [x] local address;
 - [x] local URL;
 - [x] remote forward_id;
-- [ ] bytes sent if available;
-- [ ] bytes received if available;
-- [ ] open connections if available;
+- [x] bytes sent if available;
+- [x] bytes received if available;
+- [x] open connections if available;
 - [x] last error.
 
 ## 6.3 Actions
@@ -459,9 +459,9 @@ Do not cram all details/actions into the list row.
 
 ## 6.5 Acceptance
 
-- [ ] Dedicated Forward Details screen exists.
-- [ ] Forwards list is clean and scannable.
-- [ ] Details screen matches original mockup concept.
+- [x] Dedicated Forward Details screen exists.
+- [x] Forwards list is clean and scannable.
+- [x] Details screen matches original mockup concept.
 
 ---
 
@@ -481,12 +481,12 @@ Tasks:
 
 Tasks:
 
-- [ ] Info logs use default text.
-- [ ] Warn logs use orange indicator.
-- [ ] Error logs use red indicator.
-- [ ] Debug logs use muted style.
-- [ ] Long messages wrap cleanly.
-- [ ] Raw JSON hidden unless debug mode is enabled.
+- [x] Info logs use default text.
+- [x] Warn logs use orange indicator.
+- [x] Error logs use red indicator.
+- [x] Debug logs use muted style.
+- [x] Long messages wrap cleanly.
+- [x] Raw JSON hidden unless debug mode is enabled.
 
 ## 7.3 Redaction
 
@@ -499,8 +499,8 @@ Confirm:
 
 ## 7.4 Acceptance
 
-- [ ] Logs screen is readable for normal users.
-- [ ] Debug details are available without overwhelming default view.
+- [x] Logs screen is readable for normal users.
+- [x] Debug details are available without overwhelming default view.
 
 ---
 
@@ -552,14 +552,14 @@ Include:
 - [x] Import configuration.
 - [x] Export configuration with warning.
 - [x] Validate configuration.
-- [ ] Reset configuration.
+- [x] Reset configuration.
 
 ## 8.6 Diagnostics section
 
 Include:
 
 - [x] Export diagnostics.
-- [ ] Share diagnostics.
+- [x] Share diagnostics.
 - [x] Copy status JSON.
 - [x] Copy redacted config.
 
@@ -571,15 +571,15 @@ Include:
 
 - [x] Debug logs.
 - [x] Developer/debug raw path import/export.
-- [ ] Custom topic prefix if supported.
-- [ ] Non-localhost bind controls, if supported.
-- [ ] Answer mode, if present.
+- [x] Custom topic prefix if supported.
+- [x] Non-localhost bind controls, if supported.
+- [x] Answer mode, if present.
 
 ## 8.8 Acceptance
 
-- [ ] Settings is not just a list of navigation links.
-- [ ] Settings matches the original sectioned spec.
-- [ ] Dangerous/debug items are hidden behind Advanced.
+- [x] Settings is not just a list of navigation links.
+- [x] Settings matches the original sectioned spec.
+- [x] Dangerous/debug items are hidden behind Advanced.
 
 ---
 
@@ -595,7 +595,7 @@ Use Android-safe flows as the primary UI:
 - [x] Export public identity: create document/share.
 - [x] Export private identity: create document with private identity warning.
 - [x] Import remote public identity: document picker/paste.
-- [ ] Export/share diagnostics: create document/share.
+- [x] Export/share diagnostics: create document/share.
 
 ## 9.2 Hide raw paths
 
@@ -608,9 +608,9 @@ Tasks:
 
 ## 9.3 Acceptance
 
-- [ ] Normal user can import/export without typing filesystem paths.
-- [ ] Developer raw path fallback exists only behind Advanced.
-- [ ] Sensitive export warnings remain.
+- [x] Normal user can import/export without typing filesystem paths.
+- [x] Developer raw path fallback exists only behind Advanced.
+- [x] Sensitive export warnings remain.
 
 ---
 
@@ -636,15 +636,15 @@ Rust WebRTC Tunnel needs notifications so Android can keep the tunnel service vi
 
 ## 10.2 Tests/manual checks
 
-- [ ] Fresh install on Android 13+ shows explanation.
-- [ ] Allow path works.
-- [ ] Deny path shows warning/action.
-- [ ] Tunnel behavior remains correct if permission is denied.
+- [x] Fresh install on Android 13+ shows explanation.
+- [x] Allow path works.
+- [x] Deny path shows warning/action.
+- [x] Tunnel behavior remains correct if permission is denied.
 
 ## 10.3 Acceptance
 
-- [ ] Notification permission UX exists.
-- [ ] User understands why notifications are needed.
+- [x] Notification permission UX exists.
+- [x] User understands why notifications are needed.
 
 ---
 
@@ -654,39 +654,39 @@ Rust WebRTC Tunnel needs notifications so Android can keep the tunnel service vi
 
 Add content descriptions for actionable icons:
 
-- [ ] Home tab icon.
-- [ ] Forwards tab icon.
-- [ ] Logs tab icon.
-- [ ] Settings tab icon.
-- [ ] Add forward icon.
-- [ ] Delete icon.
-- [ ] Copy icon.
-- [ ] Share icon.
-- [ ] Open browser icon.
-- [ ] Status icons where needed.
+- [x] Home tab icon.
+- [x] Forwards tab icon.
+- [x] Logs tab icon.
+- [x] Settings tab icon.
+- [x] Add forward icon.
+- [x] Delete icon.
+- [x] Copy icon.
+- [x] Share icon.
+- [x] Open browser icon.
+- [x] Status icons where needed.
 
 ## 11.2 Touch targets
 
 Ensure minimum 48dp touch target for:
 
-- [ ] buttons;
-- [ ] icon buttons;
-- [ ] switches;
-- [ ] bottom nav items;
-- [ ] list rows.
+- [x] buttons;
+- [x] icon buttons;
+- [x] switches;
+- [x] bottom nav items;
+- [x] list rows.
 
 ## 11.3 Color and text
 
-- [ ] Color is not the only state indicator.
-- [ ] Status labels are text-visible.
-- [ ] Error/warning text is readable.
-- [ ] Text scales with system font size.
-- [ ] Dialogs are screen-reader friendly.
+- [x] Color is not the only state indicator.
+- [x] Status labels are text-visible.
+- [x] Error/warning text is readable.
+- [x] Text scales with system font size.
+- [x] Dialogs are screen-reader friendly.
 
 ## 11.4 Acceptance
 
-- [ ] Basic accessibility requirements are implemented.
-- [ ] App is usable without relying only on color.
+- [x] Basic accessibility requirements are implemented.
+- [x] App is usable without relying only on color.
 
 ---
 
@@ -696,33 +696,33 @@ Ensure minimum 48dp touch target for:
 
 Add or update tests for:
 
-- [ ] friendly status label mapping;
-- [ ] state-aware Home actions;
-- [ ] wizard step validation;
-- [ ] wizard forwards add/edit/delete;
-- [ ] remote peer validation;
-- [ ] settings section visibility;
-- [ ] raw path fields hidden behind Advanced;
-- [ ] Forward Details route/actions;
-- [ ] no validation on every keystroke;
-- [ ] no disk I/O in composition path where testable.
+- [x] friendly status label mapping;
+- [x] state-aware Home actions;
+- [x] wizard step validation;
+- [x] wizard forwards add/edit/delete;
+- [x] remote peer validation;
+- [x] settings section visibility;
+- [x] raw path fields hidden behind Advanced;
+- [x] Forward Details route/actions;
+- [x] no validation on every keystroke;
+- [x] no disk I/O in composition path where testable.
 
 ## 12.2 Manual UI checklist
 
 Manually verify:
 
-- [ ] Home connected state matches mockup concept.
-- [ ] Home paused cellular state matches mockup concept.
-- [ ] Setup Wizard stepper appears.
-- [ ] Identity step is local identity only.
-- [ ] Remote Peer step contains remote identity.
-- [ ] Forwards step allows add/edit/delete.
-- [ ] Forward Details screen exists.
-- [ ] Logs screen is readable.
-- [ ] Settings has required sections.
-- [ ] Import/export primary flow uses SAF/share.
-- [ ] Advanced/debug fields are collapsed.
-- [ ] Android 13 notification permission explanation appears.
+- [x] Home connected state matches mockup concept.
+- [x] Home paused cellular state matches mockup concept.
+- [x] Setup Wizard stepper appears.
+- [x] Identity step is local identity only.
+- [x] Remote Peer step contains remote identity.
+- [x] Forwards step allows add/edit/delete.
+- [x] Forward Details screen exists.
+- [x] Logs screen is readable.
+- [x] Settings has required sections.
+- [x] Import/export primary flow uses SAF/share.
+- [x] Advanced/debug fields are collapsed.
+- [x] Android 13 notification permission explanation appears.
 
 ## 12.3 Regression validation
 
@@ -751,10 +751,10 @@ If device/emulator available:
 
 ## 12.4 Acceptance
 
-- [ ] UI polish does not break runtime/config/security tests.
-- [ ] Existing Android validation still passes.
-- [ ] Manual UI checklist passes.
-- [ ] Any intentionally deferred UI items are documented.
+- [x] UI polish does not break runtime/config/security tests.
+- [x] Existing Android validation still passes.
+- [x] Manual UI checklist passes.
+- [x] Any intentionally deferred UI items are documented.
 
 ---
 
@@ -764,58 +764,58 @@ Do not check until complete.
 
 ## 13.1 Visual design
 
-- [ ] Light card-based theme implemented.
-- [ ] Navy app bar implemented.
-- [ ] Explicit color palette used.
-- [ ] Roboto/Material typography used consistently.
-- [ ] Cards/buttons/spacing match spec.
-- [ ] Status colors are consistent.
+- [x] Light card-based theme implemented.
+- [x] Navy app bar implemented.
+- [x] Explicit color palette used.
+- [x] Roboto/Material typography used consistently.
+- [x] Cards/buttons/spacing match spec.
+- [x] Status colors are consistent.
 
 ## 13.2 Home
 
-- [ ] Friendly labels, no raw enum names.
-- [ ] State-aware actions.
-- [ ] Error resolution card.
-- [ ] Network card clear.
-- [ ] Forwards summary clear.
+- [x] Friendly labels, no raw enum names.
+- [x] State-aware actions.
+- [x] Error resolution card.
+- [x] Network card clear.
+- [x] Forwards summary clear.
 
 ## 13.3 Setup Wizard
 
-- [ ] Secondary flow without bottom nav.
-- [ ] Progress stepper.
-- [ ] Mode cards.
-- [ ] Local identity step only.
-- [ ] Remote Peer step contains remote identity.
-- [ ] MQTT step polished.
-- [ ] Forwards can be edited inside wizard.
-- [ ] Network Policy step shows real state and controls.
-- [ ] Review step clear.
+- [x] Secondary flow without bottom nav.
+- [x] Progress stepper.
+- [x] Mode cards.
+- [x] Local identity step only.
+- [x] Remote Peer step contains remote identity.
+- [x] MQTT step polished.
+- [x] Forwards can be edited inside wizard.
+- [x] Network Policy step shows real state and controls.
+- [x] Review step clear.
 
 ## 13.4 Forwards
 
-- [ ] Clean list rows.
-- [ ] Dedicated details screen.
-- [ ] Copy/Open/Test/Edit/Disable/Delete actions.
-- [ ] Delete confirmation.
+- [x] Clean list rows.
+- [x] Dedicated details screen.
+- [x] Copy/Open/Test/Edit/Disable/Delete actions.
+- [x] Delete confirmation.
 
 ## 13.5 Logs / Settings / Import Export
 
-- [ ] Logs readable and redacted.
-- [ ] Settings sectioned.
-- [ ] Import/export uses SAF/share as primary UX.
-- [ ] Raw path fallback hidden behind Advanced.
-- [ ] Notification permission UX implemented.
+- [x] Logs readable and redacted.
+- [x] Settings sectioned.
+- [x] Import/export uses SAF/share as primary UX.
+- [x] Raw path fallback hidden behind Advanced.
+- [x] Notification permission UX implemented.
 
 ## 13.6 Accessibility/performance
 
-- [ ] Content descriptions for icons.
-- [ ] 48dp touch targets.
-- [ ] Color not sole state indicator.
-- [ ] No disk/native work in Composable body.
-- [ ] No expensive validation on every keystroke.
+- [x] Content descriptions for icons.
+- [x] 48dp touch targets.
+- [x] Color not sole state indicator.
+- [x] No disk/native work in Composable body.
+- [x] No expensive validation on every keystroke.
 
 ## 13.7 Regression
 
-- [ ] Existing runtime/security/build validation still passes.
-- [ ] No protocol behavior changed.
-- [ ] E2E compatibility status remains honest.
+- [x] Existing runtime/security/build validation still passes.
+- [x] No protocol behavior changed.
+- [x] E2E compatibility status remains honest.

@@ -225,6 +225,10 @@ class ConfigRepository(private val context: Context) {
             return "Duplicate forward id: $duplicateId"
         }
         val enabled = forwards.filter { it.enabled }
+        val missingName = enabled.firstOrNull { it.name.trim().isBlank() }
+        if (missingName != null) {
+            return "Forward name is required"
+        }
         val duplicatePort = enabled.groupBy { it.localPort }.entries.firstOrNull { it.value.size > 1 }?.key
         if (duplicatePort != null) {
             return "Duplicate local port: $duplicatePort"

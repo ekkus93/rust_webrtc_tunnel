@@ -146,11 +146,16 @@ class TunnelRepository(
             "error" -> ServiceState.Error
             else -> ServiceState.Stopped
         }
+        val uptimeSeconds = started_at_unix_ms?.let { startedAt ->
+            val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+            elapsedMs / 1000L
+        }
         return previous.copy(
             serviceState = stateValue,
             mode = modeValue,
             mqttConnected = active,
             activeSessionCount = if (active) 1 else 0,
+            uptimeSeconds = uptimeSeconds,
             lastError = last_error?.let {
                 TunnelError(code = "native_runtime_error", message = it, details = config_path)
             },

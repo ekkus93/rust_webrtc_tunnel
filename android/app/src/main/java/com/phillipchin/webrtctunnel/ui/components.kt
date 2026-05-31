@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,7 +62,7 @@ fun StatusCard(content: @Composable () -> Unit) {
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = { content() })
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = { content() })
     }
 }
 
@@ -94,6 +97,7 @@ fun EmptyStateCard(message: String) {
 
 @Composable
 fun ErrorResolutionCard(summary: String, fix: String, details: String? = null, action: @Composable (() -> Unit)? = null) {
+    var showDetails by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -103,8 +107,13 @@ fun ErrorResolutionCard(summary: String, fix: String, details: String? = null, a
             Text(summary, color = Error, style = MaterialTheme.typography.titleMedium)
             Text(fix, style = MaterialTheme.typography.bodyMedium)
             details?.takeIf { it.isNotBlank() }?.let {
-                HorizontalDivider()
-                Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
+                OutlinedButton(onClick = { showDetails = !showDetails }) {
+                    Text(if (showDetails) "Hide technical details" else "Show technical details")
+                }
+                if (showDetails) {
+                    HorizontalDivider()
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
+                }
             }
             action?.invoke()
         }

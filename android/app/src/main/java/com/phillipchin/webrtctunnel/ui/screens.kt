@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,12 +20,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,10 +54,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.ForwardConfig
+import com.phillipchin.webrtctunnel.model.ForwardStatus
 import com.phillipchin.webrtctunnel.model.NetworkStatus
 import com.phillipchin.webrtctunnel.model.NetworkType
 import com.phillipchin.webrtctunnel.model.ServiceState
@@ -85,6 +97,55 @@ private fun isBrowserOpenable(forward: ForwardConfig): Boolean {
     return listOf("http", "web", "api", "llama", "ollama").any { token -> name.contains(token) }
 }
 
+private fun mapNetworkTypeLabel(networkType: NetworkType): String = when (networkType) {
+    NetworkType.UnmeteredWifi -> "Wi-Fi"
+    NetworkType.MeteredWifi -> "Metered Wi-Fi"
+    NetworkType.Cellular -> "Cellular"
+    NetworkType.NoNetwork -> "No network"
+    NetworkType.Unknown -> "Unknown"
+}
+
+private fun mapForwardListenLabel(state: String): String = when (state.lowercase()) {
+    "listening" -> "Listening"
+    "stopped" -> "Stopped"
+    "error" -> "Error"
+    "disabled" -> "Disabled"
+    "paused" -> "Paused"
+    else -> state
+}
+
+private fun ForwardStatus.toConfig(): ForwardConfig = ForwardConfig(
+    id = id,
+    name = name,
+    localHost = localHost,
+    localPort = localPort,
+    remoteForwardId = remoteForwardId,
+    enabled = enabled,
+)
+
+@Composable
+private fun HomeStatusIcon(title: String) {
+    val (icon, tint) = when {
+        title.equals("Connected", ignoreCase = true) || title.equals("Listening", ignoreCase = true) ->
+            Icons.Filled.CheckCircle to stateColorToken(title)
+        title.equals("Error", ignoreCase = true) || title.contains("attention", ignoreCase = true) ->
+            Icons.Filled.Warning to stateColorToken(title)
+        else -> Icons.Filled.Info to stateColorToken(title)
+    }
+    Icon(icon, contentDescription = "Tunnel status", tint = tint, modifier = Modifier.size(40.dp))
+}
+
+@Composable
+private fun NetworkTypeIcon(networkType: NetworkType) {
+    val (icon, description) = when (networkType) {
+        NetworkType.UnmeteredWifi, NetworkType.MeteredWifi -> Icons.Filled.Wifi to "Wi-Fi network"
+        NetworkType.Cellular -> Icons.Filled.SignalCellularAlt to "Cellular network"
+        NetworkType.NoNetwork -> Icons.Filled.WifiOff to "No network"
+        NetworkType.Unknown -> Icons.Filled.Info to "Unknown network"
+    }
+    Icon(icon, contentDescription = description, tint = Color(0xFF6B7280))
+}
+
 @Composable
 fun HomeScreen(
     padding: PaddingValues,
@@ -95,12 +156,27 @@ fun HomeScreen(
 ) {
     val status by vm.status.collectAsStateWithLifecycle()
     val statusUi = mapStatusUi(status)
+    val context = LocalContext.current
+    val browserForward = status.forwards.firstOrNull { isBrowserOpenable(it.toConfig()) }
     ScreenSurface(padding) {
         SectionHeader("Tunnel Status", "Current runtime state and quick actions")
         Spacer(Modifier.height(12.dp))
         StatusCard {
-            Text(statusUi.title, color = stateColorToken(statusUi.title), style = MaterialTheme.typography.titleLarge)
-            Text(statusUi.description)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HomeStatusIcon(statusUi.title)
+                Column {
+                    Text(
+                        statusUi.title,
+                        color = stateColorToken(statusUi.title),
+                        style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Text(statusUi.description)
+                }
+            }
             Text("Mode: ${if (status.mode == TunnelMode.Offer) "Offer (client)" else "Answer (server)"}")
             Text("Remote peer: ${status.remotePeerId ?: "-"}")
             Text("Active sessions: ${status.activeSessionCount}")
@@ -108,8 +184,15 @@ fun HomeScreen(
         }
         Spacer(Modifier.height(12.dp))
         NetworkStatusCard {
-            Text("Network", style = MaterialTheme.typography.titleMedium)
-            Text("Type: ${status.networkStatus.networkType}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NetworkTypeIcon(status.networkStatus.networkType)
+                Text("Network", style = MaterialTheme.typography.titleMedium)
+            }
+            Text("Type: ${mapNetworkTypeLabel(status.networkStatus.networkType)}")
             Text(if (status.networkStatus.isMetered) "Metered" else "Unmetered")
             Text(if (status.networkStatus.tunnelAllowed) "Tunnel allowed" else "Tunnel blocked")
             status.networkStatus.blockReason?.let { Text("Reason: $it") }
@@ -118,15 +201,18 @@ fun HomeScreen(
         StatusCard {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Forwards (${status.forwards.size})", style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = onOpenSetup) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add forward")
+                }
             }
             if (status.forwards.isEmpty()) {
-                Text("No forwards configured.")
+                EmptyStateCard("No forwards configured.")
             } else {
                 status.forwards.forEach { forward ->
                     ForwardSummaryRow(
                         title = forward.name,
-                        subtitle = "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
-                        status = forward.listenState.name,
+                        subtitle = "127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}",
+                        status = mapForwardListenLabel(forward.listenState.name),
                     )
                 }
             }
@@ -141,7 +227,21 @@ fun HomeScreen(
             )
         }
         Spacer(Modifier.height(12.dp))
-        HomeActionRow(status = status, onStart = { vm.startTunnel(TunnelMode.Offer) }, onStop = vm::stopTunnel, onOpenSetup = onOpenSetup, onOpenLogs = onOpenLogs, onOpenSettings = onOpenSettings)
+        HomeActionRow(
+            status = status,
+            onStart = { vm.startTunnel(TunnelMode.Offer) },
+            onStop = vm::stopTunnel,
+            onOpenSetup = onOpenSetup,
+            onOpenLogs = onOpenLogs,
+            onOpenSettings = onOpenSettings,
+            onAllowMeteredTemporary = vm::allowMeteredTemporarily,
+            onOpenBrowser = browserForward?.let {
+                {
+                    val url = "http://127.0.0.1:${it.localPort}"
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            },
+        )
     }
 }
 
@@ -153,6 +253,8 @@ private fun HomeActionRow(
     onOpenSetup: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenSettings: () -> Unit,
+    onAllowMeteredTemporary: () -> Unit,
+    onOpenBrowser: (() -> Unit)? = null,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         when (status.serviceState) {
@@ -163,14 +265,19 @@ private fun HomeActionRow(
             ServiceState.Starting, ServiceState.Connecting, ServiceState.Reconnecting -> {
                 OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
                 OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
             }
             ServiceState.Connected, ServiceState.Listening, ServiceState.Serving -> {
                 OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop Tunnel") }
                 OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                onOpenBrowser?.let {
+                    OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("Open URL") }
+                }
             }
             ServiceState.PausedMeteredBlocked -> {
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
                 OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
+                OutlinedButton(onClick = onAllowMeteredTemporary, modifier = Modifier.weight(1f)) { Text("Allow Temporarily") }
             }
             ServiceState.NoNetwork -> {
                 OutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
@@ -348,6 +455,15 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
             }) { Text("Copy Logs") }
             OutlinedButton(onClick = vm::clearLogs) { Text("Clear Logs") }
             OutlinedButton(onClick = { diagnosticsCreateDocumentLauncher.launch("webrtc_diagnostics_redacted.txt") }) { Text("Export Diagnostics") }
+            OutlinedButton(
+                onClick = {
+                    val share = Intent.createChooser(
+                        vm.diagnosticsShareIntent(networkStatus),
+                        "Share diagnostics",
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(share)
+                },
+            ) { Text("Share Diagnostics") }
             OutlinedButton(onClick = { paused = !paused }) { Text(if (paused) "Resume Logs" else "Pause Logs") }
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
@@ -414,6 +530,7 @@ fun SettingsScreen(
         SettingsSection("Configuration") {
             OutlinedButton(onClick = onOpenImportExport, modifier = Modifier.fillMaxWidth()) { Text("Import / Export") }
             OutlinedButton(onClick = { vm.validateConfig() }, modifier = Modifier.fillMaxWidth()) { Text("Validate configuration") }
+            OutlinedButton(onClick = { vm.resetConfiguration() }, modifier = Modifier.fillMaxWidth()) { Text("Reset configuration") }
         }
         Spacer(Modifier.height(12.dp))
         SettingsSection("Identity") {
@@ -454,11 +571,21 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Copy redacted config") }
             OutlinedButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) { Text("Open logs / export diagnostics") }
+            OutlinedButton(
+                onClick = {
+                    val share = Intent.createChooser(vm.diagnosticsShareIntent(), "Share diagnostics")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(share)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Share diagnostics") }
         }
         Spacer(Modifier.height(12.dp))
         SettingsSection("Advanced") {
             PreferenceSwitch("Enable debug logs", prefs.debugLogsEnabled) { vm.savePreferences(prefs.copy(debugLogsEnabled = it)) }
             PreferenceSwitch("Show advanced settings", prefs.advancedSettingsEnabled) { vm.savePreferences(prefs.copy(advancedSettingsEnabled = it)) }
+            OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Edit custom topic prefix") }
+            OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Configure non-localhost bind (advanced)") }
             Text("Answer mode: Not available in Android v1", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
         Spacer(Modifier.height(12.dp))

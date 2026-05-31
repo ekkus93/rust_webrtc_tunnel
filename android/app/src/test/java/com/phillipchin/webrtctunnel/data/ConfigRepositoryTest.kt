@@ -135,6 +135,14 @@ class ConfigRepositoryTest {
     }
 
     @Test
+    fun forwardsValidationRejectsBlankEnabledForwardName() {
+        val forwards = listOf(
+            ForwardConfig(id = "a", name = "", localPort = 9000, remoteForwardId = "a", enabled = true),
+        )
+        assertEquals("Forward name is required", repository.validateForwards(forwards))
+    }
+
+    @Test
     fun forwardsValidationRejectsDuplicateEnabledRemoteForwardIds() {
         val forwards = listOf(
             ForwardConfig(id = "a", name = "a", localPort = 9000, remoteForwardId = "llama", enabled = true),

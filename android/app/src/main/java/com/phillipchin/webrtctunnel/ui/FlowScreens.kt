@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -61,10 +63,17 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
             vm.importPublicIdentityFromUri(uri)
         }
     }
+    val importIdentityLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            vm.importIdentityFromUri(uri)
+        }
+    }
     var editingForward by remember { mutableStateOf<ForwardConfig?>(null) }
 
     ScreenSurface(padding) {
-        SectionHeader("Setup Wizard", "Configure tunnel in 6 guided steps")
+        SectionHeader("Setup Wizard", "Configure tunnel in 7 guided steps")
         Spacer(Modifier.height(12.dp))
         WizardStepper(
             steps = SetupStep.entries.map { stepLabel(it) },
@@ -73,7 +82,11 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
         Spacer(Modifier.height(12.dp))
         when (state.currentStep) {
             SetupStep.Mode -> ModeStepContent()
-            SetupStep.Identity -> IdentityStepContent(vm, state)
+            SetupStep.Identity -> IdentityStepContent(
+                vm = vm,
+                state = state,
+                onImportIdentityFile = { importIdentityLauncher.launch(arrayOf("text/*", "application/toml")) },
+            )
             SetupStep.Broker -> BrokerStepContent(vm, state)
             SetupStep.Peer -> PeerStepContent(
                 vm = vm,
@@ -121,7 +134,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
                     OutlinedButton(onClick = vm::testBrokerConnection) { Text("Test Broker") }
                 }
                 if (state.currentStep == SetupStep.Review) {
-                    Button(onClick = vm::saveAndApplyConfig) { Text("Save & Start Offer") }
+                    Button(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save / Start Tunnel") }
                 } else {
                     Button(onClick = vm::goNext, enabled = canAdvance) { Text("Next") }
                 }
@@ -153,25 +166,49 @@ private fun stepLabel(step: SetupStep): String = when (step) {
 
 @Composable
 private fun ModeStepContent() {
-    StatusCard {
-        Text("Tunnel mode")
-        Text("Offer mode is enabled on Android.")
-        OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-            Text("Answer mode unavailable in Android v1")
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusCard {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.PhoneAndroid, contentDescription = "Offer mode")
+                Text("Offer mode (Client)", style = MaterialTheme.typography.titleMedium)
+            }
+            Text("Start from Android and connect to a remote answer daemon.")
+        }
+        StatusCard {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Storage, contentDescription = "Answer mode disabled")
+                Text("Answer mode (Server)", style = MaterialTheme.typography.titleMedium)
+            }
+            Text("Not available on Android v1.")
+            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                Text("Answer mode unavailable in Android v1")
+            }
         }
     }
 }
 
 @Composable
-private fun IdentityStepContent(vm: SetupViewModel, state: SetupWizardState) {
+private fun IdentityStepContent(vm: SetupViewModel, state: SetupWizardState, onImportIdentityFile: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    var showRawPathImport by remember { mutableStateOf(false) }
     StatusCard {
         OutlinedTextField(value = state.input.localPeerId, onValueChange = { vm.setInput(state.input.copy(localPeerId = it)) }, label = { Text("Local peer id") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = state.importIdentityPath, onValueChange = vm::setImportIdentityPath, label = { Text("Private identity path") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = vm::importIdentityFromPath, modifier = Modifier.weight(1f)) { Text("Import identity") }
+            Button(onClick = onImportIdentityFile, modifier = Modifier.weight(1f)) { Text("Import identity file") }
             OutlinedButton(onClick = vm::generateIdentity, modifier = Modifier.weight(1f)) { Text("Generate identity") }
+        }
+        OutlinedButton(onClick = { showRawPathImport = !showRawPathImport }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (showRawPathImport) "Hide debug path import" else "Show debug path import")
+        }
+        if (showRawPathImport) {
+            OutlinedTextField(
+                value = state.importIdentityPath,
+                onValueChange = vm::setImportIdentityPath,
+                label = { Text("Private identity path (debug)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(onClick = vm::importIdentityFromPath, modifier = Modifier.fillMaxWidth()) { Text("Import from path") }
         }
         if (state.localPublicIdentity.isNotBlank()) {
             Text("Local public identity:")
@@ -309,17 +346,40 @@ private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, netwo
 
 @Composable
 private fun ReviewStepContent(vm: SetupViewModel, state: SetupWizardState, forwards: List<ForwardConfig>) {
-    StatusCard {
-        Text("Mode: Offer")
-        Text("Local peer: ${state.input.localPeerId}")
-        Text("Remote peer: ${state.input.remotePeerId}")
-        Text("Broker: ${state.input.brokerHost}:${state.input.brokerPort}")
-        Text("Topic prefix: ${state.input.topicPrefix}")
-        Text("Remote identity imported: ${state.remoteIdentityPeerId ?: "No"}")
-        Text("Forwards enabled: ${forwards.count { it.enabled }} / ${forwards.size}")
-        Text("Allow metered: ${state.input.allowMetered}")
-        Text("Resume on unmetered: ${state.input.resumeOnUnmetered}")
-        OutlinedButton(onClick = vm::startTunnelFromReview, modifier = Modifier.fillMaxWidth()) { Text("Start tunnel") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusCard {
+            Text("Mode", style = MaterialTheme.typography.titleMedium)
+            Text("Offer")
+        }
+        StatusCard {
+            Text("Local Identity", style = MaterialTheme.typography.titleMedium)
+            Text("Local peer: ${state.input.localPeerId}")
+            Text("Public identity imported/generated: ${if (state.localPublicIdentity.isBlank()) "No" else "Yes"}")
+        }
+        StatusCard {
+            Text("Remote Peer", style = MaterialTheme.typography.titleMedium)
+            Text("Remote peer: ${state.input.remotePeerId}")
+            Text("Remote identity validated: ${state.remoteIdentityPeerId ?: "No"}")
+        }
+        StatusCard {
+            Text("Broker", style = MaterialTheme.typography.titleMedium)
+            Text("${state.input.brokerHost}:${state.input.brokerPort}")
+            Text("TLS: ${if (state.input.brokerUseTls) "Enabled" else "Disabled"}")
+            Text("Topic prefix: ${state.input.topicPrefix}")
+        }
+        StatusCard {
+            Text("Network Policy", style = MaterialTheme.typography.titleMedium)
+            Text("Allow metered: ${state.input.allowMetered}")
+            Text("Resume on unmetered: ${state.input.resumeOnUnmetered}")
+        }
+        StatusCard {
+            Text("Forwards", style = MaterialTheme.typography.titleMedium)
+            Text("Enabled: ${forwards.count { it.enabled }} / ${forwards.size}")
+            forwards.filter { it.enabled }.forEach { forward ->
+                Text("127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}")
+            }
+        }
+        OutlinedButton(onClick = vm::startTunnelFromReview, modifier = Modifier.fillMaxWidth()) { Text("Start tunnel now") }
     }
 }
 
