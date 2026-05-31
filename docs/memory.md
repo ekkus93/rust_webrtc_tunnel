@@ -119,3 +119,7 @@
 ## 2026-05-31T12:19:09Z - GPT-5.3-Codex - Final full validation rerun still green
 - Re-ran the full pipeline after the runtime-completion fix and doc updates: Rust `fmt/clippy/test`, Android `cargo ndk`, `lintDebug`, `testDebugUnitTest`, `connectedDebugAndroidTest`, `assembleDebug`, and APK library presence checks.
 - All automated validation commands passed again; manual Android↔desktop E2E remains explicitly `NOT RUN` and unchecked in TODO3 final compatibility items.
+
+## 2026-05-31T12:22:10Z - GPT-5.3-Codex - User-requested lint/tests rerun passed
+- Re-ran lint and test gates on user request: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets`, and Android `./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest`.
+- All commands passed; Android connected instrumentation suite completed 3/3 tests successfully on `Medium_Phone_API_36.0(AVD) - 16`.
