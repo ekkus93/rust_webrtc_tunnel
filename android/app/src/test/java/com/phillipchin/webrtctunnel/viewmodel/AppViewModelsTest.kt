@@ -1,6 +1,7 @@
 package com.phillipchin.webrtctunnel.viewmodel
 
 import android.app.Application
+import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.phillipchin.webrtctunnel.TunnelForegroundService
 import com.phillipchin.webrtctunnel.TunnelNativeBridge
@@ -25,7 +26,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -98,24 +101,9 @@ class AppViewModelsTest {
     @Test
     fun setupViewModelDelegatesValidationAndSave() {
         val viewModel = SetupViewModel(deps)
-        val identityFile = File(app.filesDir, "incoming_identity.toml").apply {
-            writeText("peer_id = \"android-phone\"\nsecret = \"abc\"")
-        }
-        val forward = ForwardConfig(id = "svc", name = "svc", localPort = 8080, remoteForwardId = "svc", enabled = true)
-        configRepository.saveForwards(listOf(forward))
-        recordingBridge.validationResult = ValidationResult(true, null)
-        viewModel.setImportIdentityPath(identityFile.absolutePath)
-        viewModel.setImportPublicIdentity("kid peer")
-        viewModel.setInput(
-            viewModel.state.value.input.copy(
-                brokerHost = "broker.local",
-                remotePeerId = "remote-peer",
-            ),
-        )
-        while (viewModel.state.value.currentStep != SetupStep.Review) {
-            viewModel.goNext()
-        }
+        prepareValidReviewState(viewModel)
         viewModel.saveAndApplyConfig()
+        awaitSetupState(viewModel) { it.saveResult == "Configuration saved" }
         assertTrue(configRepository.readConfig().contains("broker.local"))
     }
 
@@ -163,7 +151,8 @@ class AppViewModelsTest {
             viewModel.goNext()
         }
         viewModel.saveAndApplyConfig()
-        assertTrue(viewModel.state.value.errorMessage?.contains("Local peer ID must match private identity peer ID") == true)
+        val state = awaitSetupState(viewModel) { it.errorMessage != null }
+        assertTrue(state.errorMessage?.contains("Local peer ID must match private identity peer ID") == true)
     }
 
     @Test
@@ -189,7 +178,51 @@ class AppViewModelsTest {
         }
         viewModel.setInput(viewModel.state.value.input.copy(remotePeerId = "desktop-peer"))
         viewModel.startTunnelFromReview()
-        assertTrue(viewModel.state.value.errorMessage?.contains("Remote peer ID must match imported public identity peer ID") == true)
+        val state = awaitSetupState(viewModel) { it.errorMessage != null }
+        assertTrue(state.errorMessage?.contains("Remote peer ID must match imported public identity peer ID") == true)
+        assertEquals(null, Shadows.shadowOf(app).nextStartedService)
+    }
+
+    @Test
+    fun setupViewModelStartTunnelWaitsForPreferenceSave() {
+        val gate = CompletableDeferred<Unit>()
+        val viewModel = SetupViewModel(
+            deps,
+            persistPreferences = {
+                gate.await()
+                deps.configRepository.savePreferences(it)
+            },
+        )
+        prepareValidReviewState(viewModel)
+        viewModel.startTunnelFromReview()
+        assertEquals(null, Shadows.shadowOf(app).nextStartedService)
+        gate.complete(Unit)
+        val state = awaitSetupState(viewModel) { it.saveResult == "Tunnel start requested" }
+        assertEquals("Tunnel start requested", state.saveResult)
+        assertEquals(TunnelForegroundService.ACTION_START_OFFER, Shadows.shadowOf(app).nextStartedService.action)
+    }
+
+    @Test
+    fun setupViewModelFailedPreferenceSavePreventsStartAndShowsError() {
+        val viewModel = SetupViewModel(
+            deps,
+            persistPreferences = { throw IllegalStateException("prefs save failed") },
+        )
+        prepareValidReviewState(viewModel)
+        viewModel.startTunnelFromReview()
+        val state = awaitSetupState(viewModel) { it.errorMessage != null }
+        assertTrue(state.errorMessage?.contains("prefs save failed") == true)
+        assertEquals(null, Shadows.shadowOf(app).nextStartedService)
+    }
+
+    @Test
+    fun setupViewModelSuccessfulStartRequestsServiceOnce() {
+        val viewModel = SetupViewModel(deps)
+        prepareValidReviewState(viewModel)
+        viewModel.startTunnelFromReview()
+        val state = awaitSetupState(viewModel) { it.saveResult == "Tunnel start requested" }
+        assertEquals("Tunnel start requested", state.saveResult)
+        assertEquals(TunnelForegroundService.ACTION_START_OFFER, Shadows.shadowOf(app).nextStartedService.action)
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
     }
 
@@ -323,5 +356,44 @@ class AppViewModelsTest {
             IdentityValidationResult(valid = true, canonical_public_identity = line.trim(), peer_id = "remote-peer")
         override fun generateIdentity(peerId: String): IdentityValidationResult =
             IdentityValidationResult(valid = true, canonical_public_identity = "canon", canonical_private_identity = "private", peer_id = peerId)
+    }
+
+    private fun prepareValidReviewState(viewModel: SetupViewModel) {
+        val identityFile = File(app.filesDir, "incoming_identity.toml").apply {
+            writeText("peer_id = \"android-phone\"\nsecret = \"abc\"")
+        }
+        val forward = ForwardConfig(id = "svc", name = "svc", localPort = 8080, remoteForwardId = "svc", enabled = true)
+        configRepository.saveForwards(listOf(forward))
+        recordingBridge.validationResult = ValidationResult(true, null)
+        viewModel.setImportIdentityPath(identityFile.absolutePath)
+        viewModel.setImportPublicIdentity("kid peer")
+        viewModel.setInput(
+            viewModel.state.value.input.copy(
+                brokerHost = "broker.local",
+                remotePeerId = "remote-peer",
+            ),
+        )
+        while (viewModel.state.value.currentStep != SetupStep.Review) {
+            viewModel.goNext()
+        }
+    }
+
+    private fun awaitSetupState(
+        viewModel: SetupViewModel,
+        predicate: (SetupWizardState) -> Boolean,
+    ): SetupWizardState = runBlocking {
+        withTimeout(5_000) {
+            var matched: SetupWizardState? = null
+            while (true) {
+                val current = viewModel.state.value
+                if (predicate(current)) {
+                    matched = current
+                    break
+                }
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                delay(10)
+            }
+            matched ?: error("Timed out waiting for setup state")
+        }
     }
 }

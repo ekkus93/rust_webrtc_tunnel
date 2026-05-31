@@ -24,7 +24,13 @@ jni = "0.21.1"
 tempfile = "3.20.0"
 
 [lints.rust]
-# FFI boundary crate: explicit exception is limited to JNI exports and pointer handling.
+# This crate is the Android JNI/FFI boundary and must allow Rust `unsafe_code`
+# for exported native functions and pointer/pointer-lifetime handling. Cargo
+# does not currently support inheriting the workspace lint table while
+# overriding only this one Rust lint in the shape needed here, so the Clippy
+# block below intentionally mirrors `[workspace.lints.clippy]`. Keep this list
+# in sync with the workspace policy and do not relax `unwrap_used`, `todo`, or
+# `dbg_macro`.
 unsafe_code = "allow"
 
 [lints.clippy]

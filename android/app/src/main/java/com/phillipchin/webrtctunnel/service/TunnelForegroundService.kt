@@ -116,7 +116,6 @@ class TunnelForegroundService : Service() {
             startupJob = serviceScope.launch {
                 doStartOffer(generation)
             }
-            startupJob?.invokeOnCompletion { startupJob = null }
         }
         if (generation == 0L) {
             return
@@ -155,6 +154,10 @@ class TunnelForegroundService : Service() {
             )
             return
         }
+        val stillCurrentBeforeStart = lifecycleMutex.withLock { lifecycleGeneration == startGeneration }
+        if (!stillCurrentBeforeStart) {
+            return
+        }
         val result = try {
             withContext(Dispatchers.IO) {
                 repository.start(TunnelMode.Offer, configRepository.configPath, identity)
@@ -189,7 +192,7 @@ class TunnelForegroundService : Service() {
     private suspend fun pause() {
         lifecycleMutex.withLock {
             lifecycleGeneration += 1
-            startupJob = null
+            cancelStartupJobLocked()
             withContext(Dispatchers.IO) {
                 repository.stop()
             }.onFailure {
@@ -213,7 +216,7 @@ class TunnelForegroundService : Service() {
         lifecycleMutex.withLock {
             lifecycleGeneration += 1
             pausedByPolicy = true
-            startupJob = null
+            cancelStartupJobLocked()
             withContext(Dispatchers.IO) {
                 repository.stop()
             }.onFailure {
@@ -267,7 +270,7 @@ class TunnelForegroundService : Service() {
         val pendingStop = serviceScope.launch {
             lifecycleMutex.withLock {
                 lifecycleGeneration += 1
-                startupJob = null
+                cancelStartupJobLocked()
                 withContext(Dispatchers.IO) {
                     repository.stop()
                 }.onFailure {
@@ -287,7 +290,7 @@ class TunnelForegroundService : Service() {
     private suspend fun stopServiceWork() {
         lifecycleMutex.withLock {
             lifecycleGeneration += 1
-            startupJob = null
+            cancelStartupJobLocked()
             withContext(Dispatchers.IO) {
                 repository.stop()
             }.onFailure {
@@ -301,6 +304,11 @@ class TunnelForegroundService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun cancelStartupJobLocked() {
+        startupJob?.cancel()
+        startupJob = null
     }
 
     companion object {

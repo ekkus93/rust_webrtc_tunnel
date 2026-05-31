@@ -48,12 +48,12 @@ TunnelForegroundService.pauseForPolicy(...)
 
 Confirm:
 
-- [ ] where `lifecycleGeneration` increments;
-- [ ] where START captures the generation;
-- [ ] where STOP increments generation;
-- [ ] where PAUSE/network-block increments generation;
-- [ ] where `repository.start(...)` is called;
-- [ ] where post-start stale-generation check is performed.
+- [x] where `lifecycleGeneration` increments;
+- [x] where START captures the generation;
+- [x] where STOP increments generation;
+- [x] where PAUSE/network-block increments generation;
+- [x] where `repository.start(...)` is called;
+- [x] where post-start stale-generation check is performed.
 
 ## 1.2 Add pre-start stale check
 
@@ -67,12 +67,12 @@ add a generation/desired-state check.
 
 Required behavior:
 
-- [ ] START captures generation before async startup work begins.
-- [ ] Immediately before native `repository.start(...)`, check that captured generation is still current.
-- [ ] If stale, do **not** call `repository.start(...)`.
-- [ ] If stale, publish no Running state.
-- [ ] If stale, leave repository/UI in stopped/paused/blocked state as appropriate.
-- [ ] Keep the existing post-start stale check after `repository.start(...)` returns.
+- [x] START captures generation before async startup work begins.
+- [x] Immediately before native `repository.start(...)`, check that captured generation is still current.
+- [x] If stale, do **not** call `repository.start(...)`.
+- [x] If stale, publish no Running state.
+- [x] If stale, leave repository/UI in stopped/paused/blocked state as appropriate.
+- [x] Keep the existing post-start stale check after `repository.start(...)` returns.
 
 Suggested pattern:
 
@@ -99,17 +99,17 @@ if (!stillCurrentAfterNativeStart) {
 
 Add or update tests:
 
-- [ ] STOP before native start prevents `repository.start(...)` from being called.
-- [ ] PAUSE/network-block before native start prevents `repository.start(...)` from being called.
-- [ ] STOP during native start still stops stale successful runtime.
-- [ ] stale START never publishes Running after STOP.
-- [ ] start-stop-start still works.
+- [x] STOP before native start prevents `repository.start(...)` from being called.
+- [x] PAUSE/network-block before native start prevents `repository.start(...)` from being called.
+- [x] STOP during native start still stops stale successful runtime.
+- [x] stale START never publishes Running after STOP.
+- [x] start-stop-start still works.
 
 ## 1.4 Acceptance
 
-- [ ] STOP/PAUSE before native start prevents native start.
-- [ ] STOP/PAUSE during native start prevents stale Running state.
-- [ ] Existing lifecycle tests still pass.
+- [x] STOP/PAUSE before native start prevents native start.
+- [x] STOP/PAUSE during native start prevents stale Running state.
+- [x] Existing lifecycle tests still pass.
 
 ---
 
@@ -138,12 +138,12 @@ without first cancelling the active job.
 
 Required:
 
-- [ ] On manual STOP, call `startupJob?.cancel()` before clearing it.
-- [ ] On manual PAUSE, call `startupJob?.cancel()` before clearing it.
-- [ ] On network-policy pause/block, call `startupJob?.cancel()` before clearing it.
-- [ ] On service destroy, call `startupJob?.cancel()` before clearing/cancelling service scope.
-- [ ] Keep cancellation safe if `startupJob` is already null or completed.
-- [ ] Do not block the main thread waiting for cancellation.
+- [x] On manual STOP, call `startupJob?.cancel()` before clearing it.
+- [x] On manual PAUSE, call `startupJob?.cancel()` before clearing it.
+- [x] On network-policy pause/block, call `startupJob?.cancel()` before clearing it.
+- [x] On service destroy, call `startupJob?.cancel()` before clearing/cancelling service scope.
+- [x] Keep cancellation safe if `startupJob` is already null or completed.
+- [x] Do not block the main thread waiting for cancellation.
 
 Suggested helper:
 
@@ -160,16 +160,16 @@ Use it consistently.
 
 Add or update tests:
 
-- [ ] STOP cancels pending startup job.
-- [ ] PAUSE cancels pending startup job.
-- [ ] network-policy pause cancels pending startup job.
-- [ ] duplicate STOP remains safe.
-- [ ] cancellation does not break start-stop-start.
+- [x] STOP cancels pending startup job.
+- [x] PAUSE cancels pending startup job.
+- [x] network-policy pause cancels pending startup job.
+- [x] duplicate STOP remains safe.
+- [x] cancellation does not break start-stop-start.
 
 ## 2.4 Acceptance
 
-- [ ] No path clears `startupJob` without cancelling it first.
-- [ ] Pending startup work is cancelled as early as possible.
+- [x] No path clears `startupJob` without cancelling it first.
+- [x] Pending startup work is cancelled as early as possible.
 
 ---
 
@@ -188,12 +188,12 @@ ConfigRepository.preferences
 
 Confirm:
 
-- [ ] where config is rendered;
-- [ ] where config is validated;
-- [ ] where config is written atomically;
-- [ ] where preferences are saved;
-- [ ] where service start is triggered;
-- [ ] whether service start waits for preference save.
+- [x] where config is rendered;
+- [x] where config is validated;
+- [x] where config is written atomically;
+- [x] where preferences are saved;
+- [x] where service start is triggered;
+- [x] whether service start waits for preference save.
 
 ## 3.2 Make save operation nonblocking
 
@@ -209,10 +209,10 @@ Use one of these designs.
 
 ### Preferred: suspend save function
 
-- [ ] Make the internal save/apply operation suspendable.
-- [ ] Perform preference read/write from coroutine context.
-- [ ] Start Tunnel only after save completes successfully.
-- [ ] Keep UI responsive.
+- [x] Make the internal save/apply operation suspendable.
+- [x] Perform preference read/write from coroutine context.
+- [x] Start Tunnel only after save completes successfully.
+- [x] Keep UI responsive.
 
 Example shape:
 
@@ -243,38 +243,38 @@ fun startTunnelFromReview() {
 
 ### Acceptable alternative: callback/result state
 
-- [ ] Save runs in `viewModelScope.launch`.
-- [ ] UI state records save success/failure.
-- [ ] Start Tunnel chains from successful save.
-- [ ] Service start cannot race ahead of preference save.
+- [x] Save runs in `viewModelScope.launch`.
+- [x] UI state records save success/failure.
+- [x] Start Tunnel chains from successful save.
+- [x] Service start cannot race ahead of preference save.
 
 ## 3.3 Preserve behavior
 
 Ensure:
 
-- [ ] generated config still validates before write;
-- [ ] config write remains atomic;
-- [ ] preferences save completes before service start;
-- [ ] errors are shown in setup state;
-- [ ] no UI-thread blocking remains;
-- [ ] no preference-save race is reintroduced.
+- [x] generated config still validates before write;
+- [x] config write remains atomic;
+- [x] preferences save completes before service start;
+- [x] errors are shown in setup state;
+- [x] no UI-thread blocking remains;
+- [x] no preference-save race is reintroduced.
 
 ## 3.4 Tests
 
 Add or update tests:
 
-- [ ] `saveAndApplyConfig()` does not use `runBlocking`.
-- [ ] Start Tunnel waits for preference save.
-- [ ] failed config validation prevents service start.
-- [ ] failed preference save prevents service start and shows error.
-- [ ] successful save starts service exactly once.
-- [ ] UI state updates after async save.
+- [x] `saveAndApplyConfig()` does not use `runBlocking`.
+- [x] Start Tunnel waits for preference save.
+- [x] failed config validation prevents service start.
+- [x] failed preference save prevents service start and shows error.
+- [x] successful save starts service exactly once.
+- [x] UI state updates after async save.
 
 ## 3.5 Acceptance
 
-- [ ] No `runBlocking` remains in `SetupViewModel` setup save/start path.
-- [ ] Start Tunnel still waits for preferences to persist.
-- [ ] Setup UI remains responsive.
+- [x] No `runBlocking` remains in `SetupViewModel` setup save/start path.
+- [x] Start Tunnel still waits for preferences to persist.
+- [x] Setup UI remains responsive.
 
 ---
 
@@ -314,11 +314,11 @@ if that is still the case.
 
 The comment should say:
 
-- [ ] `p2p-mobile` is the JNI/FFI boundary.
-- [ ] Rust `unsafe_code` must be allowed narrowly for JNI/FFI exports.
-- [ ] The Clippy lint list intentionally mirrors the workspace policy.
-- [ ] The crate must not weaken `unwrap_used`, `todo`, or `dbg_macro`.
-- [ ] If workspace lint policy changes, this crate's mirrored Clippy policy must be updated too, unless Cargo config is refactored to inherit workspace lints directly.
+- [x] `p2p-mobile` is the JNI/FFI boundary.
+- [x] Rust `unsafe_code` must be allowed narrowly for JNI/FFI exports.
+- [x] The Clippy lint list intentionally mirrors the workspace policy.
+- [x] The crate must not weaken `unwrap_used`, `todo`, or `dbg_macro`.
+- [x] If workspace lint policy changes, this crate's mirrored Clippy policy must be updated too, unless Cargo config is refactored to inherit workspace lints directly.
 
 Suggested comment:
 
@@ -342,9 +342,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 ## 4.4 Acceptance
 
-- [ ] The lint exception is documented.
-- [ ] Clippy policy remains equivalent to workspace policy for `p2p-mobile`.
-- [ ] Clippy passes.
+- [x] The lint exception is documented.
+- [x] Clippy policy remains equivalent to workspace policy for `p2p-mobile`.
+- [x] Clippy passes.
 
 ---
 
@@ -362,10 +362,10 @@ cargo test --workspace --all-targets
 
 Tasks:
 
-- [ ] `cargo fmt --check` passes.
-- [ ] Clippy passes with `-D warnings`.
-- [ ] Rust tests pass.
-- [ ] No broad lint suppression added.
+- [x] `cargo fmt --check` passes.
+- [x] Clippy passes with `-D warnings`.
+- [x] Rust tests pass.
+- [x] No broad lint suppression added.
 
 ## 5.2 Android validation
 
@@ -385,10 +385,10 @@ cd android
 
 Tasks:
 
-- [ ] native build passes.
-- [ ] `assembleDebug` passes.
-- [ ] unit tests pass.
-- [ ] APK contains native libraries.
+- [x] native build passes.
+- [x] `assembleDebug` passes.
+- [x] unit tests pass.
+- [x] APK contains native libraries.
 
 ## 5.3 Connected tests
 
@@ -401,7 +401,7 @@ cd android
 
 Tasks:
 
-- [ ] connected tests pass; or
+- [x] connected tests pass; or
 - [ ] NOT RUN is documented with exact reason.
 
 ## 5.4 Manual E2E
@@ -418,8 +418,8 @@ If the environment is available, run:
 
 If the environment is not available:
 
-- [ ] document `NOT RUN`;
-- [ ] leave E2E compatibility unchecked.
+- [x] document `NOT RUN`;
+- [x] leave E2E compatibility unchecked.
 
 ## 5.5 Documentation
 
@@ -431,13 +431,13 @@ docs/ANDROID_VALIDATION.md
 
 Include:
 
-- [ ] date;
-- [ ] commit hash;
-- [ ] environment;
-- [ ] command results;
-- [ ] connected test result or NOT RUN reason;
-- [ ] manual E2E result or NOT RUN reason;
-- [ ] unresolved failures.
+- [x] date;
+- [x] commit hash;
+- [x] environment;
+- [x] command results;
+- [x] connected test result or NOT RUN reason;
+- [x] manual E2E result or NOT RUN reason;
+- [x] unresolved failures.
 
 ---
 
@@ -445,15 +445,15 @@ Include:
 
 ## 6.1 Tiny final patch acceptance
 
-- [ ] Pre-native-start generation check prevents stale native start after STOP/PAUSE.
-- [ ] Post-native-start generation check still prevents stale Running publication.
-- [ ] STOP/PAUSE paths explicitly cancel `startupJob`.
-- [ ] `SetupViewModel` save/start path no longer uses `runBlocking`.
-- [ ] Start Tunnel waits for preference save before starting service.
-- [ ] `p2p-mobile` lint-policy comment explains the mirrored Clippy policy and unsafe exception.
-- [ ] Rust validation passes.
-- [ ] Android validation passes.
-- [ ] Validation docs are updated.
+- [x] Pre-native-start generation check prevents stale native start after STOP/PAUSE.
+- [x] Post-native-start generation check still prevents stale Running publication.
+- [x] STOP/PAUSE paths explicitly cancel `startupJob`.
+- [x] `SetupViewModel` save/start path no longer uses `runBlocking`.
+- [x] Start Tunnel waits for preference save before starting service.
+- [x] `p2p-mobile` lint-policy comment explains the mirrored Clippy policy and unsafe exception.
+- [x] Rust validation passes.
+- [x] Android validation passes.
+- [x] Validation docs are updated.
 
 ## 6.2 Compatibility acceptance
 

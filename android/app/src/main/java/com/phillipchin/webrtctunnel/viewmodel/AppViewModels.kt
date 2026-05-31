@@ -9,18 +9,20 @@ import com.phillipchin.webrtctunnel.TunnelForegroundService
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.LogEvent
+import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.SetupConfigInput
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.model.TunnelStatus
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import com.phillipchin.webrtctunnel.data.SensitiveDataRedactor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.io.File
@@ -82,7 +84,11 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     fun refresh() = deps.tunnelRepository.refreshStatus()
 }
 
-class SetupViewModel(private val deps: AppDependencies) : ViewModel() {
+class SetupViewModel(
+    private val deps: AppDependencies,
+    private val loadPreferences: suspend () -> AndroidAppPreferences = { deps.configRepository.preferences.first() },
+    private val persistPreferences: suspend (AndroidAppPreferences) -> Unit = { deps.configRepository.savePreferences(it) },
+) : ViewModel() {
     private val _state = MutableStateFlow(SetupWizardState())
     val state: StateFlow<SetupWizardState> = _state.asStateFlow()
     private val steps = SetupStep.entries
@@ -185,40 +191,50 @@ class SetupViewModel(private val deps: AppDependencies) : ViewModel() {
     fun loadSavedForwards(): List<ForwardConfig> = deps.configRepository.loadForwards()
 
     fun saveAndApplyConfig() {
+        viewModelScope.launch {
+            saveAndApplyConfigInternal()
+        }
+    }
+
+    private suspend fun saveAndApplyConfigInternal(): Boolean {
         val current = _state.value
         val input = current.input
-        val forwards = deps.configRepository.loadForwards().filter { it.enabled }
+        val forwards = withContext(Dispatchers.IO) { deps.configRepository.loadForwards().filter { it.enabled } }
         val validationError = validateStep(SetupStep.Review, current)
         if (validationError != null) {
             _state.value = current.copy(errorMessage = validationError, saveResult = null)
-            return
+            return false
         }
 
         val importedIdentity = if (current.importIdentityPath.isNotBlank()) {
-            val imported = importPrivateIdentity(current.importIdentityPath)
+            val imported = withContext(Dispatchers.IO) {
+                importPrivateIdentity(current.importIdentityPath)
+            }
             if (imported.isFailure) {
                 _state.value = current.copy(
                     errorMessage = imported.exceptionOrNull()?.message ?: "Failed importing private identity",
                     saveResult = null,
                 )
-                return
+                return false
             }
             imported.getOrNull()
         } else {
-            runCatching {
-                val bytes = deps.identityRepository.readEncryptedIdentity()
-                val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
-                require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
-                val peerId = validated.peer_id ?: throw IllegalArgumentException("Missing identity peer id")
-                val publicIdentity = validated.canonical_public_identity
-                    ?: deps.identityRepository.readPublicIdentity()
-                Triple(bytes, publicIdentity, peerId)
-            }.getOrNull()
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = deps.identityRepository.readEncryptedIdentity()
+                    val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
+                    require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
+                    val peerId = validated.peer_id ?: throw IllegalArgumentException("Missing identity peer id")
+                    val publicIdentity = validated.canonical_public_identity
+                        ?: deps.identityRepository.readPublicIdentity()
+                    Triple(bytes, publicIdentity, peerId)
+                }.getOrNull()
+            }
         }
         val identityBytes = importedIdentity?.first
         if (identityBytes == null || identityBytes.isEmpty()) {
             repositoryError(current, "Missing encrypted identity")
-            return
+            return false
         }
         val identityPeerId = importedIdentity.third
         if (identityPeerId != input.localPeerId) {
@@ -226,31 +242,39 @@ class SetupViewModel(private val deps: AppDependencies) : ViewModel() {
                 current,
                 "Local peer ID must match private identity peer ID ($identityPeerId)",
             )
-            return
+            return false
         }
         if (current.importPublicIdentity.isNotBlank()) {
             val imported = importPublicIdentity(current.importPublicIdentity, input.remotePeerId)
             if (imported.isFailure) {
                 repositoryError(current, imported.exceptionOrNull()?.message ?: "Failed importing public identity")
-                return
+                return false
             }
         }
         val candidate = deps.configRepository.renderOfferConfig(input, forwards)
-        val result = validateCandidateConfig(candidate, identityBytes)
+        val result = withContext(Dispatchers.IO) {
+            validateCandidateConfig(candidate, identityBytes)
+        }
         if (!result.valid) {
             _state.value = current.copy(errorMessage = result.message ?: "Config validation failed", saveResult = null)
-            return
+            return false
         }
-        deps.configRepository.writeConfigAtomically(candidate)
-        deps.configRepository.saveSetupInput(input)
-        runBlocking {
-            val existing = deps.configRepository.preferences.first()
-            deps.configRepository.savePreferences(
-                existing.copy(
-                    allowMetered = input.allowMetered,
-                    resumeOnUnmetered = input.resumeOnUnmetered,
-                ),
-            )
+        val persistResult = runCatching {
+            withContext(Dispatchers.IO) {
+                deps.configRepository.writeConfigAtomically(candidate)
+                deps.configRepository.saveSetupInput(input)
+                val existing = loadPreferences()
+                persistPreferences(
+                    existing.copy(
+                        allowMetered = input.allowMetered,
+                        resumeOnUnmetered = input.resumeOnUnmetered,
+                    ),
+                )
+            }
+        }
+        if (persistResult.isFailure) {
+            repositoryError(current, persistResult.exceptionOrNull()?.message ?: "Failed saving configuration")
+            return false
         }
         _state.value = current.copy(
             localPublicIdentity = importedIdentity.second,
@@ -258,20 +282,22 @@ class SetupViewModel(private val deps: AppDependencies) : ViewModel() {
             errorMessage = null,
             saveResult = "Configuration saved",
         )
+        return true
     }
 
     fun startTunnelFromReview() {
-        saveAndApplyConfig()
-        val latest = _state.value
-        if (latest.errorMessage != null) {
-            return
+        viewModelScope.launch {
+            val saved = saveAndApplyConfigInternal()
+            if (!saved) {
+                return@launch
+            }
+            ContextCompat.startForegroundService(
+                deps.context,
+                Intent(deps.context, TunnelForegroundService::class.java)
+                    .setAction(TunnelForegroundService.ACTION_START_OFFER),
+            )
+            _state.value = _state.value.copy(saveResult = "Tunnel start requested", errorMessage = null)
         }
-        ContextCompat.startForegroundService(
-            deps.context,
-            Intent(deps.context, TunnelForegroundService::class.java)
-                .setAction(TunnelForegroundService.ACTION_START_OFFER),
-        )
-        _state.value = latest.copy(saveResult = "Tunnel start requested")
     }
 
     private fun importPrivateIdentity(path: String): Result<Triple<ByteArray, String, String>> = runCatching {

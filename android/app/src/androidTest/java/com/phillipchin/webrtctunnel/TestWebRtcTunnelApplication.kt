@@ -59,6 +59,7 @@ class TestWebRtcTunnelApplication : Application(), HasAppDependencies {
 
 class RecordingBridge : TunnelNativeBridge {
     var startOfferCalls = 0
+    var startOfferEnterCalls = 0
     var startAnswerCalls = 0
     var stopCalls = 0
     private var blockStartOffer = false
@@ -68,6 +69,7 @@ class RecordingBridge : TunnelNativeBridge {
 
     fun reset() {
         startOfferCalls = 0
+        startOfferEnterCalls = 0
         startAnswerCalls = 0
         stopCalls = 0
         blockStartOffer = false
@@ -89,6 +91,7 @@ class RecordingBridge : TunnelNativeBridge {
     }
 
     override fun startOffer(configPath: String, identityBytes: ByteArray?): Result<Unit> {
+        startOfferEnterCalls += 1
         if (blockStartOffer) {
             startOfferEntered.countDown()
             startOfferRelease.await(5, TimeUnit.SECONDS)
