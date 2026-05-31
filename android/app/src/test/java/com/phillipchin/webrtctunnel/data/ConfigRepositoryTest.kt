@@ -3,6 +3,8 @@ package com.phillipchin.webrtctunnel.data
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
+import com.phillipchin.webrtctunnel.model.ForwardConfig
+import com.phillipchin.webrtctunnel.model.SetupConfigInput
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -24,6 +26,7 @@ class ConfigRepositoryTest {
     fun setUp() {
         repository = ConfigRepository(context)
         File(context.filesDir, "config.toml").delete()
+        File(context.filesDir, "forwards.json").delete()
         runBlocking {
             context.dataStore.edit { preferences -> preferences.clear() }
         }
@@ -115,5 +118,39 @@ class ConfigRepositoryTest {
         repository.writeConfig("second")
         assertEquals("second", repository.readConfig())
         assertFalse(repository.readConfig().contains("first"))
+    }
+
+    @Test
+    fun forwardsValidationRejectsDuplicateEnabledPorts() {
+        val forwards = listOf(
+            ForwardConfig(id = "a", name = "a", localPort = 9000, remoteForwardId = "a", enabled = true),
+            ForwardConfig(id = "b", name = "b", localPort = 9000, remoteForwardId = "b", enabled = true),
+        )
+        assertTrue(repository.validateForwards(forwards)?.contains("Duplicate enabled local port") == true)
+    }
+
+    @Test
+    fun forwardsRoundTripPersistsJson() {
+        val forwards = listOf(
+            ForwardConfig(id = "svc", name = "Service", localHost = "127.0.0.1", localPort = 18080, remoteForwardId = "svc"),
+        )
+        repository.saveForwards(forwards)
+        assertEquals(forwards, repository.loadForwards())
+    }
+
+    @Test
+    fun renderOfferConfigIncludesForwardAndPeer() {
+        val input = SetupConfigInput(
+            localPeerId = "android-peer",
+            brokerHost = "broker.local",
+            remotePeerId = "desktop-peer",
+        )
+        val text = repository.renderOfferConfig(
+            input,
+            listOf(ForwardConfig(id = "llama", name = "Llama", localPort = 8080, remoteForwardId = "llama")),
+        )
+        assertTrue(text.contains("url = \"mqtts://broker.local:8883\""))
+        assertTrue(text.contains("remote_peer_id = \"desktop-peer\""))
+        assertTrue(text.contains("listen_port = 8080"))
     }
 }

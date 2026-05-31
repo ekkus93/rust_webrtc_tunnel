@@ -1,7 +1,5 @@
 package com.phillipchin.webrtctunnel.ui
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
@@ -26,7 +24,15 @@ import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.ui.theme.WebRtcTunnelTheme
 import com.phillipchin.webrtctunnel.viewmodel.AppViewModelFactory
 
-private enum class ScreenTab(val route: String) { Home("home"), Forwards("forwards"), Logs("logs"), Settings("settings") }
+private enum class ScreenTab(val route: String) {
+    Home("home"),
+    Forwards("forwards"),
+    Logs("logs"),
+    Settings("settings"),
+    Setup("setup"),
+    NetworkPolicy("network_policy"),
+    ImportExport("import_export"),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +43,8 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
     val forwardsViewModel = remember { factory.forwards() }
     val logsViewModel = remember { factory.logs() }
     val settingsViewModel = remember { factory.settings() }
+    val networkPolicyViewModel = remember { factory.networkPolicy() }
+    val importExportViewModel = remember { factory.importExport() }
     val navController = rememberNavController()
 
     WebRtcTunnelTheme {
@@ -49,8 +57,19 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
             NavHost(navController = navController, startDestination = ScreenTab.Home.route) {
                 composable(ScreenTab.Home.route) { HomeScreen(padding, homeViewModel) }
                 composable(ScreenTab.Forwards.route) { ForwardsScreen(padding, forwardsViewModel) }
-                composable(ScreenTab.Logs.route) { LogsScreen(padding, logsViewModel) }
-                composable(ScreenTab.Settings.route) { SettingsScreen(padding, settingsViewModel, setupViewModel) }
+                composable(ScreenTab.Logs.route) { LogsScreen(padding, logsViewModel, networkPolicyViewModel) }
+                composable(ScreenTab.Settings.route) {
+                    SettingsScreen(
+                        padding = padding,
+                        vm = settingsViewModel,
+                        onOpenSetup = { navController.navigate(ScreenTab.Setup.route) },
+                        onOpenNetworkPolicy = { navController.navigate(ScreenTab.NetworkPolicy.route) },
+                        onOpenImportExport = { navController.navigate(ScreenTab.ImportExport.route) },
+                    )
+                }
+                composable(ScreenTab.Setup.route) { SetupWizardScreen(padding, setupViewModel) }
+                composable(ScreenTab.NetworkPolicy.route) { NetworkPolicyScreen(padding, networkPolicyViewModel) }
+                composable(ScreenTab.ImportExport.route) { ImportExportScreen(padding, importExportViewModel) }
             }
         }
     }

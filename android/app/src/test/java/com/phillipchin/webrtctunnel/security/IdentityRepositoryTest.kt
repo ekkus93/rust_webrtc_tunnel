@@ -60,6 +60,28 @@ class IdentityRepositoryTest {
         repository.readEncryptedIdentity()
     }
 
+    @Test
+    fun exportPrivateIdentityRequiresExplicitConfirmation() {
+        repository.storeEncryptedIdentity("private-data".toByteArray(), "pub")
+        val outFile = File(context.filesDir, "private-export.toml")
+        outFile.delete()
+        val denied = repository.exportPrivateIdentity(outFile.absolutePath, confirmRisk = false)
+        assertTrue(denied.isFailure)
+        assertFalse(outFile.exists())
+        val allowed = repository.exportPrivateIdentity(outFile.absolutePath, confirmRisk = true)
+        assertTrue(allowed.isSuccess)
+        assertEquals("private-data", outFile.readText())
+    }
+
+    @Test
+    fun appendAuthorizedPublicIdentityDeduplicates() {
+        val line = "kid1 peer1"
+        assertTrue(repository.appendAuthorizedPublicIdentity(line).isSuccess)
+        assertTrue(repository.appendAuthorizedPublicIdentity(line).isSuccess)
+        val file = File(context.filesDir, "authorized_keys")
+        assertEquals(listOf(line), file.readLines())
+    }
+
     private class TestAesGcmCrypto : IdentityCrypto {
         private val key: SecretKey = KeyGenerator.getInstance("AES").apply { init(128) }.generateKey()
 

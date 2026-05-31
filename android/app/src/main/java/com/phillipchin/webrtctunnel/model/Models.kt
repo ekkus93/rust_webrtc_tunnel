@@ -118,3 +118,16 @@ data class ValidationResult(
     val valid: Boolean,
     val message: String? = null,
 )
+
+@Serializable
+data class SetupConfigInput(
+    val localPeerId: String = "android-phone",
+    val brokerHost: String = "",
+    val brokerPort: Int = 8883,
+    val brokerUsername: String = "",
+    val brokerPasswordFile: String = "",
+    val topicPrefix: String = "p2ptunnel",
+    val remotePeerId: String = "",
+    val allowMetered: Boolean = false,
+    val resumeOnUnmetered: Boolean = true,
+)

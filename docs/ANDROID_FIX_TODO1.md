@@ -1040,7 +1040,7 @@ If any command fails:
 - [x] No plaintext private identity remains at rest.
 - [x] Network policy gates tunnel startup.
 - [x] Network policy pauses tunnel on metered/cellular transition.
-- [ ] Setup wizard is functional for offer mode.
+- [x] Setup wizard is functional for offer mode.
 
 ## 14.2 FFI/service
 
@@ -1061,27 +1061,27 @@ If any command fails:
 ## 14.4 UI
 
 - [x] Home screen shows real runtime status.
-- [ ] Setup wizard creates valid offer config.
-- [ ] Forwards add/edit/delete works.
-- [ ] Forward details works.
-- [ ] Network policy UI and warning dialog work.
+- [x] Setup wizard creates valid offer config.
+- [x] Forwards add/edit/delete works.
+- [x] Forward details works.
+- [x] Network policy UI and warning dialog work.
 - [x] Logs show native logs.
 - [x] Settings are functional.
-- [ ] Import/export works.
+- [x] Import/export works.
 - [x] Error states are actionable.
 
 ## 14.5 Security
 
 - [x] Private identity encrypted at rest with Android Keystore.
-- [ ] Private export requires explicit warning.
-- [ ] Diagnostics redact secrets.
+- [x] Private export requires explicit warning.
+- [x] Diagnostics redact secrets.
 - [x] Logs redact secrets.
 - [x] Cellular/metered data blocked by default.
 
 ## 14.6 Compatibility
 
-- [ ] Android offer connects to desktop Rust answer.
-- [ ] Android browser reaches remote service via `127.0.0.1:<port>`.
+- [x] Android offer connects to desktop Rust answer.
+- [x] Android browser reaches remote service via `127.0.0.1:<port>`.
 - [x] Protocol wire formats unchanged.
 - [x] Desktop Rust tests still pass.
 

@@ -10,6 +10,10 @@ class AppDependencies(
     val tunnelRepository: TunnelRepository = TunnelRepository(context.applicationContext),
     val networkPolicyManager: NetworkPolicyManager = NetworkPolicyManager(context.applicationContext),
     val identityRepository: IdentityRepository = IdentityRepository(context.applicationContext),
+    val diagnosticsRepository: DiagnosticsRepository = DiagnosticsRepository(
+        context.applicationContext,
+        configRepository = configRepository,
+    ),
 ) {
     val context: Context = context.applicationContext
 }

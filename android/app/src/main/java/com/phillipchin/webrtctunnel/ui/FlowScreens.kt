@@ -1,61 +1,127 @@
 package com.phillipchin.webrtctunnel.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phillipchin.webrtctunnel.model.SetupConfigInput
+import com.phillipchin.webrtctunnel.viewmodel.SetupStep
+import com.phillipchin.webrtctunnel.viewmodel.SetupViewModel
 
 @Composable
-fun SetupWizardScreen(padding: PaddingValues, onStart: () -> Unit = {}) {
-    ScreenSurface(padding) {
-        Text("Setup Wizard")
-        Spacer(Modifier.height(12.dp))
-        Text("Choose Mode")
-        Text("Identity")
-        Text("MQTT Broker")
-        Text("Remote Peer")
-        Text("Forwards")
-        Text("Network Policy")
-        Text("Review")
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Start Tunnel") }
-    }
-}
+fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val input = state.input
+    val forwards = vm.loadSavedForwards()
 
-@Composable
-fun NetworkPolicyScreen(padding: PaddingValues) {
-    ScreenSurface(padding) {
-        Text("Network Policy")
-        Spacer(Modifier.height(12.dp))
-        Text("Allow cellular / metered data: OFF")
-        Text("Pause tunnel when cellular/metered network is detected")
-        Text("Resume tunnel when unmetered Wi-Fi returns")
-        Text("Show warning before allowing cellular/metered data")
-    }
-}
+    fun updateInput(update: SetupConfigInput) = vm.setInput(update)
 
-@Composable
-fun ImportExportScreen(padding: PaddingValues) {
     ScreenSurface(padding) {
-        Text("Import / Export")
-        Spacer(Modifier.height(12.dp))
-        Text("Import config file")
-        Text("Import identity")
-        Text("Import authorized peer/public identity")
-        Text("Export config")
-        Text("Export public identity")
-        Text("Export diagnostics")
-        Text("Export private identity")
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("Copy Public Identity") }
+        Text("Setup Wizard", style = MaterialTheme.typography.headlineSmall)
+        Text("Step: ${state.currentStep}")
+        Spacer(Modifier.height(8.dp))
+
+        when (state.currentStep) {
+            SetupStep.Mode -> {
+                Text("Android v1 supports offer mode only.")
+            }
+            SetupStep.Identity -> {
+                OutlinedTextField(
+                    value = state.importIdentityPath,
+                    onValueChange = vm::setImportIdentityPath,
+                    label = { Text("Private identity import path") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = state.importPublicIdentity,
+                    onValueChange = vm::setImportPublicIdentity,
+                    label = { Text("Remote public identity line") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            SetupStep.Broker -> {
+                OutlinedTextField(
+                    value = input.brokerHost,
+                    onValueChange = { updateInput(input.copy(brokerHost = it)) },
+                    label = { Text("MQTT broker host") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = input.brokerPort.toString(),
+                    onValueChange = { value ->
+                        updateInput(input.copy(brokerPort = value.toIntOrNull() ?: input.brokerPort))
+                    },
+                    label = { Text("MQTT broker port") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = input.brokerUsername,
+                    onValueChange = { updateInput(input.copy(brokerUsername = it)) },
+                    label = { Text("Broker username") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = input.brokerPasswordFile,
+                    onValueChange = { updateInput(input.copy(brokerPasswordFile = it)) },
+                    label = { Text("Broker password file (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            SetupStep.Peer -> {
+                OutlinedTextField(
+                    value = input.localPeerId,
+                    onValueChange = { updateInput(input.copy(localPeerId = it)) },
+                    label = { Text("Local peer id") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = input.remotePeerId,
+                    onValueChange = { updateInput(input.copy(remotePeerId = it)) },
+                    label = { Text("Remote peer id") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            SetupStep.Forwards -> {
+                Text("Configured forwards: ${forwards.size}")
+                forwards.forEach { forward ->
+                    Text("${forward.name}: ${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}")
+                }
+                Text("Manage forwards in the Forwards tab.")
+            }
+            SetupStep.NetworkPolicy -> {
+                Text("Network policy is configured in Settings > Network policy.")
+            }
+            SetupStep.Review -> {
+                Text("Mode: offer")
+                Text("Broker: ${input.brokerHost}:${input.brokerPort}")
+                Text("Local peer: ${input.localPeerId}")
+                Text("Remote peer: ${input.remotePeerId}")
+                Text("Enabled forwards: ${forwards.count { it.enabled }}")
+                Text("Identity import: ${if (state.importIdentityPath.isBlank()) "existing encrypted identity" else state.importIdentityPath}")
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.saveResult?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = vm::goBack) { Text("Back") }
+            Button(onClick = vm::goNext) { Text("Next") }
+            if (state.currentStep == SetupStep.Review) {
+                Button(onClick = vm::saveAndApplyConfig) { Text("Save") }
+            }
+        }
     }
 }

@@ -7,6 +7,7 @@ import com.phillipchin.webrtctunnel.TunnelNativeBridge
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.data.ConfigRepository
 import com.phillipchin.webrtctunnel.data.TunnelRepository
+import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.NativeRuntimeStatusDto
 import com.phillipchin.webrtctunnel.model.NetworkType
 import com.phillipchin.webrtctunnel.model.TunnelMode
@@ -17,11 +18,13 @@ import com.phillipchin.webrtctunnel.security.IdentityRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class AppViewModelsTest {
@@ -89,11 +92,25 @@ class AppViewModelsTest {
     @Test
     fun setupViewModelDelegatesValidationAndSave() {
         val viewModel = SetupViewModel(deps)
-        configRepository.writeConfig("before")
-        recordingBridge.validationResult = ValidationResult(false, "bad config")
-        assertEquals(ValidationResult(false, "bad config"), viewModel.validateConfig())
-        viewModel.saveConfig("after")
-        assertEquals("after", configRepository.readConfig())
+        val identityFile = File(app.filesDir, "incoming_identity.toml").apply {
+            writeText("peer_id = \"android-phone\"\nsecret = \"abc\"")
+        }
+        val forward = ForwardConfig(id = "svc", name = "svc", localPort = 8080, remoteForwardId = "svc", enabled = true)
+        configRepository.saveForwards(listOf(forward))
+        recordingBridge.validationResult = ValidationResult(true, null)
+        viewModel.setImportIdentityPath(identityFile.absolutePath)
+        viewModel.setImportPublicIdentity("kid peer")
+        viewModel.setInput(
+            viewModel.state.value.input.copy(
+                brokerHost = "broker.local",
+                remotePeerId = "desktop-peer",
+            ),
+        )
+        while (viewModel.state.value.currentStep != SetupStep.Review) {
+            viewModel.goNext()
+        }
+        viewModel.saveAndApplyConfig()
+        assertTrue(configRepository.readConfig().contains("broker.local"))
     }
 
     @Test
@@ -101,6 +118,21 @@ class AppViewModelsTest {
         val viewModel = SettingsViewModel(deps)
         recordingBridge.validationResult = ValidationResult(true, "ok")
         assertEquals(ValidationResult(true, "ok"), viewModel.validateConfig())
+    }
+
+    @Test
+    fun setupViewModelBlocksNextWhenBrokerInvalid() {
+        val viewModel = SetupViewModel(deps)
+        val identityFile = File(app.filesDir, "incoming_identity_for_validation.toml").apply {
+            writeText("peer_id = \"android-phone\"\nsecret = \"abc\"")
+        }
+        viewModel.goNext()
+        viewModel.setImportIdentityPath(identityFile.absolutePath)
+        viewModel.goNext()
+        viewModel.setInput(viewModel.state.value.input.copy(brokerHost = "", brokerPort = 0))
+        viewModel.goNext()
+        assertEquals(SetupStep.Broker, viewModel.state.value.currentStep)
+        assertTrue(viewModel.state.value.errorMessage?.contains("Broker host") == true)
     }
 
     private class RecordingBridge : TunnelNativeBridge {

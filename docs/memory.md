@@ -38,3 +38,12 @@
 - Enforced service policy/lifecycle hardening: early `startForeground`, `START_NOT_STICKY`, null-intent handling, policy gating/pause/resume hooks, and connected test stabilization.
 - Wired Rust Android build into Gradle lifecycle (`preBuild` dependency + `verifyRustJniLibs` + cargo-ndk presence check).
 - Validation passed: `cargo fmt --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-targets`, and `./gradlew --no-daemon lintDebug assembleDebug testDebugUnitTest connectedDebugAndroidTest`.
+
+## 2026-05-31T06:28:57Z - GPT-5.3-Codex - Android UI/flow completion pass landed
+- Implemented a functional offer-mode setup wizard with step validation, config rendering, identity/public-key import hooks, and save/apply flow.
+- Implemented forwards management UI + viewmodel CRUD with validation (duplicate ports/range/localhost guard) and persisted forwards storage.
+- Added network-policy settings screen behavior with metered-warning confirm dialog and preference persistence wiring.
+- Implemented import/export workflows for config/public/private identity (private export requires explicit risk confirmation).
+- Added redacted diagnostics export path and log/config redaction coverage.
+- Added/updated Android unit tests for config rendering/forwards validation, setup viewmodel flow validation, private export confirmation, authorized-key dedupe, and diagnostics redaction.
+- Re-ran full validation successfully: Rust `fmt/clippy/test` + Android `lintDebug assembleDebug testDebugUnitTest connectedDebugAndroidTest`.

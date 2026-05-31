@@ -14,6 +14,7 @@ class IdentityRepository(
 ) {
     private val identityFile = File(context.filesDir, "identity.enc")
     private val publicFile = File(context.filesDir, "identity.pub")
+    private val authorizedKeysFile = File(context.filesDir, "authorized_keys")
 
     fun hasEncryptedIdentity(): Boolean = identityFile.exists()
 
@@ -24,6 +25,47 @@ class IdentityRepository(
 
     fun readEncryptedIdentity(): ByteArray {
         return crypto.decrypt(identityFile.readBytes())
+    }
+
+    fun readPublicIdentity(): String = if (publicFile.exists()) publicFile.readText() else ""
+
+    fun importPrivateIdentityFromPath(path: String): Result<Unit> = runCatching {
+        val source = File(path)
+        require(source.exists()) { "Identity file not found: $path" }
+        val contents = source.readBytes()
+        require(contents.isNotEmpty()) { "Identity file is empty" }
+        val publicLine = source.readText().lineSequence().firstOrNull { it.contains("peer_id") } ?: ""
+        storeEncryptedIdentity(contents, publicLine)
+    }
+
+    fun appendAuthorizedPublicIdentity(line: String): Result<Unit> = runCatching {
+        val trimmed = line.trim()
+        require(trimmed.isNotEmpty()) { "Public identity line is empty" }
+        val existing = if (authorizedKeysFile.exists()) {
+            authorizedKeysFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }.toMutableSet()
+        } else {
+            mutableSetOf()
+        }
+        if (existing.add(trimmed)) {
+            authorizedKeysFile.parentFile?.mkdirs()
+            authorizedKeysFile.writeText(existing.joinToString("\n"))
+        }
+    }
+
+    fun exportPrivateIdentity(outputPath: String, confirmRisk: Boolean): Result<Unit> = runCatching {
+        require(confirmRisk) { "Private export requires explicit confirmation" }
+        require(hasEncryptedIdentity()) { "No private identity available" }
+        val output = File(outputPath)
+        output.parentFile?.mkdirs()
+        output.writeBytes(readEncryptedIdentity())
+    }
+
+    fun exportPublicIdentity(outputPath: String): Result<Unit> = runCatching {
+        val value = readPublicIdentity()
+        require(value.isNotBlank()) { "No public identity available" }
+        val output = File(outputPath)
+        output.parentFile?.mkdirs()
+        output.writeText(value)
     }
 }
 
