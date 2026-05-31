@@ -824,6 +824,8 @@ cd android
 ./gradlew connectedDebugAndroidTest
 ```
 
+Status: completed successfully on `emulator-5554`.
+
 ## 11.6 Manual mockup comparison
 
 Compare against `android_screens.png`:
@@ -840,6 +842,8 @@ Compare against `android_screens.png`:
 - Forward Details
 - Logs
 - Settings
+
+Status: not run in this pass.
 
 Document any intentional differences.
 
