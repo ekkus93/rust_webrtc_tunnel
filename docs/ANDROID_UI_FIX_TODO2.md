@@ -843,7 +843,12 @@ Compare against `android_screens.png`:
 - Logs
 - Settings
 
-Status: not run in this pass.
+Status: completed in this pass.
+
+Intentional differences documented:
+
+- Wizard stepper uses Material-themed numbered markers and connectors rather than literal unicode circled numerals.
+- Setup includes explicit "Answer mode not available on Android v1" messaging in the Mode step for scope clarity.
 
 Document any intentional differences.
 
@@ -853,7 +858,7 @@ Document any intentional differences.
 - [x] Android build passes.
 - [x] Rust tests still pass.
 - [x] Android Rust library still builds.
-- [ ] Manual mockup comparison passes or deviations documented.
+- [x] Manual mockup comparison passes or deviations documented.
 - [x] No P0/P1 issues remain.
 
 ---
@@ -921,8 +926,8 @@ Document any intentional differences.
 
 ## Regression
 
-- [ ] No protocol behavior changed.
-- [ ] No identity-at-rest behavior weakened.
-- [ ] No network-policy behavior weakened.
-- [ ] Logs/diagnostics remain redacted.
-- [ ] Validation commands pass or failures documented.
+- [x] No protocol behavior changed.
+- [x] No identity-at-rest behavior weakened.
+- [x] No network-policy behavior weakened.
+- [x] Logs/diagnostics remain redacted.
+- [x] Validation commands pass or failures documented.

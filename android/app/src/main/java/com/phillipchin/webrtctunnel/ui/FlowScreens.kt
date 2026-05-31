@@ -45,6 +45,25 @@ import com.phillipchin.webrtctunnel.viewmodel.SetupStep
 import com.phillipchin.webrtctunnel.viewmodel.SetupWizardState
 import com.phillipchin.webrtctunnel.viewmodel.SetupViewModel
 
+internal fun suggestNewForwardPort(existingForwards: List<ForwardConfig>, startPort: Int = 8080): Int {
+    val usedPorts = existingForwards.filter { it.enabled }.map { it.localPort }.toSet()
+    for (port in startPort..65535) {
+        if (port !in usedPorts) {
+            return port
+        }
+    }
+    return startPort
+}
+
+internal fun defaultNewForward(existingForwards: List<ForwardConfig>): ForwardConfig = ForwardConfig(
+    id = "forward_${System.currentTimeMillis()}",
+    name = "",
+    localHost = "127.0.0.1",
+    localPort = suggestNewForwardPort(existingForwards),
+    remoteForwardId = "",
+    enabled = true,
+)
+
 @Composable
 fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -97,14 +116,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
                 onImportFile = { importPublicIdentityLauncher.launch(arrayOf("text/*")) },
             )
             SetupStep.Forwards -> ForwardsStepContent(vm, forwards, onAdd = {
-                editingForward = ForwardConfig(
-                    id = "forward_${System.currentTimeMillis()}",
-                    name = "New Forward",
-                    localHost = "127.0.0.1",
-                    localPort = 8080,
-                    remoteForwardId = "ssh",
-                    enabled = true,
-                )
+                editingForward = defaultNewForward(forwards)
             }, onEdit = { editingForward = it }, onDelete = vm::deleteForward)
             SetupStep.NetworkPolicy -> PolicyStepContent(vm, state, networkStatus)
             SetupStep.Review -> ReviewStepContent(vm, state, forwards)
