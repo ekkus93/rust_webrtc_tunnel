@@ -627,3 +627,8 @@
 ## 2026-05-31T22:17:54Z - GPT-5.3-Codex - Added review questions for TODO3/spec
 - Reviewed `docs/ANDROID_UI_CODE_REVIEW3.md` and `docs/ANDROID_UI_FIX_TODO3.md` without writing code.
 - Added open clarification questions/issues to `docs/responses13.md` for handoff back to ChatGPT 5.5.
+
+## 2026-05-31T22:41:51Z - GPT-5.3-Codex - TODO3 UI cleanup implemented with honest validation status
+- Implemented TODO3 UI fixes across Android UI/service/viewmodel/tests: session-scoped metered allowance wiring, duplicate Review Save/Start removal from review content, Home/Forwards scrollability hardening, Logs overflow actions menu, explicit add/edit forward dialog mode labels, and contextual action content descriptions.
+- Added targeted regression coverage in Android tests (`AppViewModelsTest`, `FlowScreensTest`, `TunnelRepositoryTest`, `TunnelForegroundServiceInstrumentationTest`) and reran full Rust+Android gates.
+- Updated `docs/ANDROID_UI_FIX_TODO3.md` and appended a new section to `docs/ANDROID_VALIDATION.md` with pass results plus explicit `NOT RUN` notes for manual large-font walkthrough and Android↔desktop browser E2E.

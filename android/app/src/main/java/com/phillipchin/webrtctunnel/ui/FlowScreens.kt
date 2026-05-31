@@ -65,7 +65,11 @@ internal fun defaultNewForward(existingForwards: List<ForwardConfig>): ForwardCo
 )
 
 @Composable
-fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
+fun SetupWizardScreen(
+    padding: PaddingValues,
+    vm: SetupViewModel,
+    onStartSuccess: () -> Unit = {},
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val networkStatus by vm.networkStatus.collectAsStateWithLifecycle(
@@ -119,7 +123,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
                 editingForward = defaultNewForward(forwards)
             }, onEdit = { editingForward = it }, onDelete = vm::deleteForward)
             SetupStep.NetworkPolicy -> PolicyStepContent(vm, state, networkStatus)
-            SetupStep.Review -> ReviewStepContent(vm, state, forwards)
+            SetupStep.Review -> ReviewStepContent(state, forwards)
         }
         state.brokerTestMessage?.let {
             Spacer(Modifier.height(8.dp))
@@ -145,7 +149,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
                 }
                 if (state.currentStep == SetupStep.Review) {
                     OutlinedButton(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save") }
-                    Button(onClick = vm::startTunnelFromReview, enabled = canAdvance) { Text("Start Tunnel") }
+                    Button(onClick = { vm.startTunnelFromReview(onStartSuccess) }, enabled = canAdvance) { Text("Start Tunnel") }
                 } else {
                     Button(onClick = vm::goNext, enabled = canAdvance) { Text("Next") }
                 }
@@ -155,6 +159,7 @@ fun SetupWizardScreen(padding: PaddingValues, vm: SetupViewModel) {
 
     editingForward?.let { draft ->
         EditForwardDialog(
+            mode = ForwardEditorMode.Add,
             initial = draft,
             existingForwards = forwards,
             validateDraft = vm::validateForwardDraft,
@@ -318,7 +323,9 @@ private fun ForwardsStepContent(
                         }
                         Row {
                             OutlinedButton(onClick = { onEdit(forward) }) { Text("Edit") }
-                            IconButton(onClick = { onDelete(forward.id) }) { Icon(Icons.Default.Delete, contentDescription = "Delete forward") }
+                            IconButton(onClick = { onDelete(forward.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete forward ${forward.name}")
+                            }
                         }
                     }
                 }
@@ -373,7 +380,7 @@ private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, netwo
 }
 
 @Composable
-private fun ReviewStepContent(vm: SetupViewModel, state: SetupWizardState, forwards: List<ForwardConfig>) {
+private fun ReviewStepContent(state: SetupWizardState, forwards: List<ForwardConfig>) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         StatusCard {
             Text("Mode", style = MaterialTheme.typography.titleMedium)
@@ -407,15 +414,27 @@ private fun ReviewStepContent(vm: SetupViewModel, state: SetupWizardState, forwa
                 Text("127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}")
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = vm::saveAndApplyConfig, modifier = Modifier.weight(1f)) { Text("Save") }
-            Button(onClick = vm::startTunnelFromReview, modifier = Modifier.weight(1f)) { Text("Start Tunnel") }
-        }
     }
+}
+
+internal enum class ForwardEditorMode {
+    Add,
+    Edit,
+}
+
+internal data class ForwardEditorLabels(
+    val title: String,
+    val action: String,
+)
+
+internal fun forwardEditorLabels(mode: ForwardEditorMode): ForwardEditorLabels = when (mode) {
+    ForwardEditorMode.Add -> ForwardEditorLabels(title = "Add Forward", action = "Add")
+    ForwardEditorMode.Edit -> ForwardEditorLabels(title = "Edit Forward", action = "Save")
 }
 
 @Composable
 internal fun EditForwardDialog(
+    mode: ForwardEditorMode,
     initial: ForwardConfig,
     existingForwards: List<ForwardConfig>,
     validateDraft: (ForwardConfig, List<ForwardConfig>) -> String?,
@@ -424,9 +443,10 @@ internal fun EditForwardDialog(
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
     var validationError by remember(initial) { mutableStateOf<String?>(null) }
+    val labels = forwardEditorLabels(mode)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial.id == value.id) "Edit Forward" else "Add Forward") },
+        title = { Text(labels.title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = value.name, onValueChange = { value = value.copy(name = it) }, label = { Text("Display name") }, modifier = Modifier.fillMaxWidth())
@@ -451,7 +471,7 @@ internal fun EditForwardDialog(
                     validationError = null
                     onSave(value)
                 }
-            }) { Text("Save") }
+            }) { Text(labels.action) }
         },
     )
 }

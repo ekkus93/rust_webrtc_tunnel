@@ -134,6 +134,10 @@ class TunnelRepository(
         _status.value = _status.value.copy(networkStatus = networkStatus)
     }
 
+    fun updateSessionMeteredAllowance(allowForCurrentSession: Boolean) {
+        _status.value = _status.value.copy(allowMeteredForCurrentSession = allowForCurrentSession)
+    }
+
     private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): TunnelStatus {
         val modeValue = when (mode) {
             "answer" -> TunnelMode.Answer

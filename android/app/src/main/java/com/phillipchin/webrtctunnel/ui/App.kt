@@ -141,7 +141,18 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
                         onOpenImportExport = { navController.navigate(Route.ImportExport.value) },
                     )
                 }
-                composable(Route.Setup.value) { SetupWizardScreen(padding, setupViewModel) }
+                composable(Route.Setup.value) {
+                    SetupWizardScreen(
+                        padding = padding,
+                        vm = setupViewModel,
+                        onStartSuccess = {
+                            navController.navigate(Route.Home.value) {
+                                popUpTo(Route.Home.value) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
                 composable(Route.NetworkPolicy.value) { NetworkPolicyScreen(padding, networkPolicyViewModel) }
                 composable(Route.ImportExport.value) { ImportExportScreen(padding, importExportViewModel) }
                 composable(

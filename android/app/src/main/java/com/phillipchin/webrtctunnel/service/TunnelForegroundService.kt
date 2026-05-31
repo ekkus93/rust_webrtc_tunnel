@@ -13,6 +13,7 @@ import com.phillipchin.webrtctunnel.data.ConfigRepository
 import com.phillipchin.webrtctunnel.data.SensitiveDataRedactor
 import com.phillipchin.webrtctunnel.security.IdentityRepository
 import com.phillipchin.webrtctunnel.data.TunnelRepository
+import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.NetworkType
 import com.phillipchin.webrtctunnel.network.NetworkPolicyManager
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ class TunnelForegroundService : Service() {
     private var startupJob: Job? = null
     private var lastMode: TunnelMode = TunnelMode.Offer
     private var pausedByPolicy: Boolean = false
+    private var allowMeteredForCurrentRun: Boolean = false
     private var lifecycleGeneration: Long = 0
     private val lifecycleMutex = Mutex()
 
@@ -53,10 +55,11 @@ class TunnelForegroundService : Service() {
         repository = deps.tunnelRepository
         identityRepository = deps.identityRepository
         networkPolicyManager = deps.networkPolicyManager
+        repository.updateSessionMeteredAllowance(false)
         networkMonitorJob = serviceScope.launch {
-            networkPolicyManager.monitor(this@TunnelForegroundService).collect { status ->
-                val prefs = configRepository.preferences.first()
-                val policy = networkPolicyManager.evaluateWithPolicy(prefs.allowMetered)
+            networkPolicyManager.monitor(this@TunnelForegroundService).collect { _ ->
+                val prefs = withContext(Dispatchers.IO) { configRepository.preferences.first() }
+                val policy = evaluatePolicy(prefs)
                 repository.updateNetworkStatus(policy)
                 if (policy.networkType == NetworkType.UnmeteredWifi) {
                     if (pausedByPolicy && prefs.resumeOnUnmetered) {
@@ -94,6 +97,7 @@ class TunnelForegroundService : Service() {
             }
             ACTION_PAUSE -> serviceScope.launch { pause() }
             ACTION_RESUME -> serviceScope.launch { resume() }
+            ACTION_ALLOW_METERED_SESSION -> serviceScope.launch { allowMeteredForSessionAndStart() }
             else -> stopSelf(startId)
         }
         return START_NOT_STICKY
@@ -126,7 +130,7 @@ class TunnelForegroundService : Service() {
         lastMode = TunnelMode.Offer
         startForeground(NOTIFICATION_ID, loadingNotification("Starting tunnel"))
         val prefs = withContext(Dispatchers.IO) { configRepository.preferences.first() }
-        val policy = networkPolicyManager.evaluateWithPolicy(prefs.allowMetered)
+        val policy = evaluatePolicy(prefs)
         repository.updateNetworkStatus(policy)
         if (!policy.tunnelAllowed) {
             repository.setPolicyBlocked(policy.blockReason ?: "Tunnel blocked by current network policy")
@@ -180,6 +184,15 @@ class TunnelForegroundService : Service() {
                 code = "native_start_failed",
             )
         }
+    }
+
+    private suspend fun allowMeteredForSessionAndStart() {
+        lifecycleMutex.withLock {
+            allowMeteredForCurrentRun = true
+            repository.updateSessionMeteredAllowance(true)
+            pausedByPolicy = false
+        }
+        startOffer()
     }
 
     private fun startAnswer() {
@@ -280,6 +293,7 @@ class TunnelForegroundService : Service() {
                     )
                 }
                 pausedByPolicy = false
+                clearTemporaryMeteredAllowance()
             }
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -300,10 +314,19 @@ class TunnelForegroundService : Service() {
                 )
             }
             pausedByPolicy = false
+            clearTemporaryMeteredAllowance()
             notifications.show(notifications.buildStatusNotification(ServiceState.Stopped, "Tunnel stopped"))
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun evaluatePolicy(prefs: AndroidAppPreferences) =
+        networkPolicyManager.evaluateWithPolicy(prefs.allowMetered || allowMeteredForCurrentRun)
+
+    private fun clearTemporaryMeteredAllowance() {
+        allowMeteredForCurrentRun = false
+        repository.updateSessionMeteredAllowance(false)
     }
 
     private fun cancelStartupJobLocked() {
@@ -317,6 +340,7 @@ class TunnelForegroundService : Service() {
         const val ACTION_STOP = "com.phillipchin.webrtctunnel.action.STOP"
         const val ACTION_PAUSE = "com.phillipchin.webrtctunnel.action.PAUSE"
         const val ACTION_RESUME = "com.phillipchin.webrtctunnel.action.RESUME"
+        const val ACTION_ALLOW_METERED_SESSION = "com.phillipchin.webrtctunnel.action.ALLOW_METERED_SESSION"
         const val NOTIFICATION_ID = NotificationController.NOTIFICATION_ID
     }
 }

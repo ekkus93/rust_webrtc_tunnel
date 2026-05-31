@@ -91,6 +91,26 @@ class AppViewModelsTest {
     }
 
     @Test
+    fun homeViewModelAllowMeteredTemporarilyDoesNotPersistPreference() = runBlocking {
+        configRepository.savePreferences(
+            com.phillipchin.webrtctunnel.model.AndroidAppPreferences(
+                allowMetered = false,
+                resumeOnUnmetered = true,
+                showMeteredWarning = true,
+                startTunnelWhenAppOpens = false,
+                debugLogsEnabled = false,
+                advancedSettingsEnabled = false,
+            ),
+        )
+        val viewModel = HomeViewModel(deps)
+        viewModel.allowMeteredTemporarily()
+        val started = Shadows.shadowOf(app).nextStartedService
+        assertNotNull(started)
+        assertEquals(TunnelForegroundService.ACTION_ALLOW_METERED_SESSION, started.action)
+        assertEquals(false, configRepository.preferences.first().allowMetered)
+    }
+
+    @Test
     fun homeViewModelRefreshDelegatesToRepository() {
         val viewModel = HomeViewModel(deps)
         assertSame(tunnelRepository.status, viewModel.status)
@@ -105,6 +125,7 @@ class AppViewModelsTest {
         viewModel.saveAndApplyConfig()
         awaitSetupState(viewModel) { it.saveResult == "Configuration saved" }
         assertTrue(configRepository.readConfig().contains("broker.local"))
+        assertEquals(null, Shadows.shadowOf(app).nextStartedService)
     }
 
     @Test
@@ -225,6 +246,19 @@ class AppViewModelsTest {
         val state = awaitSetupState(viewModel) { it.saveResult == "Tunnel start requested" }
         assertEquals("Tunnel start requested", state.saveResult)
         assertEquals(TunnelForegroundService.ACTION_START_OFFER, Shadows.shadowOf(app).nextStartedService.action)
+        assertEquals(null, Shadows.shadowOf(app).nextStartedService)
+    }
+
+    @Test
+    fun setupViewModelFailedConfigValidationPreventsStartAndShowsError() {
+        val viewModel = SetupViewModel(deps)
+        prepareValidReviewState(viewModel)
+        recordingBridge.validationResult = ValidationResult(false, "invalid review config")
+
+        viewModel.startTunnelFromReview()
+
+        val state = awaitSetupState(viewModel) { it.errorMessage != null }
+        assertTrue(state.errorMessage?.contains("invalid review config") == true)
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
     }
 

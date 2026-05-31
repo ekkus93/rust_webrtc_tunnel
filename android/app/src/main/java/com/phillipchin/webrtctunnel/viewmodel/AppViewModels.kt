@@ -90,11 +90,11 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     }
 
     fun allowMeteredTemporarily() {
-        viewModelScope.launch {
-            val current = deps.configRepository.preferences.first()
-            deps.configRepository.savePreferences(current.copy(allowMetered = true))
-            startTunnel(TunnelMode.Offer)
-        }
+        ContextCompat.startForegroundService(
+            deps.context,
+            Intent(deps.context, TunnelForegroundService::class.java)
+                .setAction(TunnelForegroundService.ACTION_ALLOW_METERED_SESSION),
+        )
     }
 
     fun refresh() = deps.tunnelRepository.refreshStatus()
@@ -490,7 +490,7 @@ class SetupViewModel(
         return true
     }
 
-    fun startTunnelFromReview() {
+    fun startTunnelFromReview(onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
             val saved = saveAndApplyConfigInternal()
             if (!saved) {
@@ -502,6 +502,7 @@ class SetupViewModel(
                     .setAction(TunnelForegroundService.ACTION_START_OFFER),
             )
             _state.value = _state.value.copy(saveResult = "Tunnel start requested", errorMessage = null).withCanAdvance(_forwards.value)
+            onSuccess?.invoke()
         }
     }
 

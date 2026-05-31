@@ -1,5 +1,49 @@
 # Android Validation
 
+## 2026-05-31T22:41:24Z
+
+- **Commit:** working tree with TODO3 final UI cleanup changes (not yet committed)
+- **Environment:** Linux host, Android emulator `Medium_Phone_API_36.0(AVD) - 16`
+- **Summary:** TODO3 UI cleanup automation is green after a flaky two-node daemon retry; manual UI large-font walkthrough and Android↔desktop browser E2E were not run in this pass.
+
+### Rust workspace validation
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets -- --test-threads=1
+```
+
+- **Result:** PASS on rerun (first run hit known flaky `p2p-daemon` two-node test `signaling_turbulence_does_not_interrupt_active_tcp_stream`; second full rerun passed cleanly).
+
+### Android lint/build/tests
+
+```bash
+cd android
+./gradlew --no-daemon lintDebug testDebugUnitTest connectedDebugAndroidTest --console=plain
+```
+
+- **Result:** PASS
+
+### Android Rust native library build
+
+```bash
+cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p p2p-mobile --release
+```
+
+- **Result:** PASS
+
+### Manual UI validation (large-font/phone-layout walkthrough)
+
+- **Result:** NOT RUN
+- **Reason:** This environment run was CLI automation only; no interactive manual walkthrough was performed for large-font visual checks.
+
+### Manual Android↔desktop E2E
+
+- **Result:** NOT RUN
+- **Reason:** Desktop `p2p-answer` runtime + remote target service were not provisioned for this pass.
+- **Required future run:** Start desktop `p2p-answer`, start Android offer tunnel, browse `http://127.0.0.1:<local_port>`, and record redacted Android/desktop logs and response evidence.
+
 ## 2026-05-31T16:42:56Z
 
 - **Commit:** `17a5b74`

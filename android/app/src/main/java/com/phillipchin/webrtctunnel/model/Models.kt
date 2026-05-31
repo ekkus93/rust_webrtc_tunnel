@@ -117,6 +117,7 @@ data class TunnelStatus(
         allowedByUserPolicy = false,
         tunnelAllowed = false,
     ),
+    val allowMeteredForCurrentSession: Boolean = false,
     val forwards: List<ForwardStatus> = emptyList(),
     val lastError: TunnelError? = null,
 )

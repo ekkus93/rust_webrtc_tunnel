@@ -31,4 +31,10 @@ class FlowScreensTest {
 
         assertEquals(8080, port)
     }
+
+    @Test
+    fun forwardEditorLabelsMatchMode() {
+        assertEquals(ForwardEditorLabels("Add Forward", "Add"), forwardEditorLabels(ForwardEditorMode.Add))
+        assertEquals(ForwardEditorLabels("Edit Forward", "Save"), forwardEditorLabels(ForwardEditorMode.Edit))
+    }
 }

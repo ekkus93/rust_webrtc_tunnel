@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SignalCellularAlt
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +77,7 @@ import com.phillipchin.webrtctunnel.viewmodel.ImportExportViewModel
 import com.phillipchin.webrtctunnel.viewmodel.LogsViewModel
 import com.phillipchin.webrtctunnel.viewmodel.NetworkPolicyViewModel
 import com.phillipchin.webrtctunnel.viewmodel.SettingsViewModel
+import com.phillipchin.webrtctunnel.ui.ForwardEditorMode
 import java.util.Locale
 
 private data class HomeStatusUi(val title: String, val description: String)
@@ -175,7 +179,7 @@ fun HomeScreen(
     }
     var showMeteredWarningDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refreshForwards() }
-    ScreenSurface(padding) {
+    ScrollableScreenSurface(padding) {
         SectionHeader("WebRTC Tunnel", "Current runtime state and quick actions")
         Spacer(Modifier.height(12.dp))
         StatusCard {
@@ -213,6 +217,9 @@ fun HomeScreen(
             Text(if (status.networkStatus.isMetered) "Metered" else "Unmetered")
             Text(if (status.networkStatus.tunnelAllowed) "Tunnel allowed" else "Tunnel blocked")
             status.networkStatus.blockReason?.let { Text("Reason: $it") }
+            if (status.allowMeteredForCurrentSession) {
+                Text("Metered override: active for this app run")
+            }
         }
         Spacer(Modifier.height(12.dp))
         StatusCard {
@@ -303,7 +310,7 @@ private fun HomeActionRow(
             ServiceState.PausedMeteredBlocked -> {
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
                 OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
-                OutlinedButton(onClick = onAllowMeteredTemporary, modifier = Modifier.weight(1f)) { Text("Allow Temporarily") }
+                OutlinedButton(onClick = onAllowMeteredTemporary, modifier = Modifier.weight(1f)) { Text("Allow This Session") }
             }
             ServiceState.NoNetwork -> {
                 OutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
@@ -327,31 +334,37 @@ fun ForwardsScreen(padding: PaddingValues, vm: ForwardsViewModel, onOpenDetails:
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
-    ScreenSurface(padding) {
-        SectionHeader("Forwards", "Manage local forwards")
-        Spacer(Modifier.height(12.dp))
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            SectionHeader("Forwards", "Manage local forwards")
+            Spacer(Modifier.height(12.dp))
+            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        }
         if (forwards.isEmpty()) {
-            EmptyStateCard("No forwards configured. Add one in Setup Wizard.")
+            item { EmptyStateCard("No forwards configured. Add one in Setup Wizard.") }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(forwards) { forward ->
-                    StatusCard {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenDetails(forward.id) },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(forward.name, style = MaterialTheme.typography.titleMedium)
-                                Text("${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}", style = MaterialTheme.typography.bodySmall)
-                                val runtime = status.forwards.firstOrNull { it.id == forward.id }
-                                Text(runtime?.listenState?.name ?: if (forward.enabled) "Configured" else "Disabled", color = stateColorToken(runtime?.listenState?.name ?: "disabled"))
-                            }
-                            Text("›", style = MaterialTheme.typography.titleLarge)
+            items(forwards) { forward ->
+                StatusCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenDetails(forward.id) },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(forward.name, style = MaterialTheme.typography.titleMedium)
+                            Text("${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}", style = MaterialTheme.typography.bodySmall)
+                            val runtime = status.forwards.firstOrNull { it.id == forward.id }
+                            Text(runtime?.listenState?.name ?: if (forward.enabled) "Configured" else "Disabled", color = stateColorToken(runtime?.listenState?.name ?: "disabled"))
                         }
+                        Text("›", style = MaterialTheme.typography.titleLarge)
                     }
                 }
             }
@@ -394,7 +407,7 @@ fun ForwardDetailsScreen(
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.localhostUrl(forward))) }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL")
+            Icon(Icons.Default.ContentCopy, contentDescription = "Copy ${forward.name} local URL")
                 Spacer(Modifier.height(0.dp))
                 Text("Copy URL")
             }
@@ -406,7 +419,7 @@ fun ForwardDetailsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Open browser")
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Open ${forward.name} local URL in browser")
                     Text("Open Browser")
                 }
             }
@@ -444,6 +457,7 @@ fun ForwardDetailsScreen(
     }
     if (showEditDialog && forward != null) {
         EditForwardDialog(
+            mode = ForwardEditorMode.Edit,
             initial = forward,
             existingForwards = forwards,
             validateDraft = vm::validateForwardDraft,
@@ -467,11 +481,26 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
     )
     val clipboard = LocalClipboardManager.current
     var paused by remember { mutableStateOf(false) }
+    var showActionsMenu by remember { mutableStateOf(false) }
     val diagnosticsCreateDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
     ) { uri -> if (uri != null) vm.exportDiagnosticsToUri(uri, networkStatus) }
     LaunchedEffect(paused) { if (!paused) vm.refresh() }
     val logs = vm.filteredLogs()
+    val copyLogs = {
+        val text = logs
+            .map(SensitiveDataRedactor::redactLogEvent)
+            .joinToString("\n") { "${it.unixMs} ${it.level} ${it.message}" }
+        clipboard.setText(AnnotatedString(text))
+    }
+    val exportDiagnostics = { diagnosticsCreateDocumentLauncher.launch("webrtc_diagnostics_redacted.txt") }
+    val shareDiagnostics = {
+        val share = Intent.createChooser(
+            vm.diagnosticsShareIntent(networkStatus),
+            "Share diagnostics",
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(share)
+    }
 
     ScrollableScreenSurface(padding) {
         SectionHeader("Logs", "Redacted runtime events")
@@ -487,31 +516,32 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
                 Text(if (paused) "Resume Logs" else "Pause Logs")
             }
             OutlinedButton(onClick = vm::clearLogs, modifier = Modifier.weight(1f)) { Text("Clear Logs") }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = {
-                    val text = logs
-                        .map(SensitiveDataRedactor::redactLogEvent)
-                        .joinToString("\n") { "${it.unixMs} ${it.level} ${it.message}" }
-                    clipboard.setText(AnnotatedString(text))
-                },
-                modifier = Modifier.weight(1f),
-            ) { Text("Copy Logs") }
-            OutlinedButton(onClick = { diagnosticsCreateDocumentLauncher.launch("webrtc_diagnostics_redacted.txt") }, modifier = Modifier.weight(1f)) {
-                Text("Export Diagnostics")
+            IconButton(onClick = { showActionsMenu = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Open log actions")
             }
-            OutlinedButton(
-                onClick = {
-                    val share = Intent.createChooser(
-                        vm.diagnosticsShareIntent(networkStatus),
-                        "Share diagnostics",
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(share)
-                },
-                modifier = Modifier.weight(1f),
-            ) { Text("Share Diagnostics") }
+            DropdownMenu(expanded = showActionsMenu, onDismissRequest = { showActionsMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Copy Logs") },
+                    onClick = {
+                        showActionsMenu = false
+                        copyLogs()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Export Diagnostics") },
+                    onClick = {
+                        showActionsMenu = false
+                        exportDiagnostics()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share Diagnostics") },
+                    onClick = {
+                        showActionsMenu = false
+                        shareDiagnostics()
+                    },
+                )
+            }
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))

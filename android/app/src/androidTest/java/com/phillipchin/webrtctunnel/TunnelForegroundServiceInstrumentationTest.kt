@@ -142,6 +142,39 @@ class TunnelForegroundServiceInstrumentationTest {
     }
 
     @Test
+    fun allowMeteredSessionActionSetsRuntimeFlagAndClearsOnStop() {
+        context.startForegroundService(
+            Intent(context, TunnelForegroundService::class.java)
+                .setAction(TunnelForegroundService.ACTION_ALLOW_METERED_SESSION),
+        )
+        assertTrue(
+            waitForCondition(timeoutMs = 8_000) {
+                (context.applicationContext as HasAppDependencies)
+                    .deps
+                    .tunnelRepository
+                    .status
+                    .value
+                    .allowMeteredForCurrentSession
+            },
+        )
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java)
+                .setAction(TunnelForegroundService.ACTION_STOP),
+        )
+        assertTrue(
+            waitForCondition(timeoutMs = 8_000) {
+                val status = (context.applicationContext as HasAppDependencies)
+                    .deps
+                    .tunnelRepository
+                    .status
+                    .value
+                status.serviceState == com.phillipchin.webrtctunnel.model.ServiceState.Stopped &&
+                    !status.allowMeteredForCurrentSession
+            },
+        )
+    }
+
+    @Test
     fun rustBridgeDisposeIsIdempotentAndRejectsCallsAfterDispose() {
         val bridge = RustTunnelBridge()
         bridge.stop()

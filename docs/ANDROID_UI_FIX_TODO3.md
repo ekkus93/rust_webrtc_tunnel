@@ -19,17 +19,17 @@ This is **not** a protocol rewrite and not a new Android architecture pass.
 
 ## 2. Non-negotiable rules
 
-- [ ] Do not change MQTT signaling wire format.
-- [ ] Do not change tunnel frame format.
-- [ ] Do not change desktop Rust protocol semantics.
-- [ ] Do not add TURN.
-- [ ] Do not add VPN/TUN mode.
-- [ ] Do not weaken Android Keystore identity-at-rest behavior.
-- [ ] Do not weaken cellular/metered blocking behavior.
-- [ ] Do not weaken log/diagnostic redaction behavior.
-- [ ] Do not expose arbitrary remote host/port selection from Android offer side.
-- [ ] Do not persist metered allowance from a UI action labeled temporary.
-- [ ] Do not mark E2E compatibility complete unless actually run.
+- [x] Do not change MQTT signaling wire format.
+- [x] Do not change tunnel frame format.
+- [x] Do not change desktop Rust protocol semantics.
+- [x] Do not add TURN.
+- [x] Do not add VPN/TUN mode.
+- [x] Do not weaken Android Keystore identity-at-rest behavior.
+- [x] Do not weaken cellular/metered blocking behavior.
+- [x] Do not weaken log/diagnostic redaction behavior.
+- [x] Do not expose arbitrary remote host/port selection from Android offer side.
+- [x] Do not persist metered allowance from a UI action labeled temporary.
+- [x] Do not mark E2E compatibility complete unless actually run.
 
 ---
 
@@ -190,10 +190,10 @@ Add tests:
 
 ## 1.7 Acceptance
 
-- [ ] No temporary-labeled action persists `allowMetered = true`.
-- [ ] Temporary allowance is cleared when tunnel stops/service ends.
-- [ ] Warning is still required.
-- [ ] UI wording matches behavior.
+- [x] No temporary-labeled action persists `allowMetered = true`.
+- [x] Temporary allowance is cleared when tunnel stops/service ends.
+- [x] Warning is still required.
+- [x] UI wording matches behavior.
 
 ---
 
@@ -261,9 +261,9 @@ Add tests:
 
 ## 2.5 Acceptance
 
-- [ ] No duplicate Save/Start controls on Review.
-- [ ] Save and Start labels match behavior.
-- [ ] Review step is less confusing.
+- [x] No duplicate Save/Start controls on Review.
+- [x] Save and Start labels match behavior.
+- [x] Review step is less confusing.
 
 ---
 
@@ -343,10 +343,10 @@ Add Compose tests where practical:
 
 ## 3.7 Acceptance
 
-- [ ] Home is scrollable or otherwise large-font safe.
-- [ ] Forwards is scrollable or otherwise large-font safe.
-- [ ] Main actions remain reachable.
-- [ ] No content clips on normal phone sizes.
+- [x] Home is scrollable or otherwise large-font safe.
+- [x] Forwards is scrollable or otherwise large-font safe.
+- [x] Main actions remain reachable.
+- [x] No content clips on normal phone sizes.
 
 ---
 
@@ -418,10 +418,10 @@ Verify:
 
 ## 4.5 Acceptance
 
-- [ ] Logs actions do not overflow.
-- [ ] Logs screen remains readable on phone width.
-- [ ] Copy/export/share still work.
-- [ ] Redaction remains intact.
+- [x] Logs actions do not overflow.
+- [x] Logs screen remains readable on phone width.
+- [x] Copy/export/share still work.
+- [x] Redaction remains intact.
 
 ---
 
@@ -465,9 +465,9 @@ Add tests:
 
 ## 5.4 Acceptance
 
-- [ ] Advanced/debug controls are hidden by default.
-- [ ] User must intentionally reveal advanced controls.
-- [ ] Settings is not cluttered by raw path/debug options.
+- [x] Advanced/debug controls are hidden by default.
+- [x] User must intentionally reveal advanced controls.
+- [x] Settings is not cluttered by raw path/debug options.
 
 ---
 
@@ -524,9 +524,9 @@ Add tests:
 
 ## 6.5 Acceptance
 
-- [ ] Add/Edit dialog labels are correct.
-- [ ] No misleading defaults.
-- [ ] Inline validation still works.
+- [x] Add/Edit dialog labels are correct.
+- [x] No misleading defaults.
+- [x] Inline validation still works.
 
 ---
 
@@ -587,8 +587,8 @@ Manual checks are acceptable for large font.
 
 ## 7.5 Acceptance
 
-- [ ] Important icons/buttons have action-specific descriptions.
-- [ ] No no-op clickable-looking controls remain.
+- [x] Important icons/buttons have action-specific descriptions.
+- [x] No no-op clickable-looking controls remain.
 - [ ] Large font remains usable.
 
 ---
@@ -633,9 +633,9 @@ Only mark checklist items complete if implemented and either tested or manually 
 
 ## 8.4 Acceptance
 
-- [ ] Test coverage matches claims.
-- [ ] Manual-only checks are documented.
-- [ ] TODO checkboxes are honest.
+- [x] Test coverage matches claims.
+- [x] Manual-only checks are documented.
+- [x] TODO checkboxes are honest.
 
 ---
 
@@ -677,8 +677,8 @@ Do not mark product acceptance complete.
 
 ## 9.4 Acceptance
 
-- [ ] E2E run and passed, or not-run status documented honestly.
-- [ ] Merge readiness notes reflect E2E status.
+- [x] E2E run and passed, or not-run status documented honestly.
+- [x] Merge readiness notes reflect E2E status.
 
 ---
 
@@ -732,12 +732,12 @@ Do not mark validation complete unless commands pass.
 
 ## 10.5 Acceptance
 
-- [ ] Rust validation passes.
-- [ ] Android assemble passes.
-- [ ] Android unit tests pass.
-- [ ] Android connected tests pass or are documented as not run.
-- [ ] cargo-ndk Android build passes.
-- [ ] Failures are documented and checklist remains unchecked.
+- [x] Rust validation passes.
+- [x] Android assemble passes.
+- [x] Android unit tests pass.
+- [x] Android connected tests pass or are documented as not run.
+- [x] cargo-ndk Android build passes.
+- [x] Failures are documented and checklist remains unchecked.
 
 ---
 
@@ -745,43 +745,43 @@ Do not mark validation complete unless commands pass.
 
 ## Temporary metered allowance
 
-- [ ] Temporary-labeled action does not persist permanent metered allowance.
-- [ ] Temporary allowance requires warning.
-- [ ] Temporary allowance clears on stop/service end.
-- [ ] UI wording matches actual behavior.
+- [x] Temporary-labeled action does not persist permanent metered allowance.
+- [x] Temporary allowance requires warning.
+- [x] Temporary allowance clears on stop/service end.
+- [x] UI wording matches actual behavior.
 
 ## Review step
 
-- [ ] No duplicate Save/Start controls.
-- [ ] Save only saves.
-- [ ] Start saves/validates/starts.
-- [ ] Errors display inline.
+- [x] No duplicate Save/Start controls.
+- [x] Save only saves.
+- [x] Start saves/validates/starts.
+- [x] Errors display inline.
 
 ## Scrollability/layout
 
-- [ ] Home scrolls or is otherwise safe on small phones.
-- [ ] Forwards scrolls or is otherwise safe on small phones.
-- [ ] Logs actions do not overflow.
-- [ ] Wizard actions remain reachable.
+- [x] Home scrolls or is otherwise safe on small phones.
+- [x] Forwards scrolls or is otherwise safe on small phones.
+- [x] Logs actions do not overflow.
+- [x] Wizard actions remain reachable.
 - [ ] Large font remains usable.
 
 ## Settings/forwards/accessibility
 
-- [ ] Advanced controls hidden by default.
-- [ ] Add/Edit forward dialog labels correct.
-- [ ] Important content descriptions are context-specific.
-- [ ] No no-op clickable controls.
+- [x] Advanced controls hidden by default.
+- [x] Add/Edit forward dialog labels correct.
+- [x] Important content descriptions are context-specific.
+- [x] No no-op clickable controls.
 
 ## Tests/docs
 
-- [ ] Targeted tests added or verified.
-- [ ] Manual UI checks documented.
-- [ ] Android↔desktop E2E passed or not-run status documented.
-- [ ] Validation commands pass or failures documented.
+- [x] Targeted tests added or verified.
+- [x] Manual UI checks documented.
+- [x] Android↔desktop E2E passed or not-run status documented.
+- [x] Validation commands pass or failures documented.
 
 ## Regression
 
-- [ ] No protocol behavior changed.
-- [ ] No identity-at-rest behavior weakened.
-- [ ] No network-policy behavior weakened.
-- [ ] Logs/diagnostics remain redacted.
+- [x] No protocol behavior changed.
+- [x] No identity-at-rest behavior weakened.
+- [x] No network-policy behavior weakened.
+- [x] Logs/diagnostics remain redacted.

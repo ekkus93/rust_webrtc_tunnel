@@ -175,6 +175,14 @@ class TunnelRepositoryTest {
         assertTrue(status.networkStatus.blockReason?.contains("***REDACTED***") == true)
     }
 
+    @Test
+    fun updateSessionMeteredAllowanceUpdatesStatusFlag() {
+        repository.updateSessionMeteredAllowance(true)
+        assertEquals(true, repository.status.value.allowMeteredForCurrentSession)
+        repository.updateSessionMeteredAllowance(false)
+        assertEquals(false, repository.status.value.allowMeteredForCurrentSession)
+    }
+
     private fun statusJson(state: String, mode: String): String =
         Json.encodeToString(
             NativeRuntimeStatusDto(
