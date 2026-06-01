@@ -642,3 +642,8 @@
 - Setup Wizard forward editing now uses explicit mode-aware editor state (`ForwardEditorState`) so Add and Edit paths pass correct `ForwardEditorMode` semantics to the dialog, while preserving existing forward draft validation flow.
 - Settings public identity loading was moved out of composable-time file reads into `SettingsViewModel` state (`SettingsUiState`) with explicit refresh/error handling; Settings copy/share actions now consume that state and are disabled when identity is unavailable.
 - Added targeted regression coverage for setup editor-mode helpers and settings public-identity load/missing/error paths, updated `docs/ANDROID_UI_FIX_TODO4.md` and `docs/ANDROID_VALIDATION.md`, and reran full Rust+Android validation (including `assembleDebug`, `connectedDebugAndroidTest`, and `cargo ndk`) with manual large-font and Android↔desktop E2E still explicitly `NOT RUN`.
+
+## 2026-06-01T08:29:34Z - Claude Sonnet 4.6 - Final lint/test rerun on TODO4 tip
+- Re-ran full validation gate: `cargo fmt --check`, strict workspace clippy, workspace tests `--test-threads=1`, Android `lintDebug testDebugUnitTest connectedDebugAndroidTest` (13/13 connected tests) — all PASS.
+- Marked Phase 4 large-font NOT RUN acceptance item in `docs/ANDROID_UI_FIX_TODO4.md`.
+- All TODO4 checklist items are now resolved; large-font and E2E remain honestly unchecked as NOT RUN per spec.

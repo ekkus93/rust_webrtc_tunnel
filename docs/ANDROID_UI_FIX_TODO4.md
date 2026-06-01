@@ -363,7 +363,7 @@ Keep the checklist unchecked.
 ## 4.4 Acceptance
 
 - [ ] Large-font walkthrough passed and is documented, or
-- [ ] Large-font walkthrough is explicitly documented as NOT RUN and remains unchecked.
+- [x] Large-font walkthrough is explicitly documented as NOT RUN and remains unchecked.
 
 ---
 
