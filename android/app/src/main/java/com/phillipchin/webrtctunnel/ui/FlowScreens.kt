@@ -345,7 +345,7 @@ private fun ForwardsStepContent(
 private fun PolicyStepContent(vm: SetupViewModel, state: SetupWizardState, networkStatus: NetworkStatus) {
     var showMeteredWarningDialog by remember { mutableStateOf(false) }
     StatusCard {
-        Text("Current network: ${networkStatus.networkType}")
+        Text("Current network: ${mapNetworkTypeLabel(networkStatus.networkType)}")
         Text(if (networkStatus.isMetered) "Metered" else "Unmetered")
         Text(if (networkStatus.tunnelAllowed) "Tunnel allowed" else "Tunnel blocked")
         networkStatus.blockReason?.let { Text("Reason: $it") }
@@ -416,7 +416,7 @@ private fun ReviewStepContent(state: SetupWizardState, forwards: List<ForwardCon
             Text("Forwards", style = MaterialTheme.typography.titleMedium)
             Text("Enabled: ${forwards.count { it.enabled }} / ${forwards.size}")
             forwards.filter { it.enabled }.forEach { forward ->
-                Text("127.0.0.1:${forward.localPort} -> ${forward.remoteForwardId}")
+                Text("${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}")
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.phillipchin.webrtctunnel.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,21 +76,37 @@ fun StatusCard(content: @Composable () -> Unit) {
 fun NetworkStatusCard(content: @Composable () -> Unit) = StatusCard(content = content)
 
 @Composable
-fun ForwardSummaryRow(title: String, subtitle: String, status: String) {
+fun ForwardSummaryRow(
+    title: String,
+    subtitle: String,
+    status: String,
+    statusColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    onClick: (() -> Unit)? = null,
+) {
+    val rowModifier = if (onClick != null) {
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+    } else {
+        Modifier.fillMaxWidth()
+    }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = rowModifier,
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
-        Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = statusColor,
+            ) {
+                Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+            }
+            if (onClick != null) {
+                Text("›", style = MaterialTheme.typography.titleLarge, color = Color(0xFF6B7280))
+            }
         }
     }
 }

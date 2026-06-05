@@ -115,7 +115,7 @@ private fun isBrowserOpenable(forward: ForwardConfig): Boolean {
     return listOf("http", "web", "api", "llama", "ollama").any { token -> name.contains(token) }
 }
 
-private fun mapNetworkTypeLabel(networkType: NetworkType): String = when (networkType) {
+internal fun mapNetworkTypeLabel(networkType: NetworkType): String = when (networkType) {
     NetworkType.UnmeteredWifi -> "Wi-Fi"
     NetworkType.MeteredWifi -> "Metered Wi-Fi"
     NetworkType.Cellular -> "Cellular"
@@ -123,7 +123,7 @@ private fun mapNetworkTypeLabel(networkType: NetworkType): String = when (networ
     NetworkType.Unknown -> "Unknown"
 }
 
-private fun mapForwardListenLabel(state: String): String = when (state.lowercase()) {
+internal fun mapForwardListenLabel(state: String): String = when (state.lowercase()) {
     "listening" -> "Listening"
     "stopped" -> "Stopped"
     "error" -> "Error"
@@ -180,6 +180,7 @@ fun HomeScreen(
     onOpenSetup: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenForwardDetails: (String) -> Unit,
 ) {
     val status by vm.status.collectAsStateWithLifecycle()
     val configuredForwards by vm.configuredForwards.collectAsStateWithLifecycle()
@@ -192,7 +193,16 @@ fun HomeScreen(
     }
     var showMeteredWarningDialog by remember { mutableStateOf(false) }
     var showAddForwardDialog by remember { mutableStateOf(false) }
+    var displayedUptimeSeconds by remember { mutableStateOf(status.uptimeSeconds) }
+    val isRunning = status.serviceState in setOf(ServiceState.Connected, ServiceState.Listening, ServiceState.Serving)
     LaunchedEffect(Unit) { vm.refreshForwards() }
+    LaunchedEffect(isRunning, status.uptimeSeconds) {
+        displayedUptimeSeconds = status.uptimeSeconds
+        while (isRunning) {
+            delay(1_000L)
+            displayedUptimeSeconds = displayedUptimeSeconds?.let { it + 1L }
+        }
+    }
     ScrollableScreenSurface(padding) {
         SectionHeader("WebRTC Tunnel", "Current runtime state and quick actions")
         Spacer(Modifier.height(12.dp))
@@ -213,11 +223,11 @@ fun HomeScreen(
                 }
             }
             Text("Mode: ${if (status.mode == TunnelMode.Offer) "Offer (client)" else "Answer (server)"}")
-            Text("Remote peer: ${status.remotePeerId ?: "-"}")
+            Text("Remote peer: ${status.remotePeerId ?: "Not configured"}")
             if (status.mode != TunnelMode.Offer) {
                 Text("Active sessions: ${status.activeSessionCount}")
             }
-            status.uptimeSeconds?.let { Text("Uptime: ${formatUptime(it)}") }
+            displayedUptimeSeconds?.let { Text("Uptime: ${formatUptime(it)}") }
         }
         Spacer(Modifier.height(12.dp))
         NetworkStatusCard {
@@ -249,10 +259,13 @@ fun HomeScreen(
                 EmptyStateCard("No forwards configured.")
             } else {
                 displayedForwards.forEach { (forward, runtime) ->
+                    val stateLabel = mapForwardListenLabel(runtime?.listenState?.name ?: if (forward.enabled) "configured" else "disabled")
                     ForwardSummaryRow(
                         title = forward.name,
                         subtitle = "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
-                        status = mapForwardListenLabel(runtime?.listenState?.name ?: if (forward.enabled) "configured" else "disabled"),
+                        status = stateLabel,
+                        statusColor = stateColorToken(stateLabel),
+                        onClick = { onOpenForwardDetails(forward.id) },
                     )
                 }
             }
@@ -565,7 +578,16 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
         context.startActivity(share)
     }
 
-    ScrollableScreenSurface(padding) {
+    val visibleLogs = logs.filterNot { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
+    val debugHidden = logs.any { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(horizontal = 16.dp),
+    ) {
+        Spacer(Modifier.height(16.dp))
         SectionHeader("Logs", "Redacted runtime events")
         Spacer(Modifier.height(8.dp))
         Row(
@@ -611,16 +633,17 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
-        val visibleLogs = logs.filterNot { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
-        val debugHidden = logs.any { it.level.equals("debug", true) && !prefs.debugLogsEnabled }
         if (visibleLogs.isEmpty() && !debugHidden) {
             EmptyStateCard("No logs available.")
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (debugHidden) {
-                    EmptyStateCard("Debug logs are hidden. Enable Debug logs in Advanced to see them.")
+                    item { EmptyStateCard("Debug logs are hidden. Enable Debug logs in Advanced to see them.") }
                 }
-                visibleLogs.forEach { event ->
+                items(visibleLogs) { event ->
                     val levelColor = when (event.level.lowercase()) {
                         "warn" -> Color(0xFFF59E0B)
                         "error" -> Color(0xFFD32F2F)
@@ -635,6 +658,7 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
                 }
             }
         }
+        Spacer(Modifier.height(16.dp))
     }
 }
 
@@ -789,11 +813,10 @@ fun NetworkPolicyScreen(padding: PaddingValues, vm: NetworkPolicyViewModel) {
         SectionHeader("Network Policy", "Current network and tunnel policy")
         Spacer(Modifier.height(8.dp))
         NetworkStatusCard {
-            Text("Current network: ${status.networkType}")
+            Text("Current network: ${mapNetworkTypeLabel(status.networkType)}")
             Text(if (status.isMetered) "Metered" else "Unmetered")
             Text(if (status.tunnelAllowed) "Tunnel allowed" else "Tunnel blocked")
             Text("Reason: ${status.blockReason ?: "None"}")
-            Text("Unknown network is blocked.")
         }
         Spacer(Modifier.height(12.dp))
         PreferenceSwitch(
