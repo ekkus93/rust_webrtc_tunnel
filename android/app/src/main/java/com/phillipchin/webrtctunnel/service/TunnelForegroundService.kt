@@ -87,7 +87,7 @@ class TunnelForegroundService : Service() {
             ACTION_START_OFFER -> serviceScope.launch { startOffer() }
             ACTION_START_ANSWER -> {
                 publishError(
-                    message = "Answer mode is not available in Android v1",
+                    message = "Answer mode is not available on Android",
                     code = "answer_mode_disabled",
                 )
                 stopSelf(startId)
@@ -197,7 +197,7 @@ class TunnelForegroundService : Service() {
 
     private fun startAnswer() {
         publishError(
-            message = "Answer mode is not available in Android v1",
+            message = "Answer mode is not available on Android",
             code = "answer_mode_disabled",
         )
     }

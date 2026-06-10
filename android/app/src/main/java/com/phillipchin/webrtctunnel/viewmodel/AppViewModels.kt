@@ -667,13 +667,16 @@ class ForwardsViewModel(private val deps: AppDependencies) : ViewModel() {
 
     fun testLocalPort(forward: ForwardConfig) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Connect to the configured local host (blank falls back to loopback),
+            // and report the host actually tested rather than a hardcoded address.
+            val host = forward.localHost.trim().ifBlank { "127.0.0.1" }
             val resultMessage = runCatching {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", forward.localPort), 1200)
+                    socket.connect(InetSocketAddress(host, forward.localPort), 1200)
                 }
-                "Local port test succeeded for 127.0.0.1:${forward.localPort}"
+                "Local port test succeeded for $host:${forward.localPort}"
             }.getOrElse {
-                "Local port test failed for 127.0.0.1:${forward.localPort}: ${it.message}"
+                "Local port test failed for $host:${forward.localPort}: ${it.message}"
             }
             _message.value = SensitiveDataRedactor.redactText(resultMessage)
         }

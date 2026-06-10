@@ -75,12 +75,39 @@ fun StatusCard(content: @Composable () -> Unit) {
 @Composable
 fun NetworkStatusCard(content: @Composable () -> Unit) = StatusCard(content = content)
 
+/**
+ * Container/content color pair for a status chip. Both are set explicitly so chip
+ * text stays readable regardless of theme — never rely on [Surface] to infer a
+ * readable content color from an arbitrary custom container color.
+ */
+data class StatusChipColors(val container: Color, val content: Color)
+
+/** Contrast-safe container/content colors for a forward status chip label. */
+fun forwardStatusChipColors(label: String): StatusChipColors = when {
+    label.contains("listening", ignoreCase = true) ||
+        label.contains("connected", ignoreCase = true) ||
+        label.contains("serving", ignoreCase = true) ->
+        StatusChipColors(Success, Color.White)
+    label.contains("error", ignoreCase = true) ||
+        label.contains("invalid", ignoreCase = true) ||
+        label.contains("attention", ignoreCase = true) ->
+        StatusChipColors(Error, Color.White)
+    label.contains("paused", ignoreCase = true) ||
+        label.contains("starting", ignoreCase = true) ->
+        StatusChipColors(Warning, Color(0xFF1F2937))
+    // Neutral pair for Stopped / Disabled / Configured and any unknown label.
+    else -> StatusChipColors(Color(0xFFE5E7EB), Color(0xFF374151))
+}
+
 @Composable
 fun ForwardSummaryRow(
     title: String,
     subtitle: String,
     status: String,
-    statusColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    statusColors: StatusChipColors = StatusChipColors(
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.onPrimaryContainer,
+    ),
     onClick: (() -> Unit)? = null,
 ) {
     val rowModifier = if (onClick != null) {
@@ -100,9 +127,15 @@ fun ForwardSummaryRow(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Surface(
                 shape = RoundedCornerShape(999.dp),
-                color = statusColor,
+                color = statusColors.container,
+                contentColor = statusColors.content,
             ) {
-                Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+                Text(
+                    status,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = statusColors.content,
+                )
             }
             if (onClick != null) {
                 Text("›", style = MaterialTheme.typography.titleLarge, color = Color(0xFF6B7280))

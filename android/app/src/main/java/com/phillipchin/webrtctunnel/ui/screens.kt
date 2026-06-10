@@ -118,6 +118,24 @@ private fun isBrowserOpenable(forward: ForwardConfig): Boolean {
     return listOf("http", "web", "api", "llama", "ollama").any { token -> name.contains(token) }
 }
 
+/** Display/copy address for a local forward, using the host exactly as configured. */
+internal fun localForwardAddress(forward: ForwardConfig): String =
+    "${forward.localHost}:${forward.localPort}"
+
+/**
+ * Host to open in a browser. Wildcard/unspecified bind addresses are normalized to
+ * loopback since they are not reachable as a destination. Validation currently only
+ * permits `127.0.0.1`/`localhost`, so the wildcard cases are future-proofing.
+ */
+internal fun browserHostForLocalForward(host: String): String = when (host.trim().lowercase()) {
+    "", "0.0.0.0", "::", "[::]" -> "127.0.0.1"
+    else -> host.trim()
+}
+
+/** Browser URL for a local forward, with the host normalized for reachability. */
+internal fun browserUrlForForward(forward: ForwardConfig): String =
+    "http://${browserHostForLocalForward(forward.localHost)}:${forward.localPort}"
+
 internal fun mapNetworkTypeLabel(networkType: NetworkType): String = when (networkType) {
     NetworkType.UnmeteredWifi -> "Wi-Fi"
     NetworkType.MeteredWifi -> "Metered Wi-Fi"
@@ -267,7 +285,7 @@ fun HomeScreen(
                         title = forward.name,
                         subtitle = "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
                         status = stateLabel,
-                        statusColor = stateColorToken(stateLabel),
+                        statusColors = forwardStatusChipColors(stateLabel),
                         onClick = { onOpenForwardDetails(forward.id) },
                     )
                 }
@@ -293,7 +311,7 @@ fun HomeScreen(
             onAllowMeteredTemporary = { showMeteredWarningDialog = true },
             onOpenBrowser = browserForward?.let {
                 {
-                    val url = "http://127.0.0.1:${it.localPort}"
+                    val url = browserUrlForForward(it)
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
             },
@@ -469,8 +487,8 @@ fun ForwardDetailsScreen(
         }
         SectionHeader(forward.name, "Forward details")
         Spacer(Modifier.height(12.dp))
-        val localAddress = "${forward.localHost}:${forward.localPort}"
-        val browserUrl = "http://$localAddress"
+        val localAddress = localForwardAddress(forward)
+        val browserUrl = browserUrlForForward(forward)
         val canOpenBrowser = isBrowserOpenable(forward)
         StatusCard {
             Text("Status: ${runtime?.listenState ?: if (forward.enabled) "Configured" else "Disabled"}")
@@ -638,32 +656,31 @@ fun LogsScreen(padding: PaddingValues, vm: LogsViewModel, networkVm: NetworkPoli
         }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
-        if (visibleLogs.isEmpty() && !debugHidden) {
-            EmptyStateCard("No logs available.")
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (debugHidden) {
-                    item { EmptyStateCard("Debug logs are hidden. Enable Debug logs in Advanced to see them.") }
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+        ) {
+            if (debugHidden) {
+                item { EmptyStateCard("Debug logs are hidden. Enable Debug logs in Advanced to see them.") }
+            }
+            if (visibleLogs.isEmpty() && !debugHidden) {
+                item { EmptyStateCard("No logs available.") }
+            }
+            items(visibleLogs) { event ->
+                val levelColor = when (event.level.lowercase()) {
+                    "warn" -> Color(0xFFF59E0B)
+                    "error" -> Color(0xFFD32F2F)
+                    "debug" -> Color(0xFF6B7280)
+                    else -> MaterialTheme.colorScheme.onSurface
                 }
-                items(visibleLogs) { event ->
-                    val levelColor = when (event.level.lowercase()) {
-                        "warn" -> Color(0xFFF59E0B)
-                        "error" -> Color(0xFFD32F2F)
-                        "debug" -> Color(0xFF6B7280)
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
-                    StatusCard {
-                        Text(formatLogTimestamp(event.unixMs), style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
-                        Text(event.level.uppercase(), color = levelColor, style = MaterialTheme.typography.labelLarge)
-                        Text(SensitiveDataRedactor.redactText(event.message))
-                    }
+                StatusCard {
+                    Text(formatLogTimestamp(event.unixMs), style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
+                    Text(event.level.uppercase(), color = levelColor, style = MaterialTheme.typography.labelLarge)
+                    Text(SensitiveDataRedactor.redactText(event.message))
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
     }
 }
 
