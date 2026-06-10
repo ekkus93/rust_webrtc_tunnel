@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use p2p_core::{AppConfig, DaemonState, NodeRole};
 use p2p_crypto::{AuthorizedKeys, IdentityFile};
-use p2p_daemon::DaemonStatus;
+use p2p_daemon::{DaemonStatus, ForwardListenState};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
@@ -42,6 +42,29 @@ pub struct AndroidRuntimeStatus {
     pub mqtt_connected: bool,
     pub active_session_count: usize,
     pub session_capacity: Option<usize>,
+    /// Per-forward runtime status (offer role). Empty unless the daemon is running
+    /// and reporting forwards.
+    pub forwards: Vec<AndroidForwardRuntimeStatus>,
+}
+
+/// Per-forward runtime status surfaced to the Android UI. Joins the daemon's
+/// per-forward listen state with the configured local host/port. Carries no secrets.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AndroidForwardRuntimeStatus {
+    pub id: String,
+    pub local_host: String,
+    pub local_port: u16,
+    pub listen_state: String,
+    pub last_error: Option<String>,
+}
+
+fn forward_listen_state_str(state: ForwardListenState) -> String {
+    match state {
+        ForwardListenState::Listening => "listening",
+        ForwardListenState::Stopped => "stopped",
+        ForwardListenState::Error => "error",
+    }
+    .to_owned()
 }
 
 /// Map the daemon's connection state machine onto the coarse mobile runtime state
@@ -82,6 +105,9 @@ struct RuntimeInner {
     /// Latest daemon status from the running offer daemon, if any. Overlaid onto the
     /// controller-owned lifecycle state in [`RuntimeInner::snapshot_status`].
     status_rx: Option<tokio::sync::watch::Receiver<DaemonStatus>>,
+    /// Configured offer forwards `(id, local_host, local_port)` captured at start,
+    /// used to enrich the daemon's per-forward status with host/port for the UI.
+    forward_config: Vec<(String, String, u16)>,
 }
 
 impl RuntimeInner {
@@ -97,10 +123,30 @@ impl RuntimeInner {
                 status.active_session_count = daemon.active_session_count;
                 status.session_capacity = Some(daemon.session_capacity);
                 status.state = android_state_from_daemon(daemon.current_state);
+                status.forwards = daemon
+                    .forwards
+                    .iter()
+                    .map(|forward| {
+                        let (local_host, local_port) = self
+                            .forward_config
+                            .iter()
+                            .find(|(id, _, _)| id == &forward.id)
+                            .map(|(_, host, port)| (host.clone(), *port))
+                            .unwrap_or_default();
+                        AndroidForwardRuntimeStatus {
+                            id: forward.id.clone(),
+                            local_host,
+                            local_port,
+                            listen_state: forward_listen_state_str(forward.listen_state),
+                            last_error: forward.last_error.clone(),
+                        }
+                    })
+                    .collect();
             }
             _ => {
                 status.mqtt_connected = false;
                 status.active_session_count = 0;
+                status.forwards = Vec::new();
             }
         }
         status
@@ -130,6 +176,7 @@ impl Default for RuntimeInner {
             task: None,
             runtime: None,
             status_rx: None,
+            forward_config: Vec::new(),
         }
     }
 }
@@ -310,6 +357,16 @@ impl AndroidTunnelController {
         inner.task = Some(task);
         inner.runtime = Some(runtime);
         inner.status_rx = Some(status_rx);
+        inner.forward_config = config
+            .forwards
+            .iter()
+            .filter_map(|forward| {
+                forward
+                    .offer
+                    .as_ref()
+                    .map(|offer| (forward.id.clone(), offer.listen_host.clone(), offer.listen_port))
+            })
+            .collect();
         inner.logs.push_back(AndroidLogEvent {
             unix_ms: unix_ms(),
             level: "info".to_owned(),
@@ -328,6 +385,7 @@ impl AndroidTunnelController {
             }
             inner.runtime = None;
             inner.status_rx = None;
+            inner.forward_config = Vec::new();
             inner.state.state = AndroidRuntimeState::Stopped;
             inner.state.mode = None;
             inner.state.active = false;
@@ -356,6 +414,7 @@ impl AndroidTunnelController {
             mqtt_connected: false,
             active_session_count: 0,
             session_capacity: None,
+            forwards: Vec::new(),
         })
     }
 

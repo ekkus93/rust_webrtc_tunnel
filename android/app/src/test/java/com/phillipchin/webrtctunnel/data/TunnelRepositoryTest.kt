@@ -2,6 +2,7 @@ package com.phillipchin.webrtctunnel.data
 
 import androidx.test.core.app.ApplicationProvider
 import com.phillipchin.webrtctunnel.TunnelNativeBridge
+import com.phillipchin.webrtctunnel.model.ListenState
 import com.phillipchin.webrtctunnel.model.LogEvent
 import com.phillipchin.webrtctunnel.model.NativeLogEventDto
 import com.phillipchin.webrtctunnel.model.NativeRuntimeStatusDto
@@ -203,6 +204,42 @@ class TunnelRepositoryTest {
         assertEquals(ServiceState.Connected, status.serviceState)
         assertEquals(false, status.mqttConnected)
         assertEquals(0, status.activeSessionCount)
+    }
+
+    @Test
+    fun refreshStatusMapsForwardRuntimeStatus() {
+        bridge.statusPayload = """
+            {"state":"running","mode":"offer","active":true,
+             "forwards":[
+               {"id":"web","local_host":"127.0.0.1","local_port":8080,"listen_state":"listening"},
+               {"id":"ssh","local_host":"127.0.0.1","local_port":2222,"listen_state":"error","last_error":"Address already in use"}
+             ]}
+        """.trimIndent()
+        repository.refreshStatus()
+        val forwards = repository.status.value.forwards
+        assertEquals(2, forwards.size)
+        val web = forwards.first { it.id == "web" }
+        assertEquals(ListenState.Listening, web.listenState)
+        assertEquals(8080, web.localPort)
+        val ssh = forwards.first { it.id == "ssh" }
+        assertEquals(ListenState.Error, ssh.listenState)
+        assertTrue(ssh.lastError != null)
+    }
+
+    @Test
+    fun refreshStatusForwardUnknownListenStateFallsBack() {
+        bridge.statusPayload =
+            """{"state":"running","active":true,"forwards":[{"id":"x","listen_state":"weird"}]}"""
+        repository.refreshStatus()
+        val forward = repository.status.value.forwards.single()
+        assertEquals(ListenState.Stopped, forward.listenState)
+    }
+
+    @Test
+    fun refreshStatusWithoutForwardsLeavesEmptyList() {
+        bridge.statusPayload = statusJson("running", "offer")
+        repository.refreshStatus()
+        assertTrue(repository.status.value.forwards.isEmpty())
     }
 
     @Test

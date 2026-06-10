@@ -3,6 +3,8 @@ package com.phillipchin.webrtctunnel.data
 import android.content.Context
 import com.phillipchin.webrtctunnel.RustTunnelBridge
 import com.phillipchin.webrtctunnel.TunnelNativeBridge
+import com.phillipchin.webrtctunnel.model.ForwardStatus
+import com.phillipchin.webrtctunnel.model.ListenState
 import com.phillipchin.webrtctunnel.model.LogEvent
 import com.phillipchin.webrtctunnel.model.NativeLogEventDto
 import com.phillipchin.webrtctunnel.model.NativeRuntimeStatusDto
@@ -157,6 +159,16 @@ class TunnelRepository(
     private fun isPolicyPausedState(state: ServiceState): Boolean =
         state == ServiceState.PausedMeteredBlocked || state == ServiceState.NoNetwork
 
+    private fun mapNativeListenState(state: String, lastError: String?): ListenState =
+        when (state.lowercase()) {
+            "listening" -> ListenState.Listening
+            "stopped" -> ListenState.Stopped
+            "error" -> ListenState.Error
+            "disabled" -> ListenState.Disabled
+            "paused" -> ListenState.Paused
+            else -> if (lastError != null) ListenState.Error else ListenState.Stopped
+        }
+
     private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): TunnelStatus {
         val modeValue = when (mode) {
             "answer" -> TunnelMode.Answer
@@ -173,6 +185,18 @@ class TunnelRepository(
             val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
             elapsedMs / 1000L
         }
+        val mappedForwards = forwards.map { forward ->
+            ForwardStatus(
+                id = forward.id,
+                name = forward.id,
+                localHost = forward.local_host,
+                localPort = forward.local_port,
+                remoteForwardId = forward.id,
+                enabled = forward.listen_state.lowercase() != "disabled",
+                listenState = mapNativeListenState(forward.listen_state, forward.last_error),
+                lastError = forward.last_error?.let(SensitiveDataRedactor::redactText),
+            )
+        }
         return previous.copy(
             serviceState = stateValue,
             mode = modeValue,
@@ -180,6 +204,7 @@ class TunnelRepository(
             activeSessionCount = active_session_count,
             sessionCapacity = session_capacity ?: previous.sessionCapacity,
             uptimeSeconds = uptimeSeconds,
+            forwards = mappedForwards,
             lastError = last_error?.let {
                 TunnelError(code = "native_runtime_error", message = it, details = config_path)
             },

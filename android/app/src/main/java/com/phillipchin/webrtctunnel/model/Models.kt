@@ -86,6 +86,18 @@ data class NativeRuntimeStatusDto(
     val mqtt_connected: Boolean = false,
     val active_session_count: Int = 0,
     val session_capacity: Int? = null,
+    // Per-forward runtime status (offer role). Defaulted for backward compatibility
+    // with native status JSON that predates per-forward reporting.
+    val forwards: List<NativeRuntimeForwardStatusDto> = emptyList(),
+)
+
+@Serializable
+data class NativeRuntimeForwardStatusDto(
+    val id: String,
+    val local_host: String = "127.0.0.1",
+    val local_port: Int = 0,
+    val listen_state: String = "stopped",
+    val last_error: String? = null,
 )
 
 @Serializable

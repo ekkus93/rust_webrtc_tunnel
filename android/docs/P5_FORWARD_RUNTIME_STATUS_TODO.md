@@ -121,38 +121,44 @@ status JSON, the status file, logs, or UI. Do not enable Android answer mode.
 `android/.../ui/screens.kt`.
 
 **Mobile tasks:**
-- [ ] Add `AndroidForwardRuntimeStatus` and
-      `forwards: Vec<AndroidForwardRuntimeStatus>` to `AndroidRuntimeStatus`,
-      snake_case JSON. Include config-derived `name`, `local_host`, `local_port`,
-      `remote_forward_id`, `enabled` plus runtime `listen_state`, `last_error`.
-- [ ] Derive these from `DaemonStatus.forwards` joined with the loaded config.
+- [x] Added `AndroidForwardRuntimeStatus { id, local_host, local_port, listen_state,
+      last_error }` and `forwards: Vec<...>` to `AndroidRuntimeStatus` (snake_case).
+      Scope note: the Rust config has no `name`/`enabled`/`remote_forward_id`, so the
+      native struct carries id + config-derived host/port + runtime state; the UI
+      already supplies display name/id from its own config by joining on `id`.
+- [x] Joined `DaemonStatus.forwards` (id → listen_state/last_error) with the offer
+      forwards captured at start (`id → host/port`) in `snapshot_status`; cleared on
+      stop / when inactive.
 
 **Kotlin tasks:**
-- [ ] Add `NativeRuntimeForwardStatusDto` (see spec §3.2).
-- [ ] Add `val forwards: List<NativeRuntimeForwardStatusDto> = emptyList()` to
-      `NativeRuntimeStatusDto` (defaulted → backward compatible).
-- [ ] Map native forward DTOs → `TunnelStatus.forwards` (`ForwardStatus`) in
-      `toTunnelStatus()`.
-- [ ] Tolerant listen-state mapper (`listening`/`stopped`/`error`/`disabled`/
-      `paused` → enum; unknown → `Stopped`, or `Error` if `last_error` present).
-- [ ] Redact `last_error` via `SensitiveDataRedactor` before storing.
+- [x] Added `NativeRuntimeForwardStatusDto { id, local_host, local_port,
+      listen_state, last_error }` (defaulted fields).
+- [x] Added `val forwards: List<NativeRuntimeForwardStatusDto> = emptyList()` to
+      `NativeRuntimeStatusDto` (backward compatible).
+- [x] Mapped native forward DTOs → `TunnelStatus.forwards` in `toTunnelStatus()`
+      (name/remoteForwardId fall back to id; the UI shows config values).
+- [x] Tolerant `mapNativeListenState` (listening/stopped/error/disabled/paused →
+      enum; unknown → `Stopped`, or `Error` when `last_error` present).
+- [x] Redact `last_error` via `SensitiveDataRedactor.redactText` (redactStatus does
+      not recurse into forwards).
 
 **UI tasks:**
-- [ ] Keep the `Configured`/`Disabled` label only as a fallback for forwards with
-      no runtime entry; otherwise render the real state via
-      `forwardStatusChipColors()`.
-- [ ] Confirm the Phase B policy-pause safeguard still holds with forwards present.
+- [x] No change needed: the Home/Forwards/Details screens already join
+      `status.forwards` by id and fall back to `Configured`/`Disabled` only when no
+      runtime entry exists; chips now render real state via `forwardStatusChipColors`.
+- [x] Phase B policy-pause safeguard still holds (forwards ride along the same copy).
 
 **Tests:**
-- [ ] Kotlin: decode JSON **with** `forwards` → populated; **without** → empty list.
-- [ ] Kotlin: unknown `listen_state` does not crash.
-- [ ] Rust: `p2p-mobile` status JSON includes `forwards`; fresh → `[]`; running →
-      populated; secret-safe.
+- [x] Kotlin: decode JSON **with** `forwards` → populated (`...MapsForwardRuntimeStatus`);
+      **without** → empty list (`...WithoutForwardsLeavesEmptyList`).
+- [x] Kotlin: unknown `listen_state` falls back (`...ForwardUnknownListenStateFallsBack`).
+- [x] Rust: `AndroidRuntimeStatus.forwards` populated when active / empty when
+      inactive (snapshot overlay tests); status JSON secret-safe.
 
 **Acceptance:**
-- [ ] Running tunnel shows real per-forward `Listening`/`Error`/`Stopped`.
-- [ ] Disabled forwards still show `Disabled` from config.
-- [ ] Older native JSON without `forwards` still decodes.
+- [x] Running tunnel shows real per-forward `Listening`/`Error`/`Stopped`.
+- [x] Disabled forwards still show `Disabled` from config (UI fallback by id).
+- [x] Older native JSON without `forwards` still decodes.
 
 ---
 
@@ -168,20 +174,24 @@ cd android
 ./gradlew --no-daemon assembleDebug
 ```
 
-- [ ] `cargo test -p p2p-daemon` passes.
-- [ ] `cargo test -p p2p-mobile` passes.
-- [ ] Full `cargo test` passes (or unrelated pre-existing failures documented).
-- [ ] `lintDebug`, `testDebugUnitTest`, `assembleDebug` pass.
+- [x] `cargo test -p p2p-daemon` passes (78 lib tests).
+- [x] `cargo test -p p2p-mobile` passes (19 + 6 tests).
+- [x] Full `cargo test` passes; `cargo fmt --check` clean.
+- [x] `lintDebug`, `testDebugUnitTest`, `assembleDebug` pass.
 
 ### Secret-safety spot checks
 ```bash
 # Status JSON / runtime status must not carry secret material.
 grep -RnE "identity|private|password|token|secret" crates/p2p-daemon/src/status.rs
 ```
-- [ ] No secret values are placed into `DaemonStatus`/`ForwardRuntimeStatus`/
-      `last_error` (matches above are field plumbing/tests only, not leaked values).
+- [x] No secret values are placed into `DaemonStatus`/`ForwardRuntimeStatus`/
+      `AndroidForwardRuntimeStatus`/`last_error` (grep matches are pre-existing
+      identity plumbing + tests, not leaked values; status test asserts no
+      `private` in serialized output).
 
 ### Manual QA (offer mode, physical device if possible)
+> Not run in this environment (no device/broker). Automated coverage stands in:
+> bind soft-fail (Rust), snapshot overlay (Rust), forward decode/fallback (Kotlin).
 - [ ] Start tunnel; Home shows real MQTT/connection state, not "task spawned".
 - [ ] Each forward shows `Listening` only after its local port is actually bound.
 - [ ] Misconfigure one forward's local port to force a bind error (per D1); confirm
@@ -193,12 +203,15 @@ grep -RnE "identity|private|password|token|secret" crates/p2p-daemon/src/status.
 
 ## Definition of done
 
-- [ ] Daemon delivers `DaemonStatus` to `AndroidTunnelController` over a channel.
-- [ ] Mobile status no longer fabricates `mqttConnected`/`activeSessionCount`/state.
-- [ ] Per-forward `Listening`/`Stopped`/`Error` sourced from real offer binds and
+- [x] Daemon delivers `DaemonStatus` to `AndroidTunnelController` over a watch
+      channel (offer path; answer disabled on Android — D4).
+- [x] Mobile status no longer fabricates `mqttConnected`/`activeSessionCount`/state.
+- [x] Per-forward `Listening`/`Stopped`/`Error` sourced from real offer binds and
       surfaced to the UI; disabled forwards derive `Disabled` from config.
-- [ ] Older native JSON without `forwards` still decodes on Kotlin.
-- [ ] All Rust + Android tests, lint, and debug build pass.
-- [ ] No secret material in status JSON, status file, logs, or UI.
-- [ ] UIUX2 Phase A/B behavior preserved.
-- [ ] CLI behavior unchanged except additive, backward-compatible status fields.
+- [x] Older native JSON without `forwards` still decodes on Kotlin.
+- [x] All Rust + Android tests, lint, and debug build pass.
+- [x] No secret material in status JSON, status file, logs, or UI.
+- [x] UIUX2 Phase A/B behavior preserved.
+- [x] CLI behavior unchanged except the additive, backward-compatible `forwards`
+      status-file field.
+- [ ] Manual on-device QA (above) — pending hardware.
