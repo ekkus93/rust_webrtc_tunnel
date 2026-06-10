@@ -189,15 +189,26 @@ grep -RnE "identity|private|password|token|secret" crates/p2p-daemon/src/status.
       identity plumbing + tests, not leaked values; status test asserts no
       `private` in serialized output).
 
-### Manual QA (offer mode, physical device if possible)
-> Not run in this environment (no device/broker). Automated coverage stands in:
-> bind soft-fail (Rust), snapshot overlay (Rust), forward decode/fallback (Kotlin).
-- [ ] Start tunnel; Home shows real MQTT/connection state, not "task spawned".
-- [ ] Each forward shows `Listening` only after its local port is actually bound.
-- [ ] Misconfigure one forward's local port to force a bind error (per D1); confirm
-      that forward shows `Error` while others show `Listening`.
-- [ ] Stop tunnel; forwards transition to `Stopped`/cleared.
-- [ ] Export diagnostics; confirm no private identity or secrets.
+### Manual QA (offer mode)
+> Partially run on the `Medium_Phone_API_36.0` x86_64 emulator (`emulator-5554`).
+> The freshly cargo-ndk-built `libp2p_mobile.so` (with all P5 changes) was installed
+> and exercised. Items needing a live MQTT broker + remote peer + provisioned
+> identity cannot be reached here (the offer daemon connects MQTT and reads the
+> identity before binding listeners), so the `Listening`/connected transitions
+> remain covered only by the headless tests below.
+- [x] App + native `.so` load and run on-device (no `UnsatisfiedLinkError`/crash);
+      Home/Forwards/Logs render; forward shows `Configured` fallback (no runtime
+      entry) via the contrast-safe chip.
+- [x] Start with no provisioned identity → Home shows an **honest `Error`**, not a
+      fabricated `Connected` (validates the Phase 1 honesty fix on-device).
+- [x] Redaction verified on-device: the identity path is `***REDACTED***` in both
+      logcat and the UI error card.
+- [ ] Real MQTT/connected state — needs a reachable broker (covered headlessly by
+      `snapshot_status_overlays_daemon_status_when_active`).
+- [ ] Forward `Listening` after bind / per-forward `Error` while others listen —
+      needs broker+peer (covered headlessly by
+      `bind_offer_listeners_soft_fails_individual_forward`).
+- [ ] Stop → forwards `Stopped`/cleared — needs a running tunnel first.
 
 ---
 
@@ -214,4 +225,7 @@ grep -RnE "identity|private|password|token|secret" crates/p2p-daemon/src/status.
 - [x] UIUX2 Phase A/B behavior preserved.
 - [x] CLI behavior unchanged except the additive, backward-compatible `forwards`
       status-file field.
-- [ ] Manual on-device QA (above) — pending hardware.
+- [x] On-device smoke + honesty QA on the x86_64 emulator (native lib loads, honest
+      `Error` not fake `Connected`, redaction in UI/logcat).
+- [ ] Full on-device tunnel QA (live `Listening`/connected) — needs broker + peer +
+      provisioned identity; covered headlessly by Rust/Kotlin tests in the meantime.
