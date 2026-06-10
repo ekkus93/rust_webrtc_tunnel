@@ -28,3 +28,5 @@ android/.kotlin/
 android/app/build/
 android/app/src/main/jniLibs/
 android/*.hprof
+
+run_claude.sh
