@@ -77,6 +77,26 @@ signaling transport).
 
 ## Phase A — Hermetic desktop ↔ desktop over a real TLS broker
 
+> **✅ IMPLEMENTED (simplified, no docker-compose).** Built as a single self-contained
+> Rust integration test: `crates/p2p-daemon/tests/real_broker_tunnel.rs`,
+> `full_tunnel_over_real_tls_broker`. It:
+> - generates a throwaway CA + server cert at runtime with `rcgen` (dev-dep),
+> - starts **one** `eclipse-mosquitto:2` container with a TLS listener (`docker run`,
+>   removed via an RAII `Drop` guard) — no compose, no `bash` orchestration,
+> - runs the real `run_offer_daemon` / `run_answer_daemon` over `mqtts://localhost:<port>`
+>   (trusting the CA via `broker.tls.ca_file`), with an in-test echo target,
+> - asserts application data round-trips: client → offer listener → WebRTC → answer →
+>   echo target → back.
+> - **Auto-skips** (logs + passes) when Docker is absent, so plain `cargo test` stays
+>   green everywhere; CI just needs Docker (preinstalled on `ubuntu-latest`).
+>
+> Run: `cargo test -p p2p-daemon --test real_broker_tunnel`. Verified locally:
+> passes in ~2s, repeatable, leaves no containers behind. The original
+> docker-compose design (A1–A10 below) is **superseded** by this lighter approach;
+> kept for reference / if a multi-service local harness is wanted later.
+>
+> Dev-deps added to `crates/p2p-daemon/Cargo.toml`: `rcgen`, `tempfile`.
+
 ### A1 — PKI / certificate generation
 - [ ] Script `tests/e2e/docker/gen-certs.sh` that produces (idempotently, into a
       gitignored dir):
