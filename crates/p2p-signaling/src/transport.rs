@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fs;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use p2p_core::{AppConfig, MsgId, PeerId, SessionId};
@@ -8,7 +9,10 @@ use p2p_crypto::{
     derive_aead_key_from_shared_secret, encrypt_message, generate_ephemeral_secret,
     kid_from_signing_key, random_nonce, sign_message, verify_message,
 };
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
+use rumqttc::tokio_rustls::rustls::{ClientConfig, RootCertStore};
+use rumqttc::{
+    AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, TlsConfiguration, Transport,
+};
 use x25519_dalek::PublicKey as X25519PublicKey;
 
 use crate::ack::AckTracker;
@@ -392,7 +396,19 @@ fn build_tls_transport(config: &AppConfig) -> Result<Transport, SignalingError> 
             "broker TLS client certificate auth requires broker.tls.ca_file in v1".to_owned(),
         ));
     }
-    Ok(Transport::tls_with_default_config())
+    // No explicit CA: trust the compiled-in Mozilla root set (webpki-roots) instead
+    // of rumqttc's default, whose OS-native trust store is empty on Android. This
+    // keeps default trust working cross-platform; private CAs still use `ca_file`.
+    Ok(Transport::tls_with_config(TlsConfiguration::Rustls(Arc::new(default_roots_tls_config()))))
+}
+
+/// rustls client config trusting the webpki-roots Mozilla CA set, with no client
+/// auth. Mirrors how rumqttc builds its config (`ClientConfig::builder()`), so it
+/// resolves the same process crypto provider.
+fn default_roots_tls_config() -> ClientConfig {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()
 }
 
 #[derive(Debug)]
@@ -443,7 +459,7 @@ mod tests {
     use super::{
         EnvelopeFlags, InnerMessageBuilder, MqttSignalingTransport, OuterEnvelope, ReplayCache,
         ReplayStatus, SignalCodec, buffer_pending_own_topic_publish, build_mqtt_options,
-        own_topic_publish_payload, signal_topic,
+        default_roots_tls_config, own_topic_publish_payload, signal_topic,
     };
     use crate::{ErrorBody, MessageBody, OfferBody, SignalingError};
 
@@ -1098,6 +1114,15 @@ mod tests {
 
         let (options, _qos, _topic) = build_mqtt_options(&config).expect("options build");
         assert!(matches!(options.transport(), Transport::Tls(_)));
+    }
+
+    #[test]
+    fn default_roots_tls_config_trusts_nonempty_webpki_root_set() {
+        // Guards against shipping an empty trust store (the Android UnknownIssuer
+        // bug): the compiled-in Mozilla root set must be present.
+        assert!(!webpki_roots::TLS_SERVER_ROOTS.is_empty());
+        // Building the config must not panic (resolves a crypto provider).
+        let _config = default_roots_tls_config();
     }
 
     #[test]

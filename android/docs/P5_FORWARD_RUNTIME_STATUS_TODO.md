@@ -215,30 +215,34 @@ grep -RnE "identity|private|password|token|secret" crates/p2p-daemon/src/status.
 - [x] Theme finding: the app is **light-only** (`Theme.kt` uses only
       `lightColorScheme`, no `isSystemInDarkTheme`), so dark-mode chip contrast is
       not an actual concern; light-mode chip readability verified.
-- [~] Real MQTT/connected state — **attempted on-device against a real public TLS
-      broker** (`broker.emqx.io:8883`, DigiCert cert, openssl-verified). Drove the
-      full setup wizard via adb (in-app identity generate, broker host, validated
-      remote peer `answer-peer`) and tapped Start Tunnel. Result: honest `Error`
-      "signaling error: mqtt connection error: TLS: I/O: invalid peer certificate:
-      `UnknownIssuer`". **Discovered a pre-existing Android bug (unrelated to P5):**
-      the app never sets `broker.tls.ca_file` and has no CA-import UI, so the Rust
-      client uses `Transport::tls_with_default_config()`, whose native trust store
-      is empty on Android → every broker TLS handshake fails with `UnknownIssuer`.
-      So the app currently cannot connect to *any* MQTT broker on-device, which is
-      what blocks reaching `Listening`. (Headless coverage:
-      `snapshot_status_overlays_daemon_status_when_active`.) See "Discovered issue"
-      below.
-- [ ] Forward `Listening` after bind / per-forward `Error` while others listen —
-      needs broker+peer (covered headlessly by
-      `bind_offer_listeners_soft_fails_individual_forward`).
-- [ ] Stop → forwards `Stopped`/cleared — needs a running tunnel first.
+- [x] Real MQTT/connected state — **verified live on-device** against
+      `broker.emqx.io:8883` after the TLS-trust fix (see "Discovered issue" →
+      Fixed). Drove the full setup wizard via adb (in-app identity generate, broker
+      host, validated remote peer `answer-peer`), tapped Start Tunnel: Home → 
+      **Connected**, uptime ticking, `mqtt_connected` true. (Initial attempt before
+      the fix failed honestly with `UnknownIssuer`, which surfaced the bug.)
+- [x] Forward **`Listening`** after bind — verified live: Home/Forwards show the
+      "Llama server" forward as **Listening** (green chip) once the daemon bound its
+      local listener. Per-forward `Error` (soft-fail while others listen) not
+      reproduced on-device (single forward) — covered headlessly by
+      `bind_offer_listeners_soft_fails_individual_forward`.
+- [x] Stop → forwards revert: tapped Stop Tunnel → status `Stopped`, forward back to
+      `Configured` (snapshot resets when `status_rx`/`forward_config` clear).
 
 ---
 
-## Discovered issue (pre-existing, NOT P5) — Android MQTT TLS has no trust roots
+## Discovered issue (pre-existing, NOT P5) — Android MQTT TLS has no trust roots — FIXED
 
-Surfaced by on-device QA. Blocks all broker connectivity on Android, so it also
-blocks live `Listening`/connected QA (emulator or real phone).
+Surfaced by on-device QA. Blocked all broker connectivity on Android, which also
+blocked live `Listening`/connected QA. **Fixed** in `crates/p2p-signaling`: when
+`ca_file` is empty, `build_tls_transport` now builds a rustls `ClientConfig` seeded
+with `webpki-roots::TLS_SERVER_ROOTS` (compiled-in Mozilla roots) and passes it via
+`Transport::tls_with_config(TlsConfiguration::Rustls(..))`, instead of rumqttc's
+`tls_with_default_config()` whose OS-native store is empty on Android. The explicit
+`ca_file` path (private CAs) is unchanged. Tests:
+`default_roots_tls_config_trusts_nonempty_webpki_root_set`; existing default-roots
+tests still pass. **Re-verified live on the emulator: tunnel reaches Connected and
+the forward shows `Listening`.**
 
 - **Symptom:** Start Tunnel → `Error`: "mqtt connection error: TLS: I/O: invalid
   peer certificate: UnknownIssuer", even against a public broker with a

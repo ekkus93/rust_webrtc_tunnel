@@ -15,6 +15,7 @@ serde_cbor.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+webpki-roots.workspace = true
 x25519-dalek.workspace = true
 
 [dev-dependencies]
