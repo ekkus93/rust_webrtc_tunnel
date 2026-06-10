@@ -1,0 +1,66 @@
+name: p2p-e2e
+
+# Full two-peer tunnel over a real TLS broker, as separate containers:
+#   tester -> offer (local listener) -> WebRTC -> answer -> target (nginx)
+# offer and answer connect direct over the compose bridge (ICE host candidates),
+# so no STUN/TURN is needed. The broker is a real mosquitto TLS listener.
+
+services:
+  broker:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./generated/certs:/mosquitto/certs:ro
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test:
+        ["CMD", "mosquitto_pub", "--cafile", "/mosquitto/certs/ca.crt",
+         "-h", "localhost", "-p", "8883", "-t", "healthcheck", "-m", "1", "-q", "1"]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+      start_period: 2s
+
+  target:
+    image: nginx:alpine
+    volumes:
+      - ./generated/index.html:/usr/share/nginx/html/index.html:ro
+
+  answer:
+    image: ubuntu:24.04
+    depends_on:
+      broker:
+        condition: service_healthy
+      target:
+        condition: service_started
+    volumes:
+      - ../../../target/release:/p2pbin:ro
+      - ./generated:/e2e:ro
+    command:
+      ["/bin/sh", "-c",
+       "mkdir -p /var/lib/p2p/state /var/lib/p2p/log && exec /p2pbin/p2p-answer run --config /e2e/answer.toml"]
+
+  offer:
+    image: ubuntu:24.04
+    depends_on:
+      broker:
+        condition: service_healthy
+    volumes:
+      - ../../../target/release:/p2pbin:ro
+      - ./generated:/e2e:ro
+    command:
+      ["/bin/sh", "-c",
+       "mkdir -p /var/lib/p2p/state /var/lib/p2p/log && exec /p2pbin/p2p-offer run --config /e2e/offer.toml"]
+
+  # Shares the offer's network namespace so the offer's 127.0.0.1:8080 listener is
+  # reachable; asserts the tunnel delivers the target's content, then exits.
+  tester:
+    image: curlimages/curl:latest
+    network_mode: "service:offer"
+    depends_on:
+      offer:
+        condition: service_started
+      answer:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/e2e/tester.sh"]
+    volumes:
+      - ./generated:/e2e:ro

@@ -91,11 +91,19 @@ signaling transport).
 >   green everywhere; CI just needs Docker (preinstalled on `ubuntu-latest`).
 >
 > Run: `cargo test -p p2p-daemon --test real_broker_tunnel`. Verified locally:
-> passes in ~2s, repeatable, leaves no containers behind. The original
-> docker-compose design (A1–A10 below) is **superseded** by this lighter approach;
-> kept for reference / if a multi-service local harness is wanted later.
->
+> passes in ~2s, repeatable, leaves no containers behind.
 > Dev-deps added to `crates/p2p-daemon/Cargo.toml`: `rcgen`, `tempfile`.
+>
+> **Also implemented — docker-compose variant** (`tests/e2e/docker/`,
+> `run.sh` + `compose.yaml`): the same scenario with the offer and answer as
+> **separate containers** plus a real mosquitto TLS broker, an nginx target, and a
+> curl tester, wired on one compose bridge. `run.sh` generates certs/identities/
+> configs at runtime into `generated/` (gitignored), brings the stack up, asserts
+> the tester pulls the target's marker through the tunnel, and tears down. Verified
+> locally: passes repeatably, clean teardown. offer↔answer connect direct over the
+> bridge (no STUN/TURN). This realizes the A1–A10 design below as a multi-service
+> local playground; the `cargo test` above remains the CI-friendly path. See
+> `tests/e2e/README.md`.
 
 ### A1 — PKI / certificate generation
 - [ ] Script `tests/e2e/docker/gen-certs.sh` that produces (idempotently, into a

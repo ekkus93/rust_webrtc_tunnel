@@ -29,6 +29,37 @@ Requires Docker. If Docker is absent the test logs a skip and passes, so plain
 - run: cargo test -p p2p-daemon --test real_broker_tunnel
 ```
 
+### Phase A (docker-compose variant) — multi-container playground
+
+A heavier, multi-container version of the same scenario, for hands-on/local use:
+
+```
+tests/e2e/docker/run.sh
+```
+
+It runs the offer and answer as **separate containers** (plus a real mosquitto TLS
+broker, an nginx target, and a curl-based tester) wired on one compose bridge:
+
+```
+tester -> offer (local listener) -> WebRTC (over the bridge) -> answer -> target (nginx) -> back
+```
+
+`run.sh` generates a throwaway CA + broker cert, two peer identities + cross
+`authorized_keys`, and the two daemon configs into `tests/e2e/docker/generated/`
+(gitignored) at runtime, brings the stack up, and asserts the tester pulls the
+target's unique marker through the tunnel, then tears everything down.
+
+Notes:
+- offer↔answer connect **directly over the compose bridge** (ICE host candidates);
+  no STUN/TURN needed (unlike the emulator's NAT in Phase B).
+- Host-built release binaries (`target/release/p2p-{offer,answer}`) are mounted into
+  `ubuntu:24.04` (matching host glibc), so there's no slow in-Docker workspace build.
+  Built automatically if missing.
+- Requires `docker` + compose v2 and `openssl`. The tester runs in the offer's
+  network namespace so it reaches the offer's `127.0.0.1:8080` listener.
+- This is equivalent in coverage to the `cargo test` above; that test is the
+  CI-friendly path, this is the multi-service local playground.
+
 ## Phase B (smoke) — Android emulator against a real broker (local/manual)
 
 ```
