@@ -588,17 +588,21 @@ pub async fn run_answer_daemon_with_transport<T: DaemonSignalingTransport>(
                     continue;
                 };
                 handle_answer_daemon_payload(
-                    &config,
-                    &local_identity,
-                    &authorized_keys,
+                    &AnswerDeps {
+                        config: &config,
+                        local_identity: &local_identity,
+                        authorized_keys: &authorized_keys,
+                        event_tx: &event_tx,
+                    },
                     &codec,
                     &mut transport,
                     &mut ctx,
-                    &event_tx,
-                    &mut replay_cache,
-                    &mut sessions_by_id,
-                    &mut session_by_peer,
-                    &mut next_generation,
+                    &mut AnswerSessionRegistry {
+                        replay_cache: &mut replay_cache,
+                        sessions_by_id: &mut sessions_by_id,
+                        session_by_peer: &mut session_by_peer,
+                        next_generation: &mut next_generation,
+                    },
                     payload,
                 )
                 .await;
@@ -625,28 +629,46 @@ pub fn apply_env_overrides(config: &mut AppConfig) -> Result<(), ConfigError> {
     apply_override_pairs(config, env::vars())
 }
 
-#[allow(clippy::too_many_arguments)]
+// Long-lived borrows shared across answer-daemon signaling handling.
+struct AnswerDeps<'a> {
+    config: &'a Arc<AppConfig>,
+    local_identity: &'a Arc<IdentityFile>,
+    authorized_keys: &'a Arc<AuthorizedKeys>,
+    event_tx: &'a mpsc::Sender<AnswerSessionEvent>,
+}
+
+// Mutable answer-session registry state owned by the daemon loop.
+struct AnswerSessionRegistry<'a> {
+    replay_cache: &'a mut p2p_signaling::ReplayCache,
+    sessions_by_id: &'a mut HashMap<SessionId, AnswerSessionHandle>,
+    session_by_peer: &'a mut HashMap<PeerId, SessionId>,
+    next_generation: &'a mut u64,
+}
+
+// A decoded inbound offer with the envelope and authenticated sender it arrived with.
+struct IncomingOffer<'a> {
+    envelope: OuterEnvelope,
+    message: InnerMessage,
+    sender: AuthorizedKey,
+    offer: &'a OfferBody,
+}
+
 async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
-    config: &Arc<AppConfig>,
-    local_identity: &Arc<IdentityFile>,
-    authorized_keys: &Arc<AuthorizedKeys>,
+    deps: &AnswerDeps<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut T,
     ctx: &mut RuntimeContext<'_>,
-    event_tx: &mpsc::Sender<AnswerSessionEvent>,
-    replay_cache: &mut p2p_signaling::ReplayCache,
-    sessions_by_id: &mut HashMap<SessionId, AnswerSessionHandle>,
-    session_by_peer: &mut HashMap<PeerId, SessionId>,
-    next_generation: &mut u64,
+    registry: &mut AnswerSessionRegistry<'_>,
     payload: Vec<u8>,
 ) {
+    let &AnswerDeps { config, .. } = deps;
     tracing::debug!(
         payload_len = payload.len(),
         role = ?config.node.role,
         "received signaling payload in answer daemon"
     );
 
-    let decoded = match codec.decode_with_replay_status(&payload, replay_cache, None) {
+    let decoded = match codec.decode_with_replay_status(&payload, registry.replay_cache, None) {
         Ok(decoded) => decoded,
         Err(error) => {
             tracing::warn!(reason = %error, "rejecting signaling message");
@@ -664,7 +686,7 @@ async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
         "decoded answer-daemon signaling message"
     );
 
-    if let Some(handle) = sessions_by_id.get(&decoded.message.session_id) {
+    if let Some(handle) = registry.sessions_by_id.get(&decoded.message.session_id) {
         if handle.remote_peer_id != decoded.sender.peer_id {
             tracing::warn!(
                 session_id = %decoded.message.session_id,
@@ -679,8 +701,9 @@ async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
     }
 
     if matches!(decoded.message.body, MessageBody::Offer(_))
-        && let Some(existing_session_id) = session_by_peer.get(&decoded.sender.peer_id).copied()
-        && let Some(handle) = sessions_by_id.get(&existing_session_id)
+        && let Some(existing_session_id) =
+            registry.session_by_peer.get(&decoded.sender.peer_id).copied()
+        && let Some(handle) = registry.sessions_by_id.get(&existing_session_id)
     {
         route_authenticated_signal(handle, decoded).await;
         return;
@@ -704,8 +727,8 @@ async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
                 tracing::warn!(peer_id = %decoded.sender.peer_id, "rejecting unauthorized peer");
                 return;
             }
-            if session_by_peer.contains_key(&decoded.sender.peer_id)
-                || sessions_by_id.len() >= ANSWER_SESSION_CAPACITY
+            if registry.session_by_peer.contains_key(&decoded.sender.peer_id)
+                || registry.sessions_by_id.len() >= ANSWER_SESSION_CAPACITY
             {
                 let _ = publish_message(
                     ctx,
@@ -731,29 +754,27 @@ async fn handle_answer_daemon_payload<T: DaemonSignalingTransport>(
                 .await;
                 return;
             }
-            let generation = SessionGeneration(*next_generation);
-            *next_generation = next_generation.saturating_add(1);
+            let generation = SessionGeneration(*registry.next_generation);
+            *registry.next_generation = registry.next_generation.saturating_add(1);
             if let Err(error) = start_answer_session_from_offer(
-                config,
-                local_identity,
-                authorized_keys,
+                deps,
                 codec,
                 transport,
                 ctx,
-                event_tx,
-                sessions_by_id,
-                session_by_peer,
+                registry,
                 generation,
-                decoded.envelope,
-                decoded.message,
-                decoded.sender,
-                &offer,
+                IncomingOffer {
+                    envelope: decoded.envelope,
+                    message: decoded.message,
+                    sender: decoded.sender,
+                    offer: &offer,
+                },
             )
             .await
             {
                 recover_daemon_after_session(ctx, Err(error)).await;
             }
-            write_answer_registry_status(ctx, sessions_by_id).await;
+            write_answer_registry_status(ctx, registry.sessions_by_id).await;
         }
         _ => {
             tracing::warn!(
@@ -775,23 +796,17 @@ async fn route_authenticated_signal(handle: &AnswerSessionHandle, decoded: Decod
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn start_answer_session_from_offer<T: DaemonSignalingTransport>(
-    config: &Arc<AppConfig>,
-    local_identity: &Arc<IdentityFile>,
-    authorized_keys: &Arc<AuthorizedKeys>,
+    deps: &AnswerDeps<'_>,
     codec: &SignalCodec<'_>,
     transport: &mut T,
     ctx: &mut RuntimeContext<'_>,
-    event_tx: &mpsc::Sender<AnswerSessionEvent>,
-    sessions_by_id: &mut HashMap<SessionId, AnswerSessionHandle>,
-    session_by_peer: &mut HashMap<PeerId, SessionId>,
+    registry: &mut AnswerSessionRegistry<'_>,
     generation: SessionGeneration,
-    envelope: OuterEnvelope,
-    message: InnerMessage,
-    sender: AuthorizedKey,
-    offer: &OfferBody,
+    incoming: IncomingOffer<'_>,
 ) -> Result<(), DaemonError> {
+    let &AnswerDeps { config, local_identity, authorized_keys, event_tx } = deps;
+    let IncomingOffer { envelope, message, sender, offer } = incoming;
     if should_ack_idle_offer(true, message.message_type.requires_ack()) {
         publish_message(
             ctx,
@@ -860,7 +875,7 @@ async fn start_answer_session_from_offer<T: DaemonSignalingTransport>(
         generation,
         session,
     ));
-    sessions_by_id.insert(
+    registry.sessions_by_id.insert(
         session_id,
         AnswerSessionHandle {
             generation,
@@ -870,7 +885,7 @@ async fn start_answer_session_from_offer<T: DaemonSignalingTransport>(
             task,
         },
     );
-    session_by_peer.insert(remote_peer_id, session_id);
+    registry.session_by_peer.insert(remote_peer_id, session_id);
     Ok(())
 }
 
@@ -1836,7 +1851,11 @@ async fn process_answer_session_signal(
                 .await?;
         } else {
             maybe_replace_pending_same_peer_session(
-                config, event_tx, generation, session, envelope, message, sender, &offer,
+                config,
+                event_tx,
+                generation,
+                session,
+                IncomingOffer { envelope, message, sender, offer: &offer },
             )
             .await?;
         }
@@ -1855,17 +1874,14 @@ async fn process_answer_session_signal(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn maybe_replace_pending_same_peer_session(
     config: &AppConfig,
     event_tx: &mpsc::Sender<AnswerSessionEvent>,
     generation: SessionGeneration,
     session: &mut ActiveSession,
-    envelope: OuterEnvelope,
-    message: InnerMessage,
-    sender: AuthorizedKey,
-    offer: &OfferBody,
+    incoming: IncomingOffer<'_>,
 ) -> Result<(), DaemonError> {
+    let IncomingOffer { envelope, message, sender, offer } = incoming;
     // v0.3 permits same-peer replacement only while the existing session has not
     // reached data-channel/tunnel activity. Unrelated second active sessions are
     // rejected with encrypted busy and must not disturb other peers.
@@ -3125,9 +3141,9 @@ mod tests {
     use tokio::time::{sleep, timeout};
 
     use super::{
-        ActiveBusyOfferAction, ActiveBusyOfferCache, ActiveBusyOfferKey, ActiveSession,
-        AnswerSessionEvent, AnswerSessionHandle, BridgeSessionState, DaemonError,
-        DaemonRuntimeState, DaemonSignalingTransport, DaemonState, ForwardListenState,
+        ActiveBusyOfferAction, ActiveBusyOfferCache, ActiveBusyOfferKey, ActiveSession, AnswerDeps,
+        AnswerSessionEvent, AnswerSessionHandle, AnswerSessionRegistry, BridgeSessionState,
+        DaemonError, DaemonRuntimeState, DaemonSignalingTransport, DaemonState, ForwardListenState,
         IceConnectionState, OfferListener, OfferSessionPayloadOutcome, RuntimeContext,
         SessionGeneration, SessionStatusSnapshot, StatusSnapshot, StatusWriter, WebRtcPeer,
         apply_answer_overrides, apply_offer_overrides, apply_override_pairs, bind_offer_listeners,
@@ -3574,17 +3590,21 @@ mod tests {
                 RuntimeContext { config: &self.config, status: &status, runtime: &mut runtime };
             let (event_tx, _event_rx) = mpsc::channel(4);
             handle_answer_daemon_payload(
-                &self.config,
-                &self.local_identity,
-                &self.authorized_keys,
+                &AnswerDeps {
+                    config: &self.config,
+                    local_identity: &self.local_identity,
+                    authorized_keys: &self.authorized_keys,
+                    event_tx: &event_tx,
+                },
                 &codec,
                 &mut self.transport,
                 &mut ctx,
-                &event_tx,
-                &mut self.replay_cache,
-                &mut self.sessions_by_id,
-                &mut self.session_by_peer,
-                &mut self.next_generation,
+                &mut AnswerSessionRegistry {
+                    replay_cache: &mut self.replay_cache,
+                    sessions_by_id: &mut self.sessions_by_id,
+                    session_by_peer: &mut self.session_by_peer,
+                    next_generation: &mut self.next_generation,
+                },
                 payload,
             )
             .await;
@@ -3900,17 +3920,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -3987,17 +4011,21 @@ mod tests {
         let forged_payload = envelope.encode().expect("forged envelope encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             forged_payload,
         )
         .await;
@@ -4496,17 +4524,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -4570,17 +4602,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -4713,17 +4749,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -4781,17 +4821,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -4869,17 +4913,21 @@ mod tests {
             .expect("payload encodes");
 
         handle_answer_daemon_payload(
-            &config,
-            &local_identity,
-            &authorized_keys,
+            &AnswerDeps {
+                config: &config,
+                local_identity: &local_identity,
+                authorized_keys: &authorized_keys,
+                event_tx: &event_tx,
+            },
             &codec,
             &mut transport,
             &mut ctx,
-            &event_tx,
-            &mut replay_cache,
-            &mut sessions_by_id,
-            &mut session_by_peer,
-            &mut next_generation,
+            &mut AnswerSessionRegistry {
+                replay_cache: &mut replay_cache,
+                sessions_by_id: &mut sessions_by_id,
+                session_by_peer: &mut session_by_peer,
+                next_generation: &mut next_generation,
+            },
             payload,
         )
         .await;
@@ -4960,17 +5008,21 @@ mod tests {
 
         for _ in 0..2 {
             handle_answer_daemon_payload(
-                &config,
-                &local_identity,
-                &authorized_keys,
+                &AnswerDeps {
+                    config: &config,
+                    local_identity: &local_identity,
+                    authorized_keys: &authorized_keys,
+                    event_tx: &event_tx,
+                },
                 &codec,
                 &mut transport,
                 &mut ctx,
-                &event_tx,
-                &mut replay_cache,
-                &mut sessions_by_id,
-                &mut session_by_peer,
-                &mut next_generation,
+                &mut AnswerSessionRegistry {
+                    replay_cache: &mut replay_cache,
+                    sessions_by_id: &mut sessions_by_id,
+                    session_by_peer: &mut session_by_peer,
+                    next_generation: &mut next_generation,
+                },
                 payload.clone(),
             )
             .await;
