@@ -375,7 +375,7 @@ pub unsafe extern "C" fn p2ptunnel_free_string(ptr: *mut c_char) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeCreateRuntime(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeCreateRuntime(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jlong {
@@ -383,7 +383,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeDestroyRuntime(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeDestroyRuntime(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -392,7 +392,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeStartOffer(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeStartOffer(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -414,7 +414,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeStartOfferWithIdentity(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeStartOfferWithIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -447,7 +447,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeStartAnswer(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeStartAnswer(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -469,7 +469,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeStop(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeStop(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -478,7 +478,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeStatusJson(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeStatusJson(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -493,7 +493,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeRecentLogsJson(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeRecentLogsJson(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,
@@ -511,7 +511,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeValidateConfig(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustValidationBridge_nativeValidateConfig(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     config_path: JString<'_>,
@@ -545,7 +545,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeValidateConfigWithIdentity(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustValidationBridge_nativeValidateConfigWithIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     config_path: JString<'_>,
@@ -592,7 +592,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeValidatePrivateIdentity(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustValidationBridge_nativeValidatePrivateIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     private_identity_toml: JString<'_>,
@@ -627,7 +627,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeValidatePublicIdentity(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustValidationBridge_nativeValidatePublicIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     public_identity_line: JString<'_>,
@@ -662,7 +662,7 @@ pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_native
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeGenerateIdentity(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustValidationBridge_nativeGenerateIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     peer_id: JString<'_>,
@@ -704,7 +704,7 @@ fn last_error_for_handle(handle: *mut AndroidTunnelController) -> String {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_phillipchin_webrtctunnel_RustTunnelBridge_nativeLastError(
+pub extern "system" fn Java_com_phillipchin_webrtctunnel_NativeControlLib_nativeLastError(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     handle: jlong,

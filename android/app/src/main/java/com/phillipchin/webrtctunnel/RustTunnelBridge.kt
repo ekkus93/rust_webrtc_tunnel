@@ -7,7 +7,7 @@ import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
-interface TunnelNativeBridge {
+interface TunnelControlBridge {
     fun startOffer(
         configPath: String,
         identityBytes: ByteArray? = null,
@@ -20,7 +20,9 @@ interface TunnelNativeBridge {
     fun getStatusJson(): String
 
     fun getRecentLogsJson(maxEvents: Int): String
+}
 
+interface TunnelValidationBridge {
     fun validateConfig(configPath: String): ValidationResult
 
     fun validateConfigWithIdentity(
@@ -35,60 +37,68 @@ interface TunnelNativeBridge {
     fun generateIdentity(peerId: String): IdentityValidationResult
 }
 
-class RustTunnelBridge : TunnelNativeBridge {
-    companion object {
-        private var nativeAvailable: Boolean = false
-        private var nativeLoadError: Throwable? = null
+interface TunnelNativeBridge : TunnelControlBridge, TunnelValidationBridge
 
-        init {
-            val load = runCatching { System.loadLibrary("p2p_mobile") }
-            nativeAvailable = load.isSuccess
-            nativeLoadError = load.exceptionOrNull()
-        }
+// Loads libp2p_mobile once for the process; both native declaring classes share it.
+private object NativeLibLoader {
+    val available: Boolean
+    val loadError: Throwable?
+
+    init {
+        val load = runCatching { System.loadLibrary("p2p_mobile") }
+        available = load.isSuccess
+        loadError = load.exceptionOrNull()
     }
+}
 
-    private var runtimeHandle: Long = if (nativeAvailable) nativeCreateRuntime() else 0L
-    private var disposed: Boolean = false
+private fun requireNativeLoaded() {
+    if (!NativeLibLoader.available) {
+        // Retains the load error as cause, which error()/check() cannot express.
+        throw IllegalStateException(
+            "Native library p2p_mobile failed to load",
+            NativeLibLoader.loadError,
+        )
+    }
+}
 
-    override fun startOffer(
+// JNI declarations for runtime/control entry points (Java_..._NativeControlLib_*).
+internal class NativeControlLib {
+    external fun nativeCreateRuntime(): Long
+
+    external fun nativeDestroyRuntime(handle: Long)
+
+    external fun nativeStartOffer(
+        handle: Long,
         configPath: String,
-        identityBytes: ByteArray?,
-    ): Result<Unit> =
-        runCatching {
-            ensureNativeAvailable()
-            val code =
-                if (identityBytes == null) {
-                    nativeStartOffer(runtimeHandle, configPath)
-                } else {
-                    nativeStartOfferWithIdentity(runtimeHandle, configPath, identityBytes)
-                }
-            check(code == 0) { nativeLastError(runtimeHandle) }
-        }
+    ): Int
 
-    override fun startAnswer(configPath: String): Result<Unit> =
-        runCatching {
-            ensureNativeAvailable()
-            check(nativeStartAnswer(runtimeHandle, configPath) == 0) { nativeLastError(runtimeHandle) }
-        }
+    external fun nativeStartOfferWithIdentity(
+        handle: Long,
+        configPath: String,
+        identityBytes: ByteArray,
+    ): Int
 
-    override fun stop(): Result<Unit> =
-        runCatching {
-            ensureNativeAvailable()
-            check(nativeStop(runtimeHandle) == 0) { nativeLastError(runtimeHandle) }
-        }
+    external fun nativeStartAnswer(
+        handle: Long,
+        configPath: String,
+    ): Int
 
-    override fun getStatusJson(): String {
-        ensureNativeAvailable()
-        return nativeStatusJson(runtimeHandle)
-    }
+    external fun nativeStop(handle: Long): Int
 
-    override fun getRecentLogsJson(maxEvents: Int): String {
-        ensureNativeAvailable()
-        return nativeRecentLogsJson(runtimeHandle, maxEvents)
-    }
+    external fun nativeStatusJson(handle: Long): String
 
+    external fun nativeRecentLogsJson(
+        handle: Long,
+        maxEvents: Int,
+    ): String
+
+    external fun nativeLastError(handle: Long): String
+}
+
+// Stateless validators; own JNI declarations (Java_..._RustValidationBridge_*).
+class RustValidationBridge : TunnelValidationBridge {
     override fun validateConfig(configPath: String): ValidationResult {
-        ensureNativeAvailable()
+        requireNativeLoaded()
         return Json.decodeFromString(nativeValidateConfig(configPath))
     }
 
@@ -96,78 +106,24 @@ class RustTunnelBridge : TunnelNativeBridge {
         configPath: String,
         identityBytes: ByteArray,
     ): ValidationResult {
-        ensureNativeAvailable()
+        requireNativeLoaded()
         return Json.decodeFromString(nativeValidateConfigWithIdentity(configPath, identityBytes))
     }
 
     override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult {
-        ensureNativeAvailable()
+        requireNativeLoaded()
         return Json.decodeFromString(nativeValidatePrivateIdentity(identityToml))
     }
 
     override fun validatePublicIdentity(line: String): IdentityValidationResult {
-        ensureNativeAvailable()
+        requireNativeLoaded()
         return Json.decodeFromString(nativeValidatePublicIdentity(line))
     }
 
     override fun generateIdentity(peerId: String): IdentityValidationResult {
-        ensureNativeAvailable()
+        requireNativeLoaded()
         return Json.decodeFromString(nativeGenerateIdentity(peerId))
     }
-
-    fun dispose() {
-        if (disposed) {
-            return
-        }
-        if (runtimeHandle != 0L) {
-            nativeDestroyRuntime(runtimeHandle)
-            runtimeHandle = 0L
-        }
-        disposed = true
-    }
-
-    private fun ensureNativeAvailable() {
-        if (disposed) {
-            error("Tunnel bridge is disposed")
-        }
-        if (!nativeAvailable) {
-            // Retains the load error as cause, which error()/check() cannot express.
-            throw IllegalStateException(
-                "Native library p2p_mobile failed to load",
-                nativeLoadError,
-            )
-        }
-        check(runtimeHandle != 0L) { "Native runtime handle is unavailable" }
-    }
-
-    private external fun nativeCreateRuntime(): Long
-
-    private external fun nativeDestroyRuntime(handle: Long)
-
-    private external fun nativeStartOffer(
-        handle: Long,
-        configPath: String,
-    ): Int
-
-    private external fun nativeStartOfferWithIdentity(
-        handle: Long,
-        configPath: String,
-        identityBytes: ByteArray,
-    ): Int
-
-    private external fun nativeStartAnswer(
-        handle: Long,
-        configPath: String,
-    ): Int
-
-    private external fun nativeStop(handle: Long): Int
-
-    private external fun nativeStatusJson(handle: Long): String
-
-    private external fun nativeRecentLogsJson(
-        handle: Long,
-        maxEvents: Int,
-    ): String
 
     private external fun nativeValidateConfig(configPath: String): String
 
@@ -181,8 +137,70 @@ class RustTunnelBridge : TunnelNativeBridge {
     private external fun nativeValidatePublicIdentity(line: String): String
 
     private external fun nativeGenerateIdentity(peerId: String): String
+}
 
-    private external fun nativeLastError(handle: Long): String
+class RustTunnelBridge(
+    private val validation: RustValidationBridge = RustValidationBridge(),
+) : TunnelNativeBridge, TunnelValidationBridge by validation {
+    private val control = NativeControlLib()
+    private var runtimeHandle: Long = if (NativeLibLoader.available) control.nativeCreateRuntime() else 0L
+    private var disposed: Boolean = false
+
+    override fun startOffer(
+        configPath: String,
+        identityBytes: ByteArray?,
+    ): Result<Unit> =
+        runCatching {
+            ensureNativeAvailable()
+            val code =
+                if (identityBytes == null) {
+                    control.nativeStartOffer(runtimeHandle, configPath)
+                } else {
+                    control.nativeStartOfferWithIdentity(runtimeHandle, configPath, identityBytes)
+                }
+            check(code == 0) { control.nativeLastError(runtimeHandle) }
+        }
+
+    override fun startAnswer(configPath: String): Result<Unit> =
+        runCatching {
+            ensureNativeAvailable()
+            check(control.nativeStartAnswer(runtimeHandle, configPath) == 0) { control.nativeLastError(runtimeHandle) }
+        }
+
+    override fun stop(): Result<Unit> =
+        runCatching {
+            ensureNativeAvailable()
+            check(control.nativeStop(runtimeHandle) == 0) { control.nativeLastError(runtimeHandle) }
+        }
+
+    override fun getStatusJson(): String {
+        ensureNativeAvailable()
+        return control.nativeStatusJson(runtimeHandle)
+    }
+
+    override fun getRecentLogsJson(maxEvents: Int): String {
+        ensureNativeAvailable()
+        return control.nativeRecentLogsJson(runtimeHandle, maxEvents)
+    }
+
+    fun dispose() {
+        if (disposed) {
+            return
+        }
+        if (runtimeHandle != 0L) {
+            control.nativeDestroyRuntime(runtimeHandle)
+            runtimeHandle = 0L
+        }
+        disposed = true
+    }
+
+    private fun ensureNativeAvailable() {
+        if (disposed) {
+            error("Tunnel bridge is disposed")
+        }
+        requireNativeLoaded()
+        check(runtimeHandle != 0L) { "Native runtime handle is unavailable" }
+    }
 }
 
 private const val FAKE_LOG_LIMIT = 3
