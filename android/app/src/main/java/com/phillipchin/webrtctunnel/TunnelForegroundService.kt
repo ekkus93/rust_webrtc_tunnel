@@ -30,6 +30,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+// Control-flow signal: a startup attempt aborted after publishing its own error/state.
+private class StartupAborted : Exception()
+
 class TunnelForegroundService : Service() {
     private val tag = "TunnelForegroundService"
     private lateinit var notifications: NotificationController
@@ -131,47 +134,59 @@ class TunnelForegroundService : Service() {
                     doStartOffer(generation)
                 }
         }
-        if (generation == 0L) {
-            return
-        }
     }
 
     private suspend fun doStartOffer(startGeneration: Long) {
         lastMode = TunnelMode.Offer
         startForeground(NOTIFICATION_ID, loadingNotification("Starting tunnel"))
+        val identity =
+            try {
+                prepareOfferIdentity()
+            } catch (_: StartupAborted) {
+                return
+            }
+        runOfferStart(identity, startGeneration)
+    }
+
+    // Loads + validates prerequisites for an offer start. Returns the private identity
+    // bytes, or throws StartupAborted after publishing the appropriate state/error.
+    private suspend fun prepareOfferIdentity(): ByteArray {
         val prefs = withContext(Dispatchers.IO) { configRepository.preferences.first() }
         val policy = evaluatePolicy(prefs)
         repository.updateNetworkStatus(policy)
         if (!policy.tunnelAllowed) {
             repository.setPolicyBlocked(policy.blockReason ?: "Tunnel blocked by current network policy")
             publishStatus(policy.blockReason ?: "Tunnel blocked by network policy")
-            return
+            throw StartupAborted()
         }
         val identity =
             withContext(Dispatchers.IO) {
                 runCatching { identityRepository.readPrivateIdentityPlaintext() }
             }
                 .getOrElse {
-                    publishError(
-                        message = "Unable to decrypt private identity: ${it.message}",
-                        code = "identity_decrypt_failed",
-                    )
-                    return
+                    abortStartup("Unable to decrypt private identity: ${it.message}", "identity_decrypt_failed")
                 }
         val validation =
             withContext(Dispatchers.IO) {
                 repository.validateConfigWithIdentity(configRepository.configPath, identity)
             }
         if (!validation.valid) {
-            publishError(
-                message = validation.message ?: "Config validation failed",
-                code = "config_validation_failed",
-                state = ServiceState.ConfigInvalid,
+            abortStartup(
+                validation.message ?: "Config validation failed",
+                "config_validation_failed",
+                ServiceState.ConfigInvalid,
             )
-            return
         }
-        val stillCurrentBeforeStart = lifecycleMutex.withLock { lifecycleGeneration == startGeneration }
-        if (!stillCurrentBeforeStart) {
+        return identity
+    }
+
+    // Starts the tunnel under the lifecycle-generation guard: aborts if a newer start
+    // superseded this one (before or after the native start) or if it was cancelled.
+    private suspend fun runOfferStart(
+        identity: ByteArray,
+        startGeneration: Long,
+    ) {
+        if (!isCurrentGeneration(startGeneration)) {
             return
         }
         val result =
@@ -183,21 +198,32 @@ class TunnelForegroundService : Service() {
                 withContext(Dispatchers.IO) { repository.stop() }
                 return
             }
-        val stillCurrent = lifecycleMutex.withLock { lifecycleGeneration == startGeneration }
-        if (!stillCurrent) {
+        if (!isCurrentGeneration(startGeneration)) {
             withContext(Dispatchers.IO) { repository.stop() }
-            return
+        } else {
+            result.onSuccess {
+                pausedByPolicy = false
+                publishStatus()
+                startStatusPolling()
+            }.onFailure {
+                publishError(
+                    message = it.message ?: "Unable to start tunnel",
+                    code = "native_start_failed",
+                )
+            }
         }
-        result.onSuccess {
-            pausedByPolicy = false
-            publishStatus()
-            startStatusPolling()
-        }.onFailure {
-            publishError(
-                message = it.message ?: "Unable to start tunnel",
-                code = "native_start_failed",
-            )
-        }
+    }
+
+    private suspend fun isCurrentGeneration(startGeneration: Long): Boolean =
+        lifecycleMutex.withLock { lifecycleGeneration == startGeneration }
+
+    private fun abortStartup(
+        message: String,
+        code: String,
+        state: ServiceState = ServiceState.Error,
+    ): Nothing {
+        publishError(message = message, code = code, state = state)
+        throw StartupAborted()
     }
 
     private suspend fun allowMeteredForSessionAndStart() {
