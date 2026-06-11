@@ -73,7 +73,9 @@ class TunnelForegroundService : Service() {
                         val current = repository.status.value.serviceState
                         if (current == ServiceState.Connected || current == ServiceState.Serving) {
                             serviceScope.launch {
-                                pauseForPolicy(policy.blockReason ?: "Tunnel paused: network policy blocks metered/cellular")
+                                pauseForPolicy(
+                                    policy.blockReason ?: "Tunnel paused: network policy blocks metered/cellular",
+                                )
                             }
                         }
                     }

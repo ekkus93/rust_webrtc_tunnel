@@ -118,7 +118,10 @@ class TunnelRepository(
         identityBytes: ByteArray,
     ): ValidationResult = bridge.validateConfigWithIdentity(configPath, identityBytes)
 
-    fun validatePrivateIdentity(identityToml: String): IdentityValidationResult = bridge.validatePrivateIdentity(identityToml)
+    fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
+        bridge.validatePrivateIdentity(
+            identityToml,
+        )
 
     fun validatePublicIdentity(line: String): IdentityValidationResult = bridge.validatePublicIdentity(line)
 

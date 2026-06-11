@@ -384,7 +384,11 @@ class AppViewModelsTest {
                     )
 
                 override fun validatePublicIdentity(line: String): IdentityValidationResult =
-                    IdentityValidationResult(valid = true, canonicalPublicIdentity = line.trim(), peerId = "remote-peer")
+                    IdentityValidationResult(
+                        valid = true,
+                        canonicalPublicIdentity = line.trim(),
+                        peerId = "remote-peer",
+                    )
 
                 override fun generateIdentity(peerId: String): IdentityValidationResult =
                     IdentityValidationResult(
@@ -408,7 +412,11 @@ class AppViewModelsTest {
         val vm = ImportExportViewModel(throwingDeps)
         val tempFile = File(app.cacheDir, "config-import-candidate.toml")
         tempFile.delete()
-        val configFile = File(app.filesDir, "exception-import-config.toml").apply { writeText(configRepository.readConfig()) }
+        val configFile =
+            File(
+                app.filesDir,
+                "exception-import-config.toml",
+            ).apply { writeText(configRepository.readConfig()) }
         vm.updateState { it.copy(configImportPath = configFile.absolutePath) }
         vm.importConfig()
         assertTrue(!tempFile.exists())

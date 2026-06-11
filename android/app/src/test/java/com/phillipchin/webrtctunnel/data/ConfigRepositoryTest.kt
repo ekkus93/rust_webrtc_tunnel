@@ -172,7 +172,13 @@ class ConfigRepositoryTest {
     fun forwardsRoundTripPersistsJson() {
         val forwards =
             listOf(
-                ForwardConfig(id = "svc", name = "Service", localHost = "127.0.0.1", localPort = 18080, remoteForwardId = "svc"),
+                ForwardConfig(
+                    id = "svc",
+                    name = "Service",
+                    localHost = "127.0.0.1",
+                    localPort = 18080,
+                    remoteForwardId = "svc",
+                ),
             )
         repository.saveForwards(forwards)
         assertEquals(forwards, repository.loadForwards())

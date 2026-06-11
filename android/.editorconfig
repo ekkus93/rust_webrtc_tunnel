@@ -1,6 +1,9 @@
 root = true
 
 [*.{kt,kts}]
+# Tighten ktlint's line length to 120 to match detekt's MaxLineLength, so the
+# formatter keeps lines within the limit (we fix lengths in code, not by relaxing).
+max_line_length = 120
 # Jetpack Compose @Composable functions use PascalCase by official convention, so
 # ktlint's function-naming rule must ignore them. This aligns ktlint with the
 # framework — non-@Composable function names are still checked. It is configuration

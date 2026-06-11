@@ -242,7 +242,9 @@ fun WizardStepper(
                                         .weight(1f)
                                         .heightIn(min = 2.dp)
                                         .padding(horizontal = 4.dp)
-                                        .background(if (completed) MaterialTheme.colorScheme.primary else Color(0xFFD1D5DB)),
+                                        .background(
+                                            if (completed) MaterialTheme.colorScheme.primary else Color(0xFFD1D5DB),
+                                        ),
                             )
                         }
                     }

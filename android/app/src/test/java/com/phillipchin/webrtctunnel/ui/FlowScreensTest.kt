@@ -9,8 +9,22 @@ class FlowScreensTest {
     fun defaultNewForwardUsesSafeDefaults() {
         val existing =
             listOf(
-                ForwardConfig(id = "a", name = "A", localHost = "127.0.0.1", localPort = 8080, remoteForwardId = "a", enabled = true),
-                ForwardConfig(id = "b", name = "B", localHost = "127.0.0.1", localPort = 8081, remoteForwardId = "b", enabled = true),
+                ForwardConfig(
+                    id = "a",
+                    name = "A",
+                    localHost = "127.0.0.1",
+                    localPort = 8080,
+                    remoteForwardId = "a",
+                    enabled = true,
+                ),
+                ForwardConfig(
+                    id = "b",
+                    name = "B",
+                    localHost = "127.0.0.1",
+                    localPort = 8081,
+                    remoteForwardId = "b",
+                    enabled = true,
+                ),
             )
 
         val draft = defaultNewForward(existing)
@@ -25,8 +39,22 @@ class FlowScreensTest {
     fun suggestNewForwardPortSkipsDisabledEntries() {
         val existing =
             listOf(
-                ForwardConfig(id = "a", name = "A", localHost = "127.0.0.1", localPort = 8080, remoteForwardId = "a", enabled = false),
-                ForwardConfig(id = "b", name = "B", localHost = "127.0.0.1", localPort = 8081, remoteForwardId = "b", enabled = true),
+                ForwardConfig(
+                    id = "a",
+                    name = "A",
+                    localHost = "127.0.0.1",
+                    localPort = 8080,
+                    remoteForwardId = "a",
+                    enabled = false,
+                ),
+                ForwardConfig(
+                    id = "b",
+                    name = "B",
+                    localHost = "127.0.0.1",
+                    localPort = 8081,
+                    remoteForwardId = "b",
+                    enabled = true,
+                ),
             )
 
         val port = suggestNewForwardPort(existing, startPort = 8080)

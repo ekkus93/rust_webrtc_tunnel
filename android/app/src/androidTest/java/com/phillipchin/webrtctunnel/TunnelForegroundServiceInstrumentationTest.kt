@@ -44,7 +44,9 @@ class TunnelForegroundServiceInstrumentationTest {
         context.startForegroundService(
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
         assertTrue(waitForCondition(timeoutMs = 3_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
     }
 
@@ -53,8 +55,12 @@ class TunnelForegroundServiceInstrumentationTest {
         context.startForegroundService(
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
         assertTrue(waitForCondition(timeoutMs = 5_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
     }
 
@@ -87,7 +93,9 @@ class TunnelForegroundServiceInstrumentationTest {
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
         assertTrue(TestTunnelHooks.bridge.awaitStartOfferEntered(10_000))
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
         assertTrue(waitForCondition(timeoutMs = 8_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
         TestTunnelHooks.bridge.releaseBlockedStartOffer()
         assertEquals(
@@ -103,7 +111,9 @@ class TunnelForegroundServiceInstrumentationTest {
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
         assertTrue(TestTunnelHooks.bridge.awaitValidationEntered(5_000))
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
         assertTrue(waitForCondition(timeoutMs = 8_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
         TestTunnelHooks.bridge.releaseBlockedValidation()
         assertEquals(0, TestTunnelHooks.bridge.startOfferEnterCalls)
@@ -117,7 +127,9 @@ class TunnelForegroundServiceInstrumentationTest {
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
         assertTrue(TestTunnelHooks.bridge.awaitStartOfferEntered(10_000))
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_PAUSE))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_PAUSE),
+        )
         assertTrue(waitForCondition(timeoutMs = 8_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
         TestTunnelHooks.bridge.releaseBlockedStartOffer()
         assertEquals(
@@ -133,7 +145,9 @@ class TunnelForegroundServiceInstrumentationTest {
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
         assertTrue(TestTunnelHooks.bridge.awaitValidationEntered(5_000))
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_PAUSE))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_PAUSE),
+        )
         assertTrue(waitForCondition(timeoutMs = 8_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
         TestTunnelHooks.bridge.releaseBlockedValidation()
         assertEquals(0, TestTunnelHooks.bridge.startOfferEnterCalls)
@@ -146,7 +160,9 @@ class TunnelForegroundServiceInstrumentationTest {
             Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_OFFER),
         )
         assertTrue(waitForCondition(timeoutMs = 5_000) { TestTunnelHooks.bridge.startOfferCalls >= 1 })
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_STOP),
+        )
         assertTrue(waitForCondition(timeoutMs = 5_000) { TestTunnelHooks.bridge.stopCalls >= 1 })
         stopService()
         assertTrue(
@@ -163,7 +179,9 @@ class TunnelForegroundServiceInstrumentationTest {
 
     @Test
     fun answerActionIsExplicitlyDisabled() {
-        context.startService(Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_ANSWER))
+        context.startService(
+            Intent(context, TunnelForegroundService::class.java).setAction(TunnelForegroundService.ACTION_START_ANSWER),
+        )
         assertTrue(waitForCondition(timeoutMs = 5_000) { TestTunnelHooks.bridge.startAnswerCalls == 0 })
     }
 

@@ -42,7 +42,12 @@ class DiagnosticsRepositoryTest {
         val result =
             diagnosticsRepository.exportRedactedDiagnostics(
                 outputPath = output.absolutePath,
-                status = TunnelStatus(serviceState = ServiceState.Connected, mode = TunnelMode.Offer, localPeerId = "android-phone"),
+                status =
+                    TunnelStatus(
+                        serviceState = ServiceState.Connected,
+                        mode = TunnelMode.Offer,
+                        localPeerId = "android-phone",
+                    ),
                 logs = listOf(LogEvent(1L, "info", "sdp=foo candidate=bar password=abc token=xyz")),
                 networkStatus = NetworkStatus(NetworkType.UnmeteredWifi, false, true, true, true, null),
             )
@@ -57,7 +62,12 @@ class DiagnosticsRepositoryTest {
     fun buildPayloadReturnsRedactedTextForSharing() {
         val payload =
             diagnosticsRepository.buildRedactedDiagnosticsPayload(
-                status = TunnelStatus(serviceState = ServiceState.Error, mode = TunnelMode.Offer, localPeerId = "android-phone"),
+                status =
+                    TunnelStatus(
+                        serviceState = ServiceState.Error,
+                        mode = TunnelMode.Offer,
+                        localPeerId = "android-phone",
+                    ),
                 logs = listOf(LogEvent(1L, "error", "password=abc token=xyz")),
                 networkStatus = NetworkStatus(NetworkType.UnmeteredWifi, false, true, true, true, null),
             )

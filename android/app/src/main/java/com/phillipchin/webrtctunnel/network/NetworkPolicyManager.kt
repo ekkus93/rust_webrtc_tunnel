@@ -78,7 +78,8 @@ class NetworkPolicyManager internal constructor(
             val metered = cm.isActiveNetworkMetered
             val networkType =
                 when {
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !metered -> NetworkType.UnmeteredWifi
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !metered ->
+                        NetworkType.UnmeteredWifi
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkType.MeteredWifi
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> NetworkType.Cellular
                     else -> NetworkType.Unknown

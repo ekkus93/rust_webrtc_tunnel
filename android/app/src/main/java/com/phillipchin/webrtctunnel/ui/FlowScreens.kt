@@ -160,7 +160,10 @@ fun SetupWizardScreen(
                 }
                 if (state.currentStep == SetupStep.Review) {
                     OutlinedButton(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save") }
-                    Button(onClick = { vm.startTunnelFromReview(onStartSuccess) }, enabled = canAdvance) { Text("Start Tunnel") }
+                    Button(
+                        onClick = { vm.startTunnelFromReview(onStartSuccess) },
+                        enabled = canAdvance,
+                    ) { Text("Start Tunnel") }
                 } else {
                     Button(onClick = vm::goNext, enabled = canAdvance) { Text("Next") }
                 }
@@ -241,7 +244,10 @@ private fun IdentityStepContent(
                 label = { Text("Private identity file path") },
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedButton(onClick = vm::importIdentityFromPath, modifier = Modifier.fillMaxWidth()) { Text("Import from path") }
+            OutlinedButton(
+                onClick = vm::importIdentityFromPath,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Import from path") }
         }
         if (state.localPublicIdentity.isNotBlank()) {
             Text("Local public identity:")
@@ -289,7 +295,10 @@ private fun BrokerStepContent(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Use TLS")
             Spacer(Modifier.weight(1f))
-            Switch(checked = state.input.brokerUseTls, onCheckedChange = { vm.setInput(state.input.copy(brokerUseTls = it)) })
+            Switch(
+                checked = state.input.brokerUseTls,
+                onCheckedChange = { vm.setInput(state.input.copy(brokerUseTls = it)) },
+            )
         }
         OutlinedTextField(value = state.input.brokerUsername, onValueChange = {
             vm.setInput(state.input.copy(brokerUsername = it))
@@ -301,7 +310,10 @@ private fun BrokerStepContent(
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
-        OutlinedButton(onClick = { vm.setAdvancedExpanded(!state.advancedExpanded) }, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { vm.setAdvancedExpanded(!state.advancedExpanded) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text(if (state.advancedExpanded) "Hide advanced" else "Show advanced")
         }
         if (state.advancedExpanded) {
@@ -338,7 +350,10 @@ private fun PeerStepContent(
             Text("Remote public identity")
         }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = vm::validateRemotePublicIdentity, modifier = Modifier.weight(1f)) { Text("Validate remote identity") }
+            Button(
+                onClick = vm::validateRemotePublicIdentity,
+                modifier = Modifier.weight(1f),
+            ) { Text("Validate remote identity") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onPaste, modifier = Modifier.weight(1f)) { Text("Paste from clipboard") }
@@ -420,7 +435,9 @@ private fun PolicyStepContent(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Resume on unmetered")
             Spacer(Modifier.weight(1f))
-            Switch(checked = state.input.resumeOnUnmetered, onCheckedChange = { vm.setInput(state.input.copy(resumeOnUnmetered = it)) })
+            Switch(checked = state.input.resumeOnUnmetered, onCheckedChange = {
+                vm.setInput(state.input.copy(resumeOnUnmetered = it))
+            })
         }
     }
     if (showMeteredWarningDialog) {

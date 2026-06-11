@@ -217,7 +217,11 @@ private fun NotificationPermissionGate() {
                         "service visible while it is running in the background.",
                 )
             },
-            confirmButton = { TextButton(onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text("Allow") } },
+            confirmButton = {
+                TextButton(
+                    onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                ) { Text("Allow") }
+            },
             dismissButton = {
                 TextButton(onClick = {
                     denied = true
