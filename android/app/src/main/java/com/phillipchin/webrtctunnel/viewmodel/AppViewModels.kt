@@ -1001,30 +1001,17 @@ class NetworkPolicyViewModel(private val deps: AppDependencies) : ViewModel() {
 class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
     private val _state = MutableStateFlow(ImportExportState())
     val state: StateFlow<ImportExportState> = _state.asStateFlow()
+    private val importService = ImportExportService(deps)
 
     fun updateState(transform: (ImportExportState) -> ImportExportState) {
         _state.value = transform(_state.value).copy(resultMessage = null)
     }
 
     fun importConfig() {
-        val path = _state.value.configImportPath.trim()
         runCatching {
-            val source = java.io.File(path)
+            val source = java.io.File(_state.value.configImportPath.trim())
             require(source.exists()) { "Config file not found" }
-            importConfigContent(source.readText())
-        }.onSuccess {
-            _state.value = _state.value.copy(resultMessage = "Config imported")
-        }.onFailure {
-            _state.value = _state.value.copy(resultMessage = it.message ?: "Config import failed")
-        }
-    }
-
-    fun importConfigFromUri(uri: Uri) {
-        runCatching {
-            val candidate =
-                deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error("Unable to read config from selected URI")
-            importConfigContent(candidate)
+            importService.importContent(ImportKind.Config, source.readText())
         }.onSuccess {
             _state.value = _state.value.copy(resultMessage = "Config imported")
         }.onFailure {
@@ -1038,20 +1025,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
                 deps.identityRepository
                     .readPrivateIdentityFile(_state.value.privateIdentityImportPath.trim())
                     .getOrThrow()
-            importPrivateIdentityContent(privateIdentity)
-        }.onSuccess {
-            _state.value = _state.value.copy(resultMessage = "Private identity imported")
-        }.onFailure {
-            _state.value = _state.value.copy(resultMessage = it.message ?: "Private identity import failed")
-        }
-    }
-
-    fun importPrivateIdentityFromUri(uri: Uri) {
-        runCatching {
-            val privateIdentity =
-                deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error("Unable to read private identity from selected URI")
-            importPrivateIdentityContent(privateIdentity)
+            importService.importContent(ImportKind.PrivateIdentity, privateIdentity)
         }.onSuccess {
             _state.value = _state.value.copy(resultMessage = "Private identity imported")
         }.onFailure {
@@ -1061,7 +1035,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
 
     fun importPublicIdentity() {
         runCatching {
-            importPublicIdentityLine(_state.value.publicIdentityLine)
+            importService.importContent(ImportKind.PublicIdentity, _state.value.publicIdentityLine)
         }.onSuccess {
             _state.value = _state.value.copy(resultMessage = "Public identity imported")
         }.onFailure {
@@ -1069,25 +1043,27 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
         }
     }
 
-    fun importPublicIdentityFromUri(uri: Uri) {
+    fun importFromUri(
+        uri: Uri,
+        kind: ImportKind,
+    ) {
         runCatching {
-            val value =
+            val content =
                 deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error("Unable to read public identity from selected URI")
-            importPublicIdentityLine(value)
+                    ?: error("Unable to read ${kind.label.lowercase()} from selected URI")
+            importService.importContent(kind, content)
         }.onSuccess {
-            _state.value = _state.value.copy(resultMessage = "Public identity imported")
+            _state.value = _state.value.copy(resultMessage = "${kind.label} imported")
         }.onFailure {
-            _state.value = _state.value.copy(resultMessage = it.message ?: "Public identity import failed")
+            _state.value = _state.value.copy(resultMessage = it.message ?: "${kind.label} import failed")
         }
     }
 
     fun exportConfig(confirmSensitive: Boolean) {
         runCatching {
-            require(confirmSensitive) { "Raw config export requires explicit confirmation" }
             val output = java.io.File(_state.value.configExportPath.trim())
             output.parentFile?.mkdirs()
-            output.writeText(exportConfigText(confirmSensitive))
+            output.writeText(importService.configForExport(confirmSensitive))
         }.onSuccess {
             _state.value = _state.value.copy(resultMessage = "Raw config exported")
         }.onFailure {
@@ -1100,8 +1076,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
         confirmSensitive: Boolean,
     ) {
         runCatching {
-            require(confirmSensitive) { "Raw config export requires explicit confirmation" }
-            val payload = exportConfigText(confirmSensitive)
+            val payload = importService.configForExport(confirmSensitive)
             deps.context.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
                 stream.write(payload.toByteArray())
             } ?: error("Unable to open destination URI")
@@ -1110,14 +1085,6 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
         }.onFailure {
             _state.value = _state.value.copy(resultMessage = it.message ?: "Config export failed")
         }
-    }
-
-    fun exportPublicIdentity() {
-        deps.identityRepository.exportPublicIdentity(_state.value.publicIdentityExportPath.trim())
-            .onSuccess { _state.value = _state.value.copy(resultMessage = "Public identity exported") }
-            .onFailure {
-                _state.value = _state.value.copy(resultMessage = it.message ?: "Public identity export failed")
-            }
     }
 
     fun exportPublicIdentityToUri(uri: Uri) {
@@ -1130,18 +1097,6 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
             _state.value = _state.value.copy(resultMessage = "Public identity exported")
         }.onFailure {
             _state.value = _state.value.copy(resultMessage = it.message ?: "Public identity export failed")
-        }
-    }
-
-    fun exportPrivateIdentity(confirmRisk: Boolean) {
-        val current = _state.value
-        deps.identityRepository.exportPrivateIdentity(
-            outputPath = current.privateIdentityExportPath.trim(),
-            confirmRisk = confirmRisk,
-        ).onSuccess {
-            _state.value = _state.value.copy(resultMessage = "Private identity exported")
-        }.onFailure {
-            _state.value = _state.value.copy(resultMessage = it.message ?: "Private identity export failed")
         }
     }
 
@@ -1166,47 +1121,6 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
         val value = deps.identityRepository.readPublicIdentity()
         require(value.isNotBlank()) { "No public identity available" }
         return value
-    }
-
-    private fun importConfigContent(candidate: String) {
-        val temp = File(deps.context.cacheDir, "config-import-candidate.toml")
-        temp.parentFile?.mkdirs()
-        try {
-            temp.writeText(candidate)
-            val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
-            val validation =
-                if (identity != null && identity.isNotEmpty()) {
-                    deps.identityValidation.validateConfigWithIdentity(temp.absolutePath, identity)
-                } else {
-                    deps.identityValidation.validateConfig(temp.absolutePath)
-                }
-            require(validation.valid) { validation.message ?: "Config validation failed" }
-            deps.configRepository.writeConfigAtomically(candidate)
-        } finally {
-            temp.delete()
-        }
-    }
-
-    private fun importPrivateIdentityContent(privateIdentity: String) {
-        val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
-        require(validated.valid) { validated.message ?: "Invalid private identity" }
-        deps.identityRepository.storeEncryptedIdentity(
-            (validated.canonicalPrivateIdentity ?: privateIdentity).toByteArray(),
-            validated.canonicalPublicIdentity ?: throw IllegalArgumentException("Missing canonical public identity"),
-        )
-    }
-
-    private fun importPublicIdentityLine(line: String) {
-        val validated = deps.identityValidation.validatePublicIdentity(line)
-        require(validated.valid) { validated.message ?: "Invalid public identity" }
-        deps.identityRepository.appendAuthorizedPublicIdentity(
-            validated.canonicalPublicIdentity ?: line.trim(),
-        ).getOrThrow()
-    }
-
-    private fun exportConfigText(confirmSensitive: Boolean): String {
-        require(confirmSensitive) { "Raw config export requires explicit confirmation" }
-        return deps.configRepository.readConfig()
     }
 }
 

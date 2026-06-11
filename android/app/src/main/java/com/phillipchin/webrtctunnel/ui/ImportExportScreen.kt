@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phillipchin.webrtctunnel.viewmodel.ImportExportState
 import com.phillipchin.webrtctunnel.viewmodel.ImportExportViewModel
+import com.phillipchin.webrtctunnel.viewmodel.ImportKind
 
 @Composable
 fun ImportExportScreen(
@@ -109,15 +110,15 @@ private fun ImportExportPrimaryActions(
 ) {
     val openTextDocumentLauncher =
         rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) vm.importConfigFromUri(uri)
+            if (uri != null) vm.importFromUri(uri, ImportKind.Config)
         }
     val openPrivateIdentityLauncher =
         rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) vm.importPrivateIdentityFromUri(uri)
+            if (uri != null) vm.importFromUri(uri, ImportKind.PrivateIdentity)
         }
     val openPublicIdentityLauncher =
         rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) vm.importPublicIdentityFromUri(uri)
+            if (uri != null) vm.importFromUri(uri, ImportKind.PublicIdentity)
         }
     val exportPublicIdentityLauncher =
         rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("text/plain")) { uri ->
