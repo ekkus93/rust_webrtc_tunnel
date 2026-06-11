@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -42,6 +43,13 @@ import androidx.navigation.navArgument
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.ui.theme.WebRtcTunnelTheme
 import com.phillipchin.webrtctunnel.viewmodel.AppViewModelFactory
+import com.phillipchin.webrtctunnel.viewmodel.ForwardsViewModel
+import com.phillipchin.webrtctunnel.viewmodel.HomeViewModel
+import com.phillipchin.webrtctunnel.viewmodel.ImportExportViewModel
+import com.phillipchin.webrtctunnel.viewmodel.LogsViewModel
+import com.phillipchin.webrtctunnel.viewmodel.NetworkPolicyViewModel
+import com.phillipchin.webrtctunnel.viewmodel.SettingsViewModel
+import com.phillipchin.webrtctunnel.viewmodel.SetupViewModel
 
 private sealed class Route(val value: String, val title: String) {
     data object Home : Route("home", "WebRTC Tunnel")
@@ -86,13 +94,7 @@ private val secondaryRoutes =
 @Composable
 fun WebRtcTunnelApp(deps: AppDependencies) {
     val factory = remember(deps) { AppViewModelFactory(deps) }
-    val homeViewModel = remember { factory.home() }
-    val setupViewModel = remember { factory.setup() }
-    val forwardsViewModel = remember { factory.forwards() }
-    val logsViewModel = remember { factory.logs() }
-    val settingsViewModel = remember { factory.settings() }
-    val networkPolicyViewModel = remember { factory.networkPolicy() }
-    val importExportViewModel = remember { factory.importExport() }
+    val models = remember(factory) { AppScreenModels(factory) }
     val navController = rememberNavController()
 
     WebRtcTunnelTheme {
@@ -127,70 +129,89 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
                 }
             },
         ) { padding ->
-            NavHost(navController = navController, startDestination = Route.Home.value) {
-                composable(Route.Home.value) {
-                    HomeScreen(
-                        padding = padding,
-                        vm = homeViewModel,
-                        forwardsVm = forwardsViewModel,
-                        nav =
-                            HomeNavActions(
-                                onOpenSetup = { navController.navigate(Route.Setup.value) },
-                                onOpenLogs = { navController.navigate(Route.Logs.value) },
-                                onOpenSettings = { navController.navigate(Route.Settings.value) },
-                                onOpenForwardDetails = { id -> navController.navigate("forwardDetails/$id") },
-                            ),
-                    )
-                }
-                composable(Route.Forwards.value) {
-                    ForwardsScreen(
-                        padding = padding,
-                        vm = forwardsViewModel,
-                        onOpenDetails = { forwardId ->
-                            navController.navigate("forwardDetails/$forwardId")
-                        },
-                    )
-                }
-                composable(Route.Logs.value) { LogsScreen(padding, logsViewModel, networkPolicyViewModel) }
-                composable(Route.Settings.value) {
-                    SettingsScreen(
-                        padding = padding,
-                        vm = settingsViewModel,
-                        nav =
-                            SettingsNavActions(
-                                onOpenSetup = { navController.navigate(Route.Setup.value) },
-                                onOpenLogs = { navController.navigate(Route.Logs.value) },
-                                onOpenNetworkPolicy = { navController.navigate(Route.NetworkPolicy.value) },
-                                onOpenImportExport = { navController.navigate(Route.ImportExport.value) },
-                            ),
-                    )
-                }
-                composable(Route.Setup.value) {
-                    SetupWizardScreen(
-                        padding = padding,
-                        vm = setupViewModel,
-                        onStartSuccess = {
-                            navController.navigate(Route.Home.value) {
-                                popUpTo(Route.Home.value) { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                    )
-                }
-                composable(Route.NetworkPolicy.value) { NetworkPolicyScreen(padding, networkPolicyViewModel) }
-                composable(Route.ImportExport.value) { ImportExportScreen(padding, importExportViewModel) }
-                composable(
-                    route = Route.ForwardDetails.value,
-                    arguments = listOf(navArgument("forwardId") { type = NavType.StringType }),
-                ) { backStack ->
-                    ForwardDetailsScreen(
-                        padding = padding,
-                        vm = forwardsViewModel,
-                        forwardId = backStack.arguments?.getString("forwardId").orEmpty(),
-                        onDeleteAndReturn = { navController.navigateUp() },
-                    )
-                }
-            }
+            AppNavHost(navController = navController, padding = padding, models = models)
+        }
+    }
+}
+
+private class AppScreenModels(factory: AppViewModelFactory) {
+    val home: HomeViewModel = factory.home()
+    val setup: SetupViewModel = factory.setup()
+    val forwards: ForwardsViewModel = factory.forwards()
+    val logs: LogsViewModel = factory.logs()
+    val settings: SettingsViewModel = factory.settings()
+    val networkPolicy: NetworkPolicyViewModel = factory.networkPolicy()
+    val importExport: ImportExportViewModel = factory.importExport()
+}
+
+private fun homeNavActions(navController: NavHostController) =
+    HomeNavActions(
+        onOpenSetup = { navController.navigate(Route.Setup.value) },
+        onOpenLogs = { navController.navigate(Route.Logs.value) },
+        onOpenSettings = { navController.navigate(Route.Settings.value) },
+        onOpenForwardDetails = { id -> navController.navigate("forwardDetails/$id") },
+    )
+
+private fun settingsNavActions(navController: NavHostController) =
+    SettingsNavActions(
+        onOpenSetup = { navController.navigate(Route.Setup.value) },
+        onOpenLogs = { navController.navigate(Route.Logs.value) },
+        onOpenNetworkPolicy = { navController.navigate(Route.NetworkPolicy.value) },
+        onOpenImportExport = { navController.navigate(Route.ImportExport.value) },
+    )
+
+@Composable
+private fun AppNavHost(
+    navController: NavHostController,
+    padding: PaddingValues,
+    models: AppScreenModels,
+) {
+    NavHost(navController = navController, startDestination = Route.Home.value) {
+        composable(Route.Home.value) {
+            HomeScreen(
+                padding = padding,
+                vm = models.home,
+                forwardsVm = models.forwards,
+                nav = homeNavActions(navController),
+            )
+        }
+        composable(Route.Forwards.value) {
+            ForwardsScreen(
+                padding = padding,
+                vm = models.forwards,
+                onOpenDetails = { forwardId ->
+                    navController.navigate("forwardDetails/$forwardId")
+                },
+            )
+        }
+        composable(Route.Logs.value) { LogsScreen(padding, models.logs, models.networkPolicy) }
+        composable(Route.Settings.value) {
+            SettingsScreen(padding = padding, vm = models.settings, nav = settingsNavActions(navController))
+        }
+        composable(Route.Setup.value) {
+            SetupWizardScreen(
+                padding = padding,
+                vm = models.setup,
+                onStartSuccess = {
+                    navController.navigate(Route.Home.value) {
+                        popUpTo(Route.Home.value) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                },
+            )
+        }
+        composable(Route.NetworkPolicy.value) { NetworkPolicyScreen(padding, models.networkPolicy) }
+        composable(Route.ImportExport.value) { ImportExportScreen(padding, models.importExport) }
+        composable(
+            route = Route.ForwardDetails.value,
+            arguments = listOf(navArgument("forwardId") { type = NavType.StringType }),
+        ) { backStack ->
+            ForwardDetailsScreen(
+                padding = padding,
+                vm = models.forwards,
+                forwardId = backStack.arguments?.getString("forwardId").orEmpty(),
+                onDeleteAndReturn = { navController.navigateUp() },
+            )
         }
     }
 }
@@ -214,49 +235,63 @@ private fun NotificationPermissionGate() {
             openDialog = !granted
         }
     if (openDialog) {
-        AlertDialog(
-            onDismissRequest = { openDialog = false },
-            title = { Text("Notification permission") },
-            text = {
-                Text(
-                    "Rust WebRTC Tunnel needs notifications so Android can keep the tunnel " +
-                        "service visible while it is running in the background.",
-                )
+        NotificationRequestDialog(
+            onAllow = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            onNotNow = {
+                denied = true
+                openDialog = false
             },
-            confirmButton = {
-                TextButton(
-                    onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                ) { Text("Allow") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    denied = true
-                    openDialog = false
-                }) { Text("Not now") }
-            },
+            onDismiss = { openDialog = false },
         )
     }
     if (denied) {
-        AlertDialog(
-            onDismissRequest = { denied = false },
-            title = { Text("Notifications are disabled") },
-            text = { Text("Background tunnel notifications are required for full foreground-service visibility.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val intent =
-                            Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.fromParts("package", context.packageName, null),
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                        denied = false
-                    },
-                ) { Text("Open Settings") }
+        NotificationsDisabledDialog(
+            onOpenAppSettings = {
+                val intent =
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                denied = false
             },
-            dismissButton = { TextButton(onClick = { denied = false }) { Text("Close") } },
+            onClose = { denied = false },
         )
     }
+}
+
+@Composable
+private fun NotificationRequestDialog(
+    onAllow: () -> Unit,
+    onNotNow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Notification permission") },
+        text = {
+            Text(
+                "Rust WebRTC Tunnel needs notifications so Android can keep the tunnel " +
+                    "service visible while it is running in the background.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onAllow) { Text("Allow") } },
+        dismissButton = { TextButton(onClick = onNotNow) { Text("Not now") } },
+    )
+}
+
+@Composable
+private fun NotificationsDisabledDialog(
+    onOpenAppSettings: () -> Unit,
+    onClose: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Notifications are disabled") },
+        text = { Text("Background tunnel notifications are required for full foreground-service visibility.") },
+        confirmButton = { TextButton(onClick = onOpenAppSettings) { Text("Open Settings") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
+    )
 }
 
 @Composable
