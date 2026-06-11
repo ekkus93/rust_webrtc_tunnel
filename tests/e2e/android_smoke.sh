@@ -21,6 +21,8 @@
 #
 # Note: intentionally NOT using `pipefail` — the UI-scraping helpers rely on grep
 # returning no match (exit 1) without aborting command substitutions under `set -e`.
+# shellcheck disable=SC2086  # "cx cy" coordinate strings are intentionally
+# word-split into two positional args for `adb input tap`.
 set -eu
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

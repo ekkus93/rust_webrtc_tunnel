@@ -44,7 +44,11 @@ fn docker_available() -> bool {
 /// Reserve an ephemeral localhost port and return it (the listener is dropped so the
 /// port is free for the real consumer — small TOCTOU window, acceptable for tests).
 fn free_port() -> u16 {
-    StdTcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral").local_addr().unwrap().port()
+    StdTcpListener::bind(("127.0.0.1", 0))
+        .expect("bind ephemeral")
+        .local_addr()
+        .expect("local addr")
+        .port()
 }
 
 fn write_world_readable(path: &Path, contents: &str) {
