@@ -3,7 +3,6 @@ package com.phillipchin.webrtctunnel
 import android.app.Application
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.data.ConfigRepository
-import com.phillipchin.webrtctunnel.data.TunnelRepository
 import com.phillipchin.webrtctunnel.model.IdentityValidationResult
 import com.phillipchin.webrtctunnel.model.NativeRuntimeStatusDto
 import com.phillipchin.webrtctunnel.model.ServiceState
@@ -51,8 +50,8 @@ class TestWebRtcTunnelApplication : Application(), HasAppDependencies {
         appDependencies =
             AppDependencies(
                 context = this,
+                nativeBridgeFactory = { bridge },
                 configRepository = configRepository,
-                tunnelRepository = TunnelRepository(bridge),
                 networkPolicyManager =
                     NetworkPolicyManager {
                         com.phillipchin.webrtctunnel.model.NetworkType.UnmeteredWifi to false

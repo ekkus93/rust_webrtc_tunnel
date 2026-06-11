@@ -22,11 +22,13 @@ import java.util.ArrayDeque
 class TunnelRepositoryTest {
     private lateinit var bridge: RecordingBridge
     private lateinit var repository: TunnelRepository
+    private lateinit var validationClient: IdentityValidationClient
 
     @Before
     fun setUp() {
         bridge = RecordingBridge()
         repository = TunnelRepository(bridge)
+        validationClient = IdentityValidationClient(bridge)
     }
 
     @Test
@@ -81,7 +83,7 @@ class TunnelRepositoryTest {
     @Test
     fun validateConfigPassesThroughBridgeResult() {
         bridge.validationResult = ValidationResult(false, "invalid")
-        assertEquals(ValidationResult(false, "invalid"), repository.validateConfig("/tmp/config.toml"))
+        assertEquals(ValidationResult(false, "invalid"), validationClient.validateConfig("/tmp/config.toml"))
     }
 
     @Test

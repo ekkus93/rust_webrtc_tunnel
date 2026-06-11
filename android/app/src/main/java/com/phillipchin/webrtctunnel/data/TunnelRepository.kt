@@ -3,7 +3,6 @@ package com.phillipchin.webrtctunnel.data
 import com.phillipchin.webrtctunnel.RustTunnelBridge
 import com.phillipchin.webrtctunnel.TunnelNativeBridge
 import com.phillipchin.webrtctunnel.model.ForwardStatus
-import com.phillipchin.webrtctunnel.model.IdentityValidationResult
 import com.phillipchin.webrtctunnel.model.ListenState
 import com.phillipchin.webrtctunnel.model.LogEvent
 import com.phillipchin.webrtctunnel.model.NativeLogEventDto
@@ -13,7 +12,6 @@ import com.phillipchin.webrtctunnel.model.ServiceState
 import com.phillipchin.webrtctunnel.model.TunnelError
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.model.TunnelStatus
-import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -113,22 +111,6 @@ class TunnelRepository(
                 )
         }.getOrDefault(emptyList())
 
-    fun validateConfig(configPath: String): ValidationResult = bridge.validateConfig(configPath)
-
-    fun validateConfigWithIdentity(
-        configPath: String,
-        identityBytes: ByteArray,
-    ): ValidationResult = bridge.validateConfigWithIdentity(configPath, identityBytes)
-
-    fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
-        bridge.validatePrivateIdentity(
-            identityToml,
-        )
-
-    fun validatePublicIdentity(line: String): IdentityValidationResult = bridge.validatePublicIdentity(line)
-
-    fun generateIdentity(peerId: String): IdentityValidationResult = bridge.generateIdentity(peerId)
-
     fun setPolicyBlocked(blockReason: String) {
         val redacted = SensitiveDataRedactor.redactText(blockReason)
         _status.value =
@@ -172,67 +154,67 @@ class TunnelRepository(
     fun updateSessionMeteredAllowance(allowForCurrentSession: Boolean) {
         _status.value = _status.value.copy(allowMeteredForCurrentSession = allowForCurrentSession)
     }
+}
 
-    private fun isPolicyPausedState(state: ServiceState): Boolean =
-        state == ServiceState.PausedMeteredBlocked || state == ServiceState.NoNetwork
+private fun isPolicyPausedState(state: ServiceState): Boolean =
+    state == ServiceState.PausedMeteredBlocked || state == ServiceState.NoNetwork
 
-    private fun mapNativeListenState(
-        state: String,
-        lastError: String?,
-    ): ListenState =
-        when (state.lowercase()) {
-            "listening" -> ListenState.Listening
-            "stopped" -> ListenState.Stopped
-            "error" -> ListenState.Error
-            "disabled" -> ListenState.Disabled
-            "paused" -> ListenState.Paused
-            else -> if (lastError != null) ListenState.Error else ListenState.Stopped
-        }
-
-    private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): TunnelStatus {
-        val modeValue =
-            when (mode) {
-                "answer" -> TunnelMode.Answer
-                else -> TunnelMode.Offer
-            }
-        val stateValue =
-            when (state) {
-                "running" -> if (modeValue == TunnelMode.Answer) ServiceState.Serving else ServiceState.Connected
-                "starting" -> ServiceState.Starting
-                "stopping" -> ServiceState.Stopping
-                "error" -> ServiceState.Error
-                else -> ServiceState.Stopped
-            }
-        val uptimeSeconds =
-            startedAtUnixMs?.let { startedAt ->
-                val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
-                elapsedMs / MILLIS_PER_SECOND
-            }
-        val mappedForwards =
-            forwards.map { forward ->
-                ForwardStatus(
-                    id = forward.id,
-                    name = forward.id,
-                    localHost = forward.localHost,
-                    localPort = forward.localPort,
-                    remoteForwardId = forward.id,
-                    enabled = forward.listenState.lowercase() != "disabled",
-                    listenState = mapNativeListenState(forward.listenState, forward.lastError),
-                    lastError = forward.lastError?.let(SensitiveDataRedactor::redactText),
-                )
-            }
-        return previous.copy(
-            serviceState = stateValue,
-            mode = modeValue,
-            mqttConnected = mqttConnected,
-            activeSessionCount = activeSessionCount,
-            sessionCapacity = sessionCapacity ?: previous.sessionCapacity,
-            uptimeSeconds = uptimeSeconds,
-            forwards = mappedForwards,
-            lastError =
-                lastError?.let {
-                    TunnelError(code = "native_runtime_error", message = it, details = configPath)
-                },
-        )
+private fun mapNativeListenState(
+    state: String,
+    lastError: String?,
+): ListenState =
+    when (state.lowercase()) {
+        "listening" -> ListenState.Listening
+        "stopped" -> ListenState.Stopped
+        "error" -> ListenState.Error
+        "disabled" -> ListenState.Disabled
+        "paused" -> ListenState.Paused
+        else -> if (lastError != null) ListenState.Error else ListenState.Stopped
     }
+
+private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): TunnelStatus {
+    val modeValue =
+        when (mode) {
+            "answer" -> TunnelMode.Answer
+            else -> TunnelMode.Offer
+        }
+    val stateValue =
+        when (state) {
+            "running" -> if (modeValue == TunnelMode.Answer) ServiceState.Serving else ServiceState.Connected
+            "starting" -> ServiceState.Starting
+            "stopping" -> ServiceState.Stopping
+            "error" -> ServiceState.Error
+            else -> ServiceState.Stopped
+        }
+    val uptimeSeconds =
+        startedAtUnixMs?.let { startedAt ->
+            val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+            elapsedMs / MILLIS_PER_SECOND
+        }
+    val mappedForwards =
+        forwards.map { forward ->
+            ForwardStatus(
+                id = forward.id,
+                name = forward.id,
+                localHost = forward.localHost,
+                localPort = forward.localPort,
+                remoteForwardId = forward.id,
+                enabled = forward.listenState.lowercase() != "disabled",
+                listenState = mapNativeListenState(forward.listenState, forward.lastError),
+                lastError = forward.lastError?.let(SensitiveDataRedactor::redactText),
+            )
+        }
+    return previous.copy(
+        serviceState = stateValue,
+        mode = modeValue,
+        mqttConnected = mqttConnected,
+        activeSessionCount = activeSessionCount,
+        sessionCapacity = sessionCapacity ?: previous.sessionCapacity,
+        uptimeSeconds = uptimeSeconds,
+        forwards = mappedForwards,
+        lastError =
+            lastError?.let {
+                TunnelError(code = "native_runtime_error", message = it, details = configPath)
+            },
+    )
 }

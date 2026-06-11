@@ -146,7 +146,7 @@ class SetupViewModel(
         refreshForwards()
     }
 
-    fun validateConfig(): ValidationResult = deps.tunnelRepository.validateConfig(deps.configRepository.configPath)
+    fun validateConfig(): ValidationResult = deps.identityValidation.validateConfig(deps.configRepository.configPath)
 
     fun validateForwardDraft(
         draft: ForwardConfig,
@@ -232,7 +232,7 @@ class SetupViewModel(
         val resolved =
             runCatching {
                 val privateIdentity = deps.identityRepository.readPrivateIdentityFile(trimmed).getOrThrow()
-                val validated = deps.tunnelRepository.validatePrivateIdentity(privateIdentity)
+                val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
                 require(validated.valid) { validated.message ?: "Invalid private identity" }
                 val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
                 val canonicalPublic = validated.canonicalPublicIdentity ?: ""
@@ -266,7 +266,7 @@ class SetupViewModel(
                 val privateIdentity =
                     deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                         ?: error("Unable to read private identity from selected URI")
-                val validated = deps.tunnelRepository.validatePrivateIdentity(privateIdentity)
+                val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
                 require(validated.valid) { validated.message ?: "Invalid private identity" }
                 val canonicalPrivate = validated.canonicalPrivateIdentity ?: privateIdentity
                 val canonicalPublic = validated.canonicalPublicIdentity ?: ""
@@ -304,7 +304,7 @@ class SetupViewModel(
             return
         }
 
-        val validated = deps.tunnelRepository.validatePublicIdentity(value)
+        val validated = deps.identityValidation.validatePublicIdentity(value)
         val updated =
             when {
                 !validated.valid ->
@@ -345,7 +345,7 @@ class SetupViewModel(
 
     fun generateIdentity() {
         val current = _state.value
-        val generated = deps.tunnelRepository.generateIdentity(current.input.localPeerId)
+        val generated = deps.identityValidation.generateIdentity(current.input.localPeerId)
         if (!generated.valid) {
             _state.value =
                 current
@@ -552,7 +552,7 @@ class SetupViewModel(
         withContext(Dispatchers.IO) {
             runCatching {
                 val bytes = deps.identityRepository.readPrivateIdentityPlaintext()
-                val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
+                val validated = deps.identityValidation.validatePrivateIdentity(bytes.decodeToString())
                 require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
                 val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
                 val publicIdentity =
@@ -604,7 +604,7 @@ class SetupViewModel(
     private fun importPrivateIdentity(path: String): Result<Triple<ByteArray, String, String>> =
         runCatching {
             val privateIdentity = deps.identityRepository.readPrivateIdentityFile(path).getOrThrow()
-            val validated = deps.tunnelRepository.validatePrivateIdentity(privateIdentity)
+            val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
             require(validated.valid) { validated.message ?: "Invalid private identity" }
             val canonicalPrivate = validated.canonicalPrivateIdentity ?: privateIdentity
             val canonicalPublic =
@@ -620,7 +620,7 @@ class SetupViewModel(
         expectedRemotePeerId: String,
     ): Result<String> =
         runCatching {
-            val validated = deps.tunnelRepository.validatePublicIdentity(line)
+            val validated = deps.identityValidation.validatePublicIdentity(line)
             require(validated.valid) { validated.message ?: "Invalid public identity" }
             val peerId = validated.peerId ?: throw IllegalArgumentException("Public identity missing peer ID")
             require(peerId == expectedRemotePeerId) {
@@ -640,7 +640,7 @@ class SetupViewModel(
         return runCatching {
             temp.parentFile?.mkdirs()
             temp.writeText(candidate)
-            deps.tunnelRepository.validateConfigWithIdentity(temp.absolutePath, identityBytes)
+            deps.identityValidation.validateConfigWithIdentity(temp.absolutePath, identityBytes)
         }.getOrElse { ValidationResult(false, it.message) }.also {
             temp.delete()
         }
@@ -673,7 +673,7 @@ class SetupViewModel(
                 } else if (state.importPublicIdentity.isBlank()) {
                     "Remote public identity is required"
                 } else {
-                    val validated = deps.tunnelRepository.validatePublicIdentity(state.importPublicIdentity)
+                    val validated = deps.identityValidation.validatePublicIdentity(state.importPublicIdentity)
                     when {
                         !validated.valid -> validated.message ?: "Invalid remote public identity"
                         validated.peerId == input.localPeerId -> "Remote identity cannot be the same as local identity"
@@ -818,9 +818,9 @@ class ForwardsViewModel(private val deps: AppDependencies) : ViewModel() {
             temp.writeText(candidate)
             val result =
                 if (identity != null && identity.isNotEmpty()) {
-                    deps.tunnelRepository.validateConfigWithIdentity(temp.absolutePath, identity)
+                    deps.identityValidation.validateConfigWithIdentity(temp.absolutePath, identity)
                 } else {
-                    deps.tunnelRepository.validateConfig(temp.absolutePath)
+                    deps.identityValidation.validateConfig(temp.absolutePath)
                 }
             if (result.valid) {
                 deps.configRepository.writeConfigAtomically(candidate)
@@ -923,7 +923,7 @@ class SettingsViewModel(
         refreshPublicIdentity()
     }
 
-    fun validateConfig(): ValidationResult = deps.tunnelRepository.validateConfig(deps.configRepository.configPath)
+    fun validateConfig(): ValidationResult = deps.identityValidation.validateConfig(deps.configRepository.configPath)
 
     fun savePreferences(updated: AndroidAppPreferences) {
         viewModelScope.launch { deps.configRepository.savePreferences(updated) }
@@ -1176,9 +1176,9 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
             val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
             val validation =
                 if (identity != null && identity.isNotEmpty()) {
-                    deps.tunnelRepository.validateConfigWithIdentity(temp.absolutePath, identity)
+                    deps.identityValidation.validateConfigWithIdentity(temp.absolutePath, identity)
                 } else {
-                    deps.tunnelRepository.validateConfig(temp.absolutePath)
+                    deps.identityValidation.validateConfig(temp.absolutePath)
                 }
             require(validation.valid) { validation.message ?: "Config validation failed" }
             deps.configRepository.writeConfigAtomically(candidate)
@@ -1188,7 +1188,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
     }
 
     private fun importPrivateIdentityContent(privateIdentity: String) {
-        val validated = deps.tunnelRepository.validatePrivateIdentity(privateIdentity)
+        val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
         require(validated.valid) { validated.message ?: "Invalid private identity" }
         deps.identityRepository.storeEncryptedIdentity(
             (validated.canonicalPrivateIdentity ?: privateIdentity).toByteArray(),
@@ -1197,7 +1197,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
     }
 
     private fun importPublicIdentityLine(line: String) {
-        val validated = deps.tunnelRepository.validatePublicIdentity(line)
+        val validated = deps.identityValidation.validatePublicIdentity(line)
         require(validated.valid) { validated.message ?: "Invalid public identity" }
         deps.identityRepository.appendAuthorizedPublicIdentity(
             validated.canonicalPublicIdentity ?: line.trim(),

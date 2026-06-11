@@ -7,6 +7,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.phillipchin.webrtctunnel.data.ConfigRepository
+import com.phillipchin.webrtctunnel.data.IdentityValidationClient
 import com.phillipchin.webrtctunnel.data.SensitiveDataRedactor
 import com.phillipchin.webrtctunnel.data.TunnelRepository
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
@@ -37,6 +38,7 @@ class TunnelForegroundService : Service() {
     private val tag = "TunnelForegroundService"
     private lateinit var notifications: NotificationController
     private lateinit var repository: TunnelRepository
+    private lateinit var identityValidation: IdentityValidationClient
     private lateinit var configRepository: ConfigRepository
     private lateinit var identityRepository: IdentityRepository
     private lateinit var networkPolicyManager: NetworkPolicyManager
@@ -58,6 +60,7 @@ class TunnelForegroundService : Service() {
         val deps = (application as HasAppDependencies).deps
         configRepository = deps.configRepository
         repository = deps.tunnelRepository
+        identityValidation = deps.identityValidation
         identityRepository = deps.identityRepository
         networkPolicyManager = deps.networkPolicyManager
         repository.updateSessionMeteredAllowance(false)
@@ -168,7 +171,7 @@ class TunnelForegroundService : Service() {
                 }
         val validation =
             withContext(Dispatchers.IO) {
-                repository.validateConfigWithIdentity(configRepository.configPath, identity)
+                identityValidation.validateConfigWithIdentity(configRepository.configPath, identity)
             }
         if (!validation.valid) {
             abortStartup(

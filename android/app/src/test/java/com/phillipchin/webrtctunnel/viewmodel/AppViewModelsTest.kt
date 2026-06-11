@@ -47,12 +47,11 @@ class AppViewModelsTest {
     fun setUp() {
         configRepository = ConfigRepository(app)
         recordingBridge = RecordingBridge()
-        tunnelRepository = TunnelRepository(recordingBridge)
         deps =
             AppDependencies(
                 context = app,
+                nativeBridgeFactory = { recordingBridge },
                 configRepository = configRepository,
-                tunnelRepository = tunnelRepository,
                 networkPolicyManager =
                     NetworkPolicyManager {
                         NetworkType.UnmeteredWifi to false
@@ -67,6 +66,7 @@ class AppViewModelsTest {
                         },
                     ),
             )
+        tunnelRepository = deps.tunnelRepository
     }
 
     @Test
@@ -401,8 +401,8 @@ class AppViewModelsTest {
         val throwingDeps =
             AppDependencies(
                 context = app,
+                nativeBridgeFactory = { throwingBridge },
                 configRepository = configRepository,
-                tunnelRepository = TunnelRepository(throwingBridge),
                 networkPolicyManager =
                     NetworkPolicyManager {
                         NetworkType.UnmeteredWifi to false
