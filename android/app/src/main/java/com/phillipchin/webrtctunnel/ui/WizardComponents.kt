@@ -35,57 +35,13 @@ fun WizardStepper(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             steps.forEachIndexed { index, _ ->
-                val active = index == currentIndex
-                val completed = index < currentIndex
-                val circleColor =
-                    when {
-                        active -> MaterialTheme.colorScheme.primary
-                        completed -> MaterialTheme.colorScheme.primaryContainer
-                        else -> Color(color = 0xFFE5E7EB)
-                    }
-                Box(
-                    modifier =
-                        Modifier
-                            .weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier =
-                                Modifier
-                                    .heightIn(min = 32.dp)
-                                    .background(circleColor, RoundedCornerShape(999.dp))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "${index + 1}",
-                                color = if (active) Color.White else Color(color = 0xFF374151),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        if (index < steps.lastIndex) {
-                            Box(
-                                modifier =
-                                    Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 2.dp)
-                                        .padding(horizontal = 4.dp)
-                                        .background(
-                                            if (completed) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                Color(
-                                                    color = 0xFFD1D5DB,
-                                                )
-                                            },
-                                        ),
-                            )
-                        }
-                    }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    WizardStepIndicator(
+                        stepNumber = index + 1,
+                        active = index == currentIndex,
+                        completed = index < currentIndex,
+                        showConnector = index < steps.lastIndex,
+                    )
                 }
             }
         }
@@ -93,6 +49,53 @@ fun WizardStepper(
             "Step ${currentIndex + 1} of ${steps.size}: ${steps[currentIndex]}",
             style = MaterialTheme.typography.titleSmall,
         )
+    }
+}
+
+@Composable
+private fun WizardStepIndicator(
+    stepNumber: Int,
+    active: Boolean,
+    completed: Boolean,
+    showConnector: Boolean,
+) {
+    val circleColor =
+        when {
+            active -> MaterialTheme.colorScheme.primary
+            completed -> MaterialTheme.colorScheme.primaryContainer
+            else -> Color(color = 0xFFE5E7EB)
+        }
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier =
+                Modifier
+                    .heightIn(min = 32.dp)
+                    .background(circleColor, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "$stepNumber",
+                color = if (active) Color.White else Color(color = 0xFF374151),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (showConnector) {
+            Box(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .heightIn(min = 2.dp)
+                        .padding(horizontal = 4.dp)
+                        .background(
+                            if (completed) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color(color = 0xFFD1D5DB)
+                            },
+                        ),
+            )
+        }
     }
 }
 
