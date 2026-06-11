@@ -31,14 +31,21 @@ pass with zero errors and warnings:
 Commands (run from `android/`):
 
 - `./gradlew ktlintCheck`   (auto-fix what's fixable with `./gradlew ktlintFormat`)
-- `./gradlew detekt`        (once wired in)
+- `./gradlew detekt`
 - `./gradlew lintDebug`
+
+`./gradlew check` runs ktlint, detekt, and Android lint together.
 
 Current wiring status:
 - Android lint: available (AGP built-in).
 - ktlint: wired via the `org.jlleitschuh.gradle.ktlint` Gradle plugin
   (`gradle/libs.versions.toml`).
-- detekt: not yet wired (TODO).
+- detekt: wired. The plain `detekt` task (main + test + androidTest sources) runs
+  as part of `check` via an explicit `dependsOn` in `app/build.gradle.kts`.
+  The type-resolution variant tasks (`detektDebug`/`detektRelease`) are **not**
+  wired into `check` yet: they enable extra rules requiring type resolution
+  (e.g. `InjectDispatcher`, `UseOrEmpty`) that currently report findings. Wiring
+  them in is a follow-up that must fix those findings (no suppression).
 
 ## Rust linting
 

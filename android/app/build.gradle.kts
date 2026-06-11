@@ -138,4 +138,18 @@ tasks.named("preBuild") {
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("detekt.yml"))
+    // Analyze the same source sets ktlint does, not just main.
+    source.setFrom(
+        "src/main/java",
+        "src/test/java",
+        "src/androidTest/java",
+    )
+}
+
+// Make detekt an explicit part of the `check` lifecycle rather than relying on
+// the plugin's implicit attachment. Scoped to the plain `detekt` task; the
+// type-resolution variant tasks (detektDebug/detektRelease) are not wired in yet
+// (they enable extra rules that currently report findings — see CLAUDE.md).
+tasks.named("check") {
+    dependsOn(tasks.named("detekt"))
 }
