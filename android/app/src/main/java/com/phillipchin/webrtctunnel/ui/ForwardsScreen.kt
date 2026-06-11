@@ -38,6 +38,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phillipchin.webrtctunnel.model.ForwardConfig
+import com.phillipchin.webrtctunnel.model.TunnelStatus
 import com.phillipchin.webrtctunnel.viewmodel.ForwardsViewModel
 
 @Composable
@@ -76,31 +78,7 @@ fun ForwardsScreen(
             item { EmptyStateCard("No forwards configured. Tap + to add one.") }
         } else {
             items(forwards) { forward ->
-                StatusCard {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenDetails(forward.id) },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(forward.name, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            val runtime = status.forwards.firstOrNull { it.id == forward.id }
-                            val stateLabel =
-                                mapForwardListenLabel(
-                                    runtime?.listenState?.name ?: if (forward.enabled) "configured" else "disabled",
-                                )
-                            Text(stateLabel, color = stateColorToken(stateLabel))
-                        }
-                        Text("›", style = MaterialTheme.typography.titleLarge)
-                    }
-                }
+                ForwardListRow(forward = forward, status = status, onClick = { onOpenDetails(forward.id) })
             }
         }
     }
@@ -128,8 +106,6 @@ fun ForwardDetailsScreen(
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     val forward = forwards.firstOrNull { it.id == forwardId }
@@ -142,57 +118,18 @@ fun ForwardDetailsScreen(
         }
         SectionHeader(forward.name, "Forward details")
         Spacer(Modifier.height(12.dp))
-        val localAddress = localForwardAddress(forward)
-        val browserUrl = browserUrlForForward(forward)
-        val canOpenBrowser = isBrowserOpenable(forward)
         StatusCard {
             Text("Status: ${runtime?.listenState ?: if (forward.enabled) "Configured" else "Disabled"}")
-            Text("Local address: $localAddress")
+            Text("Local address: ${localForwardAddress(forward)}")
             Text("Remote forward ID: ${forward.remoteForwardId}")
             runtime?.lastError?.let { Text("Last error: $it", color = MaterialTheme.colorScheme.error) }
         }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val copyLabel = if (canOpenBrowser) "Copy URL" else "Copy address"
-            val copyValue = if (canOpenBrowser) browserUrl else localAddress
-            OutlinedButton(
-                onClick = { clipboard.setText(AnnotatedString(copyValue)) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null)
-                Spacer(Modifier.size(4.dp))
-                Text(copyLabel)
-            }
-            if (canOpenBrowser) {
-                OutlinedButton(
-                    onClick = {
-                        val intent =
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(browserUrl),
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Open ${forward.name} in browser")
-                    Text("Open Browser")
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { vm.testLocalPort(forward) },
-                modifier = Modifier.weight(1f),
-            ) { Text("Test Local Port") }
-            OutlinedButton(
-                onClick = { vm.saveForward(forward.copy(enabled = !forward.enabled)) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (forward.enabled) "Disable" else "Enable")
-            }
-        }
+        ForwardDetailActions(
+            forward = forward,
+            onTestPort = { vm.testLocalPort(forward) },
+            onToggleEnabled = { vm.saveForward(forward.copy(enabled = !forward.enabled)) },
+        )
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = { showEditDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit") }
@@ -201,20 +138,14 @@ fun ForwardDetailsScreen(
     }
 
     if (showDeleteDialog && forward != null) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete forward?") },
-            text = { Text("This removes ${forward.name} from configuration.") },
-            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.deleteForward(forward.id)
-                        showDeleteDialog = false
-                        onDeleteAndReturn()
-                    },
-                ) { Text("Delete") }
+        DeleteForwardDialog(
+            forwardName = forward.name,
+            onConfirm = {
+                vm.deleteForward(forward.id)
+                showDeleteDialog = false
+                onDeleteAndReturn()
             },
+            onDismiss = { showDeleteDialog = false },
         )
     }
     if (showEditDialog && forward != null) {
@@ -229,4 +160,100 @@ fun ForwardDetailsScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ForwardListRow(
+    forward: ForwardConfig,
+    status: TunnelStatus,
+    onClick: () -> Unit,
+) {
+    StatusCard {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onClick() },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(forward.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                val runtime = status.forwards.firstOrNull { it.id == forward.id }
+                val stateLabel =
+                    mapForwardListenLabel(
+                        runtime?.listenState?.name ?: if (forward.enabled) "configured" else "disabled",
+                    )
+                Text(stateLabel, color = stateColorToken(stateLabel))
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge)
+        }
+    }
+}
+
+@Composable
+private fun ForwardDetailActions(
+    forward: ForwardConfig,
+    onTestPort: () -> Unit,
+    onToggleEnabled: () -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val localAddress = localForwardAddress(forward)
+    val browserUrl = browserUrlForForward(forward)
+    val canOpenBrowser = isBrowserOpenable(forward)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val copyLabel = if (canOpenBrowser) "Copy URL" else "Copy address"
+        val copyValue = if (canOpenBrowser) browserUrl else localAddress
+        OutlinedButton(
+            onClick = { clipboard.setText(AnnotatedString(copyValue)) },
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = null)
+            Spacer(Modifier.size(4.dp))
+            Text(copyLabel)
+        }
+        if (canOpenBrowser) {
+            OutlinedButton(
+                onClick = {
+                    val intent =
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse(browserUrl),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open ${forward.name} in browser")
+                Text("Open Browser")
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = onTestPort, modifier = Modifier.weight(1f)) { Text("Test Local Port") }
+        OutlinedButton(onClick = onToggleEnabled, modifier = Modifier.weight(1f)) {
+            Text(if (forward.enabled) "Disable" else "Enable")
+        }
+    }
+}
+
+@Composable
+private fun DeleteForwardDialog(
+    forwardName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete forward?") },
+        text = { Text("This removes $forwardName from configuration.") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete") } },
+    )
 }
