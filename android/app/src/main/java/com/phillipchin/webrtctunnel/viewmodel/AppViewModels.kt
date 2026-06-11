@@ -499,18 +499,7 @@ class SetupViewModel(
                 }
                 imported.getOrNull()
             } else {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        val bytes = deps.identityRepository.readPrivateIdentityPlaintext()
-                        val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
-                        require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
-                        val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
-                        val publicIdentity =
-                            validated.canonicalPublicIdentity
-                                ?: deps.identityRepository.readPublicIdentity()
-                        Triple(bytes, publicIdentity, peerId)
-                    }.getOrNull()
-                }
+                resolveStoredIdentity()
             }
         val identityBytes = importedIdentity?.first
         if (identityBytes == null || identityBytes.isEmpty()) {
@@ -544,6 +533,39 @@ class SetupViewModel(
                     .withCanAdvance(_forwards.value)
             return false
         }
+        if (!persistConfig(candidate, input, current)) {
+            return false
+        }
+        _state.value =
+            current.copy(
+                localPublicIdentity = importedIdentity.second,
+                identityPeerId = identityPeerId,
+                errorMessage = null,
+                saveResult = "Configuration saved",
+            ).withCanAdvance(_forwards.value)
+        return true
+    }
+
+    private suspend fun resolveStoredIdentity(): Triple<ByteArray, String, String>? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = deps.identityRepository.readPrivateIdentityPlaintext()
+                val validated = deps.tunnelRepository.validatePrivateIdentity(bytes.decodeToString())
+                require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
+                val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
+                val publicIdentity =
+                    validated.canonicalPublicIdentity ?: deps.identityRepository.readPublicIdentity()
+                Triple(bytes, publicIdentity, peerId)
+            }.getOrNull()
+        }
+
+    // Persists config/input/preferences off the main thread. Returns true on success;
+    // sets a redacted repository error and returns false on failure.
+    private suspend fun persistConfig(
+        candidate: String,
+        input: SetupConfigInput,
+        current: SetupWizardState,
+    ): Boolean {
         val persistResult =
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -562,13 +584,6 @@ class SetupViewModel(
             repositoryError(current, persistResult.exceptionOrNull()?.message ?: "Failed saving configuration")
             return false
         }
-        _state.value =
-            current.copy(
-                localPublicIdentity = importedIdentity.second,
-                identityPeerId = identityPeerId,
-                errorMessage = null,
-                saveResult = "Configuration saved",
-            ).withCanAdvance(_forwards.value)
         return true
     }
 
