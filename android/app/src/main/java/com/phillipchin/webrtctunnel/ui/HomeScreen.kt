@@ -119,16 +119,24 @@ private fun NetworkTypeIcon(networkType: NetworkType) {
     Icon(icon, contentDescription = description, tint = Color(color = 0xFF6B7280))
 }
 
+data class HomeNavActions(
+    val onOpenSetup: () -> Unit,
+    val onOpenLogs: () -> Unit,
+    val onOpenSettings: () -> Unit,
+    val onOpenForwardDetails: (String) -> Unit,
+)
+
 @Composable
 fun HomeScreen(
     padding: PaddingValues,
     vm: HomeViewModel,
     forwardsVm: ForwardsViewModel,
-    onOpenSetup: () -> Unit,
-    onOpenLogs: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenForwardDetails: (String) -> Unit,
+    nav: HomeNavActions,
 ) {
+    val onOpenSetup = nav.onOpenSetup
+    val onOpenLogs = nav.onOpenLogs
+    val onOpenSettings = nav.onOpenSettings
+    val onOpenForwardDetails = nav.onOpenForwardDetails
     val status by vm.status.collectAsStateWithLifecycle()
     val configuredForwards by vm.configuredForwards.collectAsStateWithLifecycle()
     val statusUi = mapStatusUi(status)
@@ -238,21 +246,24 @@ fun HomeScreen(
         Spacer(Modifier.height(12.dp))
         HomeActionRow(
             status = status,
-            onStart = { vm.startTunnel(TunnelMode.Offer) },
-            onStop = vm::stopTunnel,
-            onOpenSetup = onOpenSetup,
-            onOpenLogs = onOpenLogs,
-            onOpenSettings = onOpenSettings,
-            onAllowMeteredTemporary = { showMeteredWarningDialog = true },
-            onOpenBrowser =
-                browserForward?.let {
-                    {
-                        val url = browserUrlForForward(it)
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    }
-                },
+            actions =
+                HomeRowActions(
+                    onStart = { vm.startTunnel(TunnelMode.Offer) },
+                    onStop = vm::stopTunnel,
+                    onOpenSetup = onOpenSetup,
+                    onOpenLogs = onOpenLogs,
+                    onOpenSettings = onOpenSettings,
+                    onAllowMeteredTemporary = { showMeteredWarningDialog = true },
+                    onOpenBrowser =
+                        browserForward?.let {
+                            {
+                                val url = browserUrlForForward(it)
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                        },
+                ),
         )
     }
     if (showMeteredWarningDialog) {
@@ -266,8 +277,7 @@ fun HomeScreen(
     }
     if (showAddForwardDialog) {
         EditForwardDialog(
-            mode = ForwardEditorMode.Add,
-            initial = defaultNewForward(configuredForwards),
+            editor = ForwardEditorState(ForwardEditorMode.Add, defaultNewForward(configuredForwards)),
             existingForwards = configuredForwards,
             validateDraft = forwardsVm::validateForwardDraft,
             onDismiss = { showAddForwardDialog = false },
@@ -280,17 +290,28 @@ fun HomeScreen(
     }
 }
 
+private data class HomeRowActions(
+    val onStart: () -> Unit,
+    val onStop: () -> Unit,
+    val onOpenSetup: () -> Unit,
+    val onOpenLogs: () -> Unit,
+    val onOpenSettings: () -> Unit,
+    val onAllowMeteredTemporary: () -> Unit,
+    val onOpenBrowser: (() -> Unit)? = null,
+)
+
 @Composable
 private fun HomeActionRow(
     status: TunnelStatus,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onOpenSetup: () -> Unit,
-    onOpenLogs: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onAllowMeteredTemporary: () -> Unit,
-    onOpenBrowser: (() -> Unit)? = null,
+    actions: HomeRowActions,
 ) {
+    val onStart = actions.onStart
+    val onStop = actions.onStop
+    val onOpenSetup = actions.onOpenSetup
+    val onOpenLogs = actions.onOpenLogs
+    val onOpenSettings = actions.onOpenSettings
+    val onAllowMeteredTemporary = actions.onAllowMeteredTemporary
+    val onOpenBrowser = actions.onOpenBrowser
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         when (status.serviceState) {
             ServiceState.Stopped -> {

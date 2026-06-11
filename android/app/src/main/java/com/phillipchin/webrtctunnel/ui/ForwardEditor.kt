@@ -48,16 +48,15 @@ internal fun forwardEditorLabels(mode: ForwardEditorMode): ForwardEditorLabels =
 
 @Composable
 internal fun EditForwardDialog(
-    mode: ForwardEditorMode,
-    initial: ForwardConfig,
+    editor: ForwardEditorState,
     existingForwards: List<ForwardConfig>,
     validateDraft: (ForwardConfig, List<ForwardConfig>) -> String?,
     onDismiss: () -> Unit,
     onSave: (ForwardConfig) -> Unit,
 ) {
-    var value by remember(initial) { mutableStateOf(initial) }
-    var validationError by remember(initial) { mutableStateOf<String?>(null) }
-    val labels = forwardEditorLabels(mode)
+    var value by remember(editor.draft) { mutableStateOf(editor.draft) }
+    var validationError by remember(editor.draft) { mutableStateOf<String?>(null) }
+    val labels = forwardEditorLabels(editor.mode)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(labels.title) },

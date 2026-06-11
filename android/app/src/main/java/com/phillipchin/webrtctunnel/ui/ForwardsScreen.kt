@@ -106,8 +106,7 @@ fun ForwardsScreen(
     }
     if (showAddDialog) {
         EditForwardDialog(
-            mode = ForwardEditorMode.Add,
-            initial = defaultNewForward(forwards),
+            editor = ForwardEditorState(ForwardEditorMode.Add, defaultNewForward(forwards)),
             existingForwards = forwards,
             validateDraft = vm::validateForwardDraft,
             onDismiss = { showAddDialog = false },
@@ -220,8 +219,7 @@ fun ForwardDetailsScreen(
     }
     if (showEditDialog && forward != null) {
         EditForwardDialog(
-            mode = ForwardEditorMode.Edit,
-            initial = forward,
+            editor = ForwardEditorState(ForwardEditorMode.Edit, forward),
             existingForwards = forwards,
             validateDraft = vm::validateForwardDraft,
             onDismiss = { showEditDialog = false },

@@ -133,10 +133,13 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
                         padding = padding,
                         vm = homeViewModel,
                         forwardsVm = forwardsViewModel,
-                        onOpenSetup = { navController.navigate(Route.Setup.value) },
-                        onOpenLogs = { navController.navigate(Route.Logs.value) },
-                        onOpenSettings = { navController.navigate(Route.Settings.value) },
-                        onOpenForwardDetails = { id -> navController.navigate("forwardDetails/$id") },
+                        nav =
+                            HomeNavActions(
+                                onOpenSetup = { navController.navigate(Route.Setup.value) },
+                                onOpenLogs = { navController.navigate(Route.Logs.value) },
+                                onOpenSettings = { navController.navigate(Route.Settings.value) },
+                                onOpenForwardDetails = { id -> navController.navigate("forwardDetails/$id") },
+                            ),
                     )
                 }
                 composable(Route.Forwards.value) {
@@ -153,10 +156,13 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
                     SettingsScreen(
                         padding = padding,
                         vm = settingsViewModel,
-                        onOpenSetup = { navController.navigate(Route.Setup.value) },
-                        onOpenLogs = { navController.navigate(Route.Logs.value) },
-                        onOpenNetworkPolicy = { navController.navigate(Route.NetworkPolicy.value) },
-                        onOpenImportExport = { navController.navigate(Route.ImportExport.value) },
+                        nav =
+                            SettingsNavActions(
+                                onOpenSetup = { navController.navigate(Route.Setup.value) },
+                                onOpenLogs = { navController.navigate(Route.Logs.value) },
+                                onOpenNetworkPolicy = { navController.navigate(Route.NetworkPolicy.value) },
+                                onOpenImportExport = { navController.navigate(Route.ImportExport.value) },
+                            ),
                     )
                 }
                 composable(Route.Setup.value) {

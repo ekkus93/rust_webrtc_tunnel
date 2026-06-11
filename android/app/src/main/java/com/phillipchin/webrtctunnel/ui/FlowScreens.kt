@@ -148,8 +148,7 @@ fun SetupWizardScreen(
 
     editingForward?.let { editor ->
         EditForwardDialog(
-            mode = editor.mode,
-            initial = editor.draft,
+            editor = editor,
             existingForwards = forwards,
             validateDraft = vm::validateForwardDraft,
             onDismiss = { editingForward = null },

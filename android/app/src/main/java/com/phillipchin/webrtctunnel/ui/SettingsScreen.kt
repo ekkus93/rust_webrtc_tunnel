@@ -40,15 +40,23 @@ private fun truncateIdentity(key: String): String =
         key
     }
 
+data class SettingsNavActions(
+    val onOpenSetup: () -> Unit,
+    val onOpenLogs: () -> Unit,
+    val onOpenNetworkPolicy: () -> Unit,
+    val onOpenImportExport: () -> Unit,
+)
+
 @Composable
 fun SettingsScreen(
     padding: PaddingValues,
     vm: SettingsViewModel,
-    onOpenSetup: () -> Unit,
-    onOpenLogs: () -> Unit,
-    onOpenNetworkPolicy: () -> Unit,
-    onOpenImportExport: () -> Unit,
+    nav: SettingsNavActions,
 ) {
+    val onOpenSetup = nav.onOpenSetup
+    val onOpenLogs = nav.onOpenLogs
+    val onOpenNetworkPolicy = nav.onOpenNetworkPolicy
+    val onOpenImportExport = nav.onOpenImportExport
     val prefs by vm.preferences.collectAsStateWithLifecycle(initialValue = AndroidAppPreferences())
     val uiState by vm.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
