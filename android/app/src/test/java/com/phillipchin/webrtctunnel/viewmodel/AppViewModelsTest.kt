@@ -368,33 +368,30 @@ class AppViewModelsTest {
 
                 override fun getRecentLogsJson(maxEvents: Int): String = "[]"
 
-                override fun validateConfig(configPath: String): ValidationResult = throw RuntimeException("boom")
+                override fun validateConfig(configPath: String): ValidationResult = error("boom")
 
                 override fun validateConfigWithIdentity(
                     configPath: String,
                     identityBytes: ByteArray,
-                ): ValidationResult =
-                    throw RuntimeException(
-                        "boom",
-                    )
+                ): ValidationResult = error("boom")
 
                 override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
                     IdentityValidationResult(
                         valid = true,
-                        canonical_public_identity = "canon",
-                        canonical_private_identity = identityToml,
-                        peer_id = "android-phone",
+                        canonicalPublicIdentity = "canon",
+                        canonicalPrivateIdentity = identityToml,
+                        peerId = "android-phone",
                     )
 
                 override fun validatePublicIdentity(line: String): IdentityValidationResult =
-                    IdentityValidationResult(valid = true, canonical_public_identity = line.trim(), peer_id = "remote-peer")
+                    IdentityValidationResult(valid = true, canonicalPublicIdentity = line.trim(), peerId = "remote-peer")
 
                 override fun generateIdentity(peerId: String): IdentityValidationResult =
                     IdentityValidationResult(
                         valid = true,
-                        canonical_public_identity = "canon",
-                        canonical_private_identity = "private",
-                        peer_id = peerId,
+                        canonicalPublicIdentity = "canon",
+                        canonicalPrivateIdentity = "private",
+                        peerId = peerId,
                     )
             }
         val throwingDeps =
@@ -488,20 +485,20 @@ class AppViewModelsTest {
         override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
             IdentityValidationResult(
                 valid = true,
-                canonical_public_identity = "canon",
-                canonical_private_identity = identityToml,
-                peer_id = "android-phone",
+                canonicalPublicIdentity = "canon",
+                canonicalPrivateIdentity = identityToml,
+                peerId = "android-phone",
             )
 
         override fun validatePublicIdentity(line: String): IdentityValidationResult =
-            IdentityValidationResult(valid = true, canonical_public_identity = line.trim(), peer_id = "remote-peer")
+            IdentityValidationResult(valid = true, canonicalPublicIdentity = line.trim(), peerId = "remote-peer")
 
         override fun generateIdentity(peerId: String): IdentityValidationResult =
             IdentityValidationResult(
                 valid = true,
-                canonical_public_identity = "canon",
-                canonical_private_identity = "private",
-                peer_id = peerId,
+                canonicalPublicIdentity = "canon",
+                canonicalPrivateIdentity = "private",
+                peerId = peerId,
             )
     }
 

@@ -128,7 +128,6 @@ fun SetupWizardScreen(
                 )
             SetupStep.Forwards ->
                 ForwardsStepContent(
-                    vm,
                     forwards,
                     onAdd = { editingForward = beginAddForwardEdit(forwards) },
                     onEdit = { editingForward = beginEditForward(it) },
@@ -351,7 +350,6 @@ private fun PeerStepContent(
 
 @Composable
 private fun ForwardsStepContent(
-    vm: SetupViewModel,
     forwards: List<ForwardConfig>,
     onAdd: () -> Unit,
     onEdit: (ForwardConfig) -> Unit,

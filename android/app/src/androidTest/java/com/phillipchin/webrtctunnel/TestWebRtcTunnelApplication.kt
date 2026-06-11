@@ -179,24 +179,24 @@ class RecordingBridge : TunnelNativeBridge {
     override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = true,
-            canonical_public_identity = "android-phone ssh-ed25519 AAAA test",
-            canonical_private_identity = identityToml,
-            peer_id = "android-phone",
+            canonicalPublicIdentity = "android-phone ssh-ed25519 AAAA test",
+            canonicalPrivateIdentity = identityToml,
+            peerId = "android-phone",
         )
 
     override fun validatePublicIdentity(line: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = line.isNotBlank(),
             message = if (line.isBlank()) "empty" else null,
-            canonical_public_identity = line.trim(),
-            peer_id = "desktop-peer",
+            canonicalPublicIdentity = line.trim(),
+            peerId = "desktop-peer",
         )
 
     override fun generateIdentity(peerId: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = true,
-            canonical_public_identity = "$peerId ssh-ed25519 AAAA generated",
-            canonical_private_identity = "[identity]\npeer_id = \"$peerId\"\n",
-            peer_id = peerId,
+            canonicalPublicIdentity = "$peerId ssh-ed25519 AAAA generated",
+            canonicalPrivateIdentity = "[identity]\npeer_id = \"$peerId\"\n",
+            peerId = peerId,
         )
 }

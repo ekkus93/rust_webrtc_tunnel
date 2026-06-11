@@ -180,11 +180,11 @@ class TunnelRepositoryTest {
                 NativeRuntimeStatusDto(
                     state = "running",
                     mode = "offer",
-                    config_path = "/tmp/config.toml",
+                    configPath = "/tmp/config.toml",
                     active = true,
-                    mqtt_connected = true,
-                    active_session_count = 2,
-                    session_capacity = 16,
+                    mqttConnected = true,
+                    activeSessionCount = 2,
+                    sessionCapacity = 16,
                 ),
             )
         repository.refreshStatus()
@@ -279,7 +279,7 @@ class TunnelRepositoryTest {
             NativeRuntimeStatusDto(
                 state = state,
                 mode = mode,
-                config_path = "/tmp/config.toml",
+                configPath = "/tmp/config.toml",
                 active = state == "running",
             ),
         )
@@ -338,20 +338,20 @@ class TunnelRepositoryTest {
         override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
             IdentityValidationResult(
                 valid = true,
-                canonical_public_identity = "canon",
-                canonical_private_identity = identityToml,
-                peer_id = "peer",
+                canonicalPublicIdentity = "canon",
+                canonicalPrivateIdentity = identityToml,
+                peerId = "peer",
             )
 
         override fun validatePublicIdentity(line: String): IdentityValidationResult =
-            IdentityValidationResult(valid = true, canonical_public_identity = line.trim(), peer_id = "peer")
+            IdentityValidationResult(valid = true, canonicalPublicIdentity = line.trim(), peerId = "peer")
 
         override fun generateIdentity(peerId: String): IdentityValidationResult =
             IdentityValidationResult(
                 valid = true,
-                canonical_public_identity = "canon",
-                canonical_private_identity = "private",
-                peer_id = peerId,
+                canonicalPublicIdentity = "canon",
+                canonicalPrivateIdentity = "private",
+                peerId = peerId,
             )
     }
 }

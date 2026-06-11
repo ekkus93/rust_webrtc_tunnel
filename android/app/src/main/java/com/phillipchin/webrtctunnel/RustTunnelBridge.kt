@@ -128,17 +128,16 @@ class RustTunnelBridge : TunnelNativeBridge {
 
     private fun ensureNativeAvailable() {
         if (disposed) {
-            throw IllegalStateException("Tunnel bridge is disposed")
+            error("Tunnel bridge is disposed")
         }
         if (!nativeAvailable) {
+            // Retains the load error as cause, which error()/check() cannot express.
             throw IllegalStateException(
                 "Native library p2p_mobile failed to load",
                 nativeLoadError,
             )
         }
-        if (runtimeHandle == 0L) {
-            throw IllegalStateException("Native runtime handle is unavailable")
-        }
+        check(runtimeHandle != 0L) { "Native runtime handle is unavailable" }
     }
 
     private external fun nativeCreateRuntime(): Long
@@ -216,7 +215,7 @@ class FakeTunnelBridge : TunnelNativeBridge {
             NativeRuntimeStatusDto(
                 state = state,
                 mode = mode,
-                config_path = "/tmp/fake-config.toml",
+                configPath = "/tmp/fake-config.toml",
                 active = state == "running",
             ),
         )
@@ -237,24 +236,24 @@ class FakeTunnelBridge : TunnelNativeBridge {
     override fun validatePrivateIdentity(identityToml: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = true,
-            canonical_public_identity = "p2ptunnel-ed25519 peer_id=android-phone sign_pub=Zm9v kex_pub=YmFy",
-            canonical_private_identity = identityToml,
-            peer_id = "android-phone",
+            canonicalPublicIdentity = "p2ptunnel-ed25519 peer_id=android-phone sign_pub=Zm9v kex_pub=YmFy",
+            canonicalPrivateIdentity = identityToml,
+            peerId = "android-phone",
         )
 
     override fun validatePublicIdentity(line: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = line.isNotBlank(),
             message = if (line.isBlank()) "empty" else null,
-            canonical_public_identity = line.trim(),
-            peer_id = "remote-peer",
+            canonicalPublicIdentity = line.trim(),
+            peerId = "remote-peer",
         )
 
     override fun generateIdentity(peerId: String): IdentityValidationResult =
         IdentityValidationResult(
             valid = true,
-            canonical_public_identity = "p2ptunnel-ed25519 peer_id=$peerId sign_pub=Zm9v kex_pub=YmFy",
-            canonical_private_identity = "format = \"p2ptunnel-identity-v1\"\npeer_id = \"$peerId\"\n",
-            peer_id = peerId,
+            canonicalPublicIdentity = "p2ptunnel-ed25519 peer_id=$peerId sign_pub=Zm9v kex_pub=YmFy",
+            canonicalPrivateIdentity = "format = \"p2ptunnel-identity-v1\"\npeer_id = \"$peerId\"\n",
+            peerId = peerId,
         )
 }

@@ -365,7 +365,8 @@ class TunnelForegroundService : Service() {
         statusPollJob =
             serviceScope.launch {
                 var lastState = repository.status.value.serviceState
-                while (true) {
+                var active = true
+                while (active && !pausedByPolicy) {
                     delay(STATUS_POLL_INTERVAL_MS)
                     if (pausedByPolicy) break
                     withContext(Dispatchers.IO) { runCatching { repository.refreshStatus() } }
@@ -374,7 +375,7 @@ class TunnelForegroundService : Service() {
                         lastState = state
                         publishStatus()
                     }
-                    if (state !in ACTIVE_STATES) break
+                    active = state in ACTIVE_STATES
                 }
             }
     }

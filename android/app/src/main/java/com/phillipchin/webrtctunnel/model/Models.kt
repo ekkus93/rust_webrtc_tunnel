@@ -1,5 +1,6 @@
 package com.phillipchin.webrtctunnel.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -77,15 +78,15 @@ data class LogEvent(
 data class NativeRuntimeStatusDto(
     val state: String,
     val mode: String? = null,
-    val config_path: String? = null,
-    val last_error: String? = null,
-    val started_at_unix_ms: Long? = null,
+    @SerialName("config_path") val configPath: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+    @SerialName("started_at_unix_ms") val startedAtUnixMs: Long? = null,
     val active: Boolean = false,
     // Measured runtime fields from the native daemon status channel. Defaulted so
     // older/native status JSON without them still decodes.
-    val mqtt_connected: Boolean = false,
-    val active_session_count: Int = 0,
-    val session_capacity: Int? = null,
+    @SerialName("mqtt_connected") val mqttConnected: Boolean = false,
+    @SerialName("active_session_count") val activeSessionCount: Int = 0,
+    @SerialName("session_capacity") val sessionCapacity: Int? = null,
     // Per-forward runtime status (offer role). Defaulted for backward compatibility
     // with native status JSON that predates per-forward reporting.
     val forwards: List<NativeRuntimeForwardStatusDto> = emptyList(),
@@ -94,15 +95,15 @@ data class NativeRuntimeStatusDto(
 @Serializable
 data class NativeRuntimeForwardStatusDto(
     val id: String,
-    val local_host: String = "127.0.0.1",
-    val local_port: Int = 0,
-    val listen_state: String = "stopped",
-    val last_error: String? = null,
+    @SerialName("local_host") val localHost: String = "127.0.0.1",
+    @SerialName("local_port") val localPort: Int = 0,
+    @SerialName("listen_state") val listenState: String = "stopped",
+    @SerialName("last_error") val lastError: String? = null,
 )
 
 @Serializable
 data class NativeLogEventDto(
-    val unix_ms: Long,
+    @SerialName("unix_ms") val unixMs: Long,
     val level: String,
     val message: String,
 )
@@ -150,9 +151,9 @@ data class ValidationResult(
 data class IdentityValidationResult(
     val valid: Boolean,
     val message: String? = null,
-    val canonical_public_identity: String? = null,
-    val canonical_private_identity: String? = null,
-    val peer_id: String? = null,
+    @SerialName("canonical_public_identity") val canonicalPublicIdentity: String? = null,
+    @SerialName("canonical_private_identity") val canonicalPrivateIdentity: String? = null,
+    @SerialName("peer_id") val peerId: String? = null,
 )
 
 @Serializable

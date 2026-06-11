@@ -1,0 +1,9 @@
+# detekt config. Built on top of detekt's default rules (buildUponDefaultConfig).
+# Per CLAUDE.md the no-suppress policy applies: this file does NOT relax/disable
+# rules or raise thresholds to make findings disappear — everything is fixed in
+# code. The single exception is the unavoidable framework-alignment below.
+naming:
+  FunctionNaming:
+    # Jetpack Compose @Composable functions are PascalCase by official convention;
+    # renaming them would be incorrect. Same alignment we apply for ktlint.
+    ignoreAnnotated: ['Composable']

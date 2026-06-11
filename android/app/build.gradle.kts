@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ktlint)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -132,4 +133,9 @@ tasks.register("verifyRustJniLibs") {
 
 tasks.named("preBuild") {
     dependsOn("verifyRustJniLibs")
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("detekt.yml"))
 }

@@ -92,7 +92,7 @@ class TunnelRepository(
                 .map { event ->
                     SensitiveDataRedactor.redactLogEvent(
                         LogEvent(
-                            unixMs = event.unix_ms,
+                            unixMs = event.unixMs,
                             level = event.level,
                             message = event.message,
                         ),
@@ -199,7 +199,7 @@ class TunnelRepository(
                 else -> ServiceState.Stopped
             }
         val uptimeSeconds =
-            started_at_unix_ms?.let { startedAt ->
+            startedAtUnixMs?.let { startedAt ->
                 val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
                 elapsedMs / 1000L
             }
@@ -208,25 +208,25 @@ class TunnelRepository(
                 ForwardStatus(
                     id = forward.id,
                     name = forward.id,
-                    localHost = forward.local_host,
-                    localPort = forward.local_port,
+                    localHost = forward.localHost,
+                    localPort = forward.localPort,
                     remoteForwardId = forward.id,
-                    enabled = forward.listen_state.lowercase() != "disabled",
-                    listenState = mapNativeListenState(forward.listen_state, forward.last_error),
-                    lastError = forward.last_error?.let(SensitiveDataRedactor::redactText),
+                    enabled = forward.listenState.lowercase() != "disabled",
+                    listenState = mapNativeListenState(forward.listenState, forward.lastError),
+                    lastError = forward.lastError?.let(SensitiveDataRedactor::redactText),
                 )
             }
         return previous.copy(
             serviceState = stateValue,
             mode = modeValue,
-            mqttConnected = mqtt_connected,
-            activeSessionCount = active_session_count,
-            sessionCapacity = session_capacity ?: previous.sessionCapacity,
+            mqttConnected = mqttConnected,
+            activeSessionCount = activeSessionCount,
+            sessionCapacity = sessionCapacity ?: previous.sessionCapacity,
             uptimeSeconds = uptimeSeconds,
             forwards = mappedForwards,
             lastError =
-                last_error?.let {
-                    TunnelError(code = "native_runtime_error", message = it, details = config_path)
+                lastError?.let {
+                    TunnelError(code = "native_runtime_error", message = it, details = configPath)
                 },
         )
     }
