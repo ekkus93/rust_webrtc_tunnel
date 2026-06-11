@@ -130,7 +130,7 @@ class AppViewModelsTest {
     fun setupViewModelDelegatesValidationAndSave() {
         val viewModel = SetupViewModel(deps)
         prepareValidReviewState(viewModel)
-        viewModel.saveAndApplyConfig()
+        viewModel.save.saveAndApplyConfig()
         awaitSetupState(viewModel) { it.saveResult == "Configuration saved" }
         assertTrue(configRepository.readConfig().contains("broker.local"))
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
@@ -227,7 +227,7 @@ class AppViewModelsTest {
         while (viewModel.state.value.currentStep != SetupStep.Review) {
             viewModel.goNext()
         }
-        viewModel.saveAndApplyConfig()
+        viewModel.save.saveAndApplyConfig()
         val state = awaitSetupState(viewModel) { it.errorMessage != null }
         assertTrue(state.errorMessage?.contains("Local peer ID must match private identity peer ID") == true)
     }
@@ -255,7 +255,7 @@ class AppViewModelsTest {
             viewModel.goNext()
         }
         viewModel.setInput(viewModel.state.value.input.copy(remotePeerId = "desktop-peer"))
-        viewModel.startTunnelFromReview()
+        viewModel.save.startTunnelFromReview()
         val state = awaitSetupState(viewModel) { it.errorMessage != null }
         assertTrue(state.errorMessage?.contains("Remote peer ID must match imported public identity peer ID") == true)
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
@@ -273,7 +273,7 @@ class AppViewModelsTest {
                 },
             )
         prepareValidReviewState(viewModel)
-        viewModel.startTunnelFromReview()
+        viewModel.save.startTunnelFromReview()
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
         gate.complete(Unit)
         val state = awaitSetupState(viewModel) { it.saveResult == "Tunnel start requested" }
@@ -289,7 +289,7 @@ class AppViewModelsTest {
                 persistPreferences = { throw IllegalStateException("prefs save failed") },
             )
         prepareValidReviewState(viewModel)
-        viewModel.startTunnelFromReview()
+        viewModel.save.startTunnelFromReview()
         val state = awaitSetupState(viewModel) { it.errorMessage != null }
         assertTrue(state.errorMessage?.contains("prefs save failed") == true)
         assertEquals(null, Shadows.shadowOf(app).nextStartedService)
@@ -299,7 +299,7 @@ class AppViewModelsTest {
     fun setupViewModelSuccessfulStartRequestsServiceOnce() {
         val viewModel = SetupViewModel(deps)
         prepareValidReviewState(viewModel)
-        viewModel.startTunnelFromReview()
+        viewModel.save.startTunnelFromReview()
         val state = awaitSetupState(viewModel) { it.saveResult == "Tunnel start requested" }
         assertEquals("Tunnel start requested", state.saveResult)
         assertEquals(TunnelForegroundService.ACTION_START_OFFER, Shadows.shadowOf(app).nextStartedService.action)
@@ -312,7 +312,7 @@ class AppViewModelsTest {
         prepareValidReviewState(viewModel)
         recordingBridge.validationResult = ValidationResult(false, "invalid review config")
 
-        viewModel.startTunnelFromReview()
+        viewModel.save.startTunnelFromReview()
 
         val state = awaitSetupState(viewModel) { it.errorMessage != null }
         assertTrue(state.errorMessage?.contains("invalid review config") == true)

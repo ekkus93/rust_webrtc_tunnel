@@ -159,12 +159,12 @@ private fun WizardNavigationButtons(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.currentStep == SetupStep.Broker) {
-                OutlinedButton(onClick = vm::testBrokerConnection) { Text("Test TCP reachability") }
+                OutlinedButton(onClick = vm.save::testBrokerConnection) { Text("Test TCP reachability") }
             }
             if (state.currentStep == SetupStep.Review) {
-                OutlinedButton(onClick = vm::saveAndApplyConfig, enabled = canAdvance) { Text("Save") }
+                OutlinedButton(onClick = vm.save::saveAndApplyConfig, enabled = canAdvance) { Text("Save") }
                 Button(
-                    onClick = { vm.startTunnelFromReview(onStartSuccess) },
+                    onClick = { vm.save.startTunnelFromReview(onStartSuccess) },
                     enabled = canAdvance,
                 ) { Text("Start Tunnel") }
             } else {

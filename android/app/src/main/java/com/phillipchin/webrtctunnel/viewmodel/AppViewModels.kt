@@ -31,16 +31,8 @@ import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 
-private const val MAX_PORT = 65535
-private const val BROKER_PROBE_TIMEOUT_MS = 2_500
+internal const val MAX_PORT = 65535
 private const val LOCAL_PORT_TEST_TIMEOUT_MS = 1200
-
-// Carries a save-flow failure plus whether its message is safe to show verbatim.
-// Identity/persist failures are redacted; validation messages are shown as-is.
-private class SaveError(
-    message: String,
-    val redact: Boolean,
-) : Exception(message)
 
 enum class SetupStep {
     Mode,
@@ -146,7 +138,25 @@ class SetupViewModel(
         refreshForwards()
     }
 
-    fun validateConfig(): ValidationResult = deps.identityValidation.validateConfig(deps.configRepository.configPath)
+    private val stateAccess =
+        WizardStateAccess(
+            state = { _state.value },
+            forwards = { _forwards.value },
+            applyState = ::applyState,
+        )
+
+    val save =
+        SetupSaveController(
+            deps = deps,
+            scope = viewModelScope,
+            loadPreferences = loadPreferences,
+            persistPreferences = persistPreferences,
+            access = stateAccess,
+        )
+
+    private fun applyState(newState: SetupWizardState) {
+        _state.value = newState.copy(canAdvance = canAdvance(newState, _forwards.value))
+    }
 
     fun validateForwardDraft(
         draft: ForwardConfig,
@@ -392,7 +402,7 @@ class SetupViewModel(
 
     fun goNext() {
         val current = _state.value
-        val validationError = validateStep(current.currentStep, current)
+        val validationError = validateStep(deps, current.currentStep, current)
         if (validationError != null) {
             _state.value =
                 current
@@ -445,274 +455,6 @@ class SetupViewModel(
                 .copy(errorMessage = null, saveResult = "Forward deleted")
                 .withCanAdvance(_forwards.value)
     }
-
-    fun testBrokerConnection() {
-        val current = _state.value
-        val host = current.input.brokerHost.trim()
-        val port = current.input.brokerPort
-        if (host.isBlank() || port !in 1..MAX_PORT) {
-            _state.value =
-                current
-                    .copy(brokerTestMessage = "Broker host/port is invalid")
-                    .withCanAdvance(_forwards.value)
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val message =
-                runCatching {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(host, port), BROKER_PROBE_TIMEOUT_MS)
-                    }
-                    "TCP connection to $host:$port succeeded. Full MQTT/TLS auth is confirmed when the tunnel connects."
-                }.getOrElse {
-                    "TCP connection to $host:$port failed: ${it.message ?: "unknown error"}"
-                }
-            _state.value = _state.value.copy(brokerTestMessage = SensitiveDataRedactor.redactText(message))
-        }
-    }
-
-    fun saveAndApplyConfig() {
-        viewModelScope.launch {
-            saveAndApplyConfigInternal()
-        }
-    }
-
-    private suspend fun saveAndApplyConfigInternal(): Boolean {
-        val current = _state.value
-        val input = current.input
-        val forwards = _forwards.value.filter { it.enabled }
-        val outcome =
-            runCatching {
-                validateStep(SetupStep.Review, current)?.let { saveError(it, redact = false) }
-                val identity = resolveSaveIdentity(current)
-                if (identity.third != input.localPeerId) {
-                    saveError(
-                        "Local peer ID must match private identity peer ID (${identity.third})",
-                        redact = true,
-                    )
-                }
-                if (current.importPublicIdentity.isNotBlank()) {
-                    importPublicIdentity(current.importPublicIdentity, input.remotePeerId)
-                        .getOrElse { saveError(it.message ?: "Failed importing public identity", redact = true) }
-                }
-                val candidate = deps.configRepository.renderOfferConfig(input, forwards)
-                val validation = withContext(Dispatchers.IO) { validateCandidateConfig(candidate, identity.first) }
-                if (!validation.valid) {
-                    saveError(validation.message ?: "Config validation failed", redact = false)
-                }
-                persistConfig(candidate, input)
-                identity
-            }
-        return outcome.fold(
-            onSuccess = { identity ->
-                _state.value =
-                    current.copy(
-                        localPublicIdentity = identity.second,
-                        identityPeerId = identity.third,
-                        errorMessage = null,
-                        saveResult = "Configuration saved",
-                    ).withCanAdvance(_forwards.value)
-                true
-            },
-            onFailure = { error ->
-                // Preserve the per-step redaction map: SaveError carries whether its
-                // message is safe to show verbatim; anything else is redacted.
-                val message = error.message ?: "Failed saving configuration"
-                val text =
-                    if (error is SaveError && !error.redact) {
-                        message
-                    } else {
-                        SensitiveDataRedactor.redactText(
-                            message,
-                        )
-                    }
-                _state.value = current.copy(errorMessage = text, saveResult = null).withCanAdvance(_forwards.value)
-                false
-            },
-        )
-    }
-
-    // Resolves the private identity for save: imported from a file (errors shown
-    // verbatim, as before) or the stored encrypted identity (absence redacted).
-    private suspend fun resolveSaveIdentity(current: SetupWizardState): Triple<ByteArray, String, String> {
-        val resolved =
-            if (current.importIdentityPath.isNotBlank()) {
-                withContext(Dispatchers.IO) { importPrivateIdentity(current.importIdentityPath) }
-                    .getOrElse { saveError(it.message ?: "Failed importing private identity", redact = false) }
-            } else {
-                resolveStoredIdentity()
-            }
-        if (resolved == null || resolved.first.isEmpty()) {
-            saveError("Missing encrypted identity", redact = true)
-        }
-        return resolved
-    }
-
-    private suspend fun resolveStoredIdentity(): Triple<ByteArray, String, String>? =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val bytes = deps.identityRepository.readPrivateIdentityPlaintext()
-                val validated = deps.identityValidation.validatePrivateIdentity(bytes.decodeToString())
-                require(validated.valid) { validated.message ?: "Stored private identity is invalid" }
-                val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
-                val publicIdentity =
-                    validated.canonicalPublicIdentity ?: deps.identityRepository.readPublicIdentity()
-                Triple(bytes, publicIdentity, peerId)
-            }.getOrNull()
-        }
-
-    // Persists config/input/preferences off the main thread. Throws SaveError
-    // (redacted) on failure.
-    private suspend fun persistConfig(
-        candidate: String,
-        input: SetupConfigInput,
-    ) {
-        runCatching {
-            withContext(Dispatchers.IO) {
-                deps.configRepository.writeConfigAtomically(candidate)
-                deps.configRepository.saveSetupInput(input)
-                val existing = loadPreferences()
-                persistPreferences(
-                    existing.copy(
-                        allowMetered = input.allowMetered,
-                        resumeOnUnmetered = input.resumeOnUnmetered,
-                    ),
-                )
-            }
-        }.getOrElse { saveError(it.message ?: "Failed saving configuration", redact = true) }
-    }
-
-    fun startTunnelFromReview(onSuccess: (() -> Unit)? = null) {
-        viewModelScope.launch {
-            val saved = saveAndApplyConfigInternal()
-            if (!saved) {
-                return@launch
-            }
-            ContextCompat.startForegroundService(
-                deps.context,
-                Intent(deps.context, TunnelForegroundService::class.java)
-                    .setAction(TunnelForegroundService.ACTION_START_OFFER),
-            )
-            _state.value =
-                _state.value
-                    .copy(saveResult = "Tunnel start requested", errorMessage = null)
-                    .withCanAdvance(_forwards.value)
-            onSuccess?.invoke()
-        }
-    }
-
-    private fun importPrivateIdentity(path: String): Result<Triple<ByteArray, String, String>> =
-        runCatching {
-            val privateIdentity = deps.identityRepository.readPrivateIdentityFile(path).getOrThrow()
-            val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
-            require(validated.valid) { validated.message ?: "Invalid private identity" }
-            val canonicalPrivate = validated.canonicalPrivateIdentity ?: privateIdentity
-            val canonicalPublic =
-                validated.canonicalPublicIdentity
-                    ?: throw IllegalArgumentException("Missing canonical public identity")
-            val peerId = validated.peerId ?: throw IllegalArgumentException("Missing canonical peer id")
-            deps.identityRepository.storeEncryptedIdentity(canonicalPrivate.toByteArray(), canonicalPublic)
-            Triple(canonicalPrivate.toByteArray(), canonicalPublic, peerId)
-        }
-
-    private fun importPublicIdentity(
-        line: String,
-        expectedRemotePeerId: String,
-    ): Result<String> =
-        runCatching {
-            val validated = deps.identityValidation.validatePublicIdentity(line)
-            require(validated.valid) { validated.message ?: "Invalid public identity" }
-            val peerId = validated.peerId ?: throw IllegalArgumentException("Public identity missing peer ID")
-            require(peerId == expectedRemotePeerId) {
-                "Remote peer ID must match imported public identity peer ID ($peerId)"
-            }
-            deps.identityRepository.appendAuthorizedPublicIdentity(
-                validated.canonicalPublicIdentity ?: line.trim(),
-            ).getOrThrow()
-            peerId
-        }
-
-    private fun validateCandidateConfig(
-        candidate: String,
-        identityBytes: ByteArray,
-    ): ValidationResult {
-        val temp = File(deps.context.cacheDir, "config-candidate.toml")
-        return runCatching {
-            temp.parentFile?.mkdirs()
-            temp.writeText(candidate)
-            deps.identityValidation.validateConfigWithIdentity(temp.absolutePath, identityBytes)
-        }.getOrElse { ValidationResult(false, it.message) }.also {
-            temp.delete()
-        }
-    }
-
-    private fun validateStep(
-        step: SetupStep,
-        state: SetupWizardState,
-    ): String? {
-        val input = state.input
-        return when (step) {
-            SetupStep.Mode -> null
-            SetupStep.Identity -> {
-                val hasStored = deps.identityRepository.hasEncryptedIdentity()
-                if (!hasStored && state.importIdentityPath.isBlank() && state.localPublicIdentity.isBlank()) {
-                    "Import or generate a private identity to continue"
-                } else {
-                    null
-                }
-            }
-            SetupStep.Broker ->
-                when {
-                    input.brokerHost.isBlank() -> "Broker host is required"
-                    input.brokerPort !in 1..MAX_PORT -> "Broker port must be between 1 and 65535"
-                    else -> null
-                }
-            SetupStep.Peer -> {
-                if (input.remotePeerId.isBlank()) {
-                    "Remote peer id is required"
-                } else if (state.importPublicIdentity.isBlank()) {
-                    "Remote public identity is required"
-                } else {
-                    val validated = deps.identityValidation.validatePublicIdentity(state.importPublicIdentity)
-                    when {
-                        !validated.valid -> validated.message ?: "Invalid remote public identity"
-                        validated.peerId == input.localPeerId -> "Remote identity cannot be the same as local identity"
-                        validated.peerId != input.remotePeerId ->
-                            "Remote peer ID must match imported public identity peer ID (${validated.peerId})"
-                        else -> null
-                    }
-                }
-            }
-            SetupStep.Forwards ->
-                deps.forwardsStore.validateForwards(deps.forwardsStore.loadForwards())
-                    ?: if (deps.forwardsStore.loadForwards().none { it.enabled }) {
-                        "Enable at least one forward"
-                    } else {
-                        null
-                    }
-            SetupStep.NetworkPolicy -> null
-            SetupStep.Review -> {
-                validateStep(SetupStep.Identity, state)
-                    ?: validateStep(SetupStep.Broker, state)
-                    ?: validateStep(SetupStep.Peer, state)
-                    ?: validateStep(SetupStep.Forwards, state)
-                    ?: state.identityPeerId?.let { identityPeerId ->
-                        if (identityPeerId != input.localPeerId) {
-                            "Local peer ID must match private identity peer ID ($identityPeerId)"
-                        } else {
-                            null
-                        }
-                    }
-            }
-        }
-    }
-
-    // Single throw site for save-flow failures, so callers (and detekt's ThrowsCount)
-    // see a function call rather than scattered throw statements.
-    private fun saveError(
-        message: String,
-        redact: Boolean,
-    ): Nothing = throw SaveError(message, redact)
 
     private fun loadStoredIdentity() {
         val publicIdentity = deps.identityRepository.readPublicIdentity()
