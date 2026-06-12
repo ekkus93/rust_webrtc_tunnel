@@ -12,6 +12,7 @@ import com.phillipchin.webrtctunnel.model.ServiceState
 import com.phillipchin.webrtctunnel.model.TunnelError
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.model.TunnelStatus
+import com.phillipchin.webrtctunnel.model.isTunnelActiveOrStarting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -156,17 +157,6 @@ class TunnelRepository(
     }
 }
 
-// Service states for which a run is genuinely in progress, so uptime should be shown.
-private val UPTIME_STATES =
-    setOf(
-        ServiceState.Starting,
-        ServiceState.Connecting,
-        ServiceState.Reconnecting,
-        ServiceState.Listening,
-        ServiceState.Serving,
-        ServiceState.Connected,
-    )
-
 private fun isPolicyPausedState(state: ServiceState): Boolean =
     state == ServiceState.PausedMeteredBlocked || state == ServiceState.NoNetwork
 
@@ -215,7 +205,7 @@ private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): Tunne
     // Uptime is only meaningful while a run is in progress; never show it for
     // stopped/error/paused states even if a stale timestamp were present.
     val uptimeSeconds =
-        if (stateValue in UPTIME_STATES) {
+        if (stateValue.isTunnelActiveOrStarting()) {
             startedAtUnixMs?.let { startedAt ->
                 val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
                 elapsedMs / MILLIS_PER_SECOND

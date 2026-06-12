@@ -258,7 +258,9 @@ impl AndroidTunnelController {
     ) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|_| "runtime mutex poisoned".to_owned())?;
         if inner.state.active {
-            return Err(record_start_error(&mut inner, "runtime already running".to_owned()));
+            // A duplicate start must not corrupt the live runtime: reject without
+            // routing through record_start_error (which would set Error + active=false).
+            return Err("runtime already running".to_owned());
         }
 
         let config_path = config_path.to_owned();
@@ -603,6 +605,28 @@ mod tests {
         assert_eq!(status.config_path, None);
         assert_eq!(status.active_session_count, 0);
         assert_eq!(status.session_capacity, None);
+    }
+
+    #[test]
+    fn duplicate_start_preserves_running_state() {
+        let controller = AndroidTunnelController::new();
+        {
+            let mut inner = controller.inner.lock().expect("lock");
+            inner.state.state = AndroidRuntimeState::Running;
+            inner.state.active = true;
+            inner.state.mode = Some(AndroidTunnelMode::Offer);
+            inner.state.started_at_unix_ms = Some(123);
+            inner.state.active_session_count = 1;
+        }
+
+        let result = controller.start_offer("/tmp/whatever.toml");
+
+        assert_eq!(result, Err("runtime already running".to_owned()));
+        let inner = controller.inner.lock().expect("lock");
+        assert_eq!(inner.state.state, AndroidRuntimeState::Running);
+        assert!(inner.state.active);
+        assert_eq!(inner.state.started_at_unix_ms, Some(123));
+        assert_eq!(inner.state.active_session_count, 1);
     }
 
     #[test]

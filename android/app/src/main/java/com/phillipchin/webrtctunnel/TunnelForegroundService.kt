@@ -14,6 +14,7 @@ import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.NetworkType
 import com.phillipchin.webrtctunnel.model.ServiceState
 import com.phillipchin.webrtctunnel.model.TunnelMode
+import com.phillipchin.webrtctunnel.model.isTunnelRunning
 import com.phillipchin.webrtctunnel.network.NetworkPolicyManager
 import com.phillipchin.webrtctunnel.notification.NotificationController
 import com.phillipchin.webrtctunnel.security.IdentityRepository
@@ -89,7 +90,8 @@ class TunnelForegroundService
                             }
                         } else if (!policy.tunnelAllowed) {
                             val current = repository.status.value.serviceState
-                            if (current == ServiceState.Connected || current == ServiceState.Serving) {
+                            // A Listening tunnel is still running and must pause on a policy block.
+                            if (current.isTunnelRunning()) {
                                 serviceScope.launch {
                                     offer.pauseForPolicy(
                                         policy.blockReason ?: "Tunnel paused: network policy blocks metered/cellular",
@@ -269,7 +271,8 @@ class TunnelForegroundService
                         return
                     }
                     val current = repository.status.value.serviceState
-                    if (current == ServiceState.Connected || current == ServiceState.Serving) {
+                    // Listening/Serving/Connected all mean a run is already up — don't start again.
+                    if (current.isTunnelRunning()) {
                         reporter.publishStatus("Tunnel already running")
                         return
                     }

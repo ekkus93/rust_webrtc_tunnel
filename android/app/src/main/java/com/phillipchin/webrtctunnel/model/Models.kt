@@ -22,6 +22,25 @@ enum class ServiceState {
     ConfigInvalid,
 }
 
+/**
+ * A run is in progress: either actively connecting/starting or running
+ * (listening/serving/connected). Used for duplicate-start prevention,
+ * network-policy pause decisions, status polling, and uptime display.
+ */
+fun ServiceState.isTunnelActiveOrStarting(): Boolean =
+    this == ServiceState.Starting ||
+        this == ServiceState.Connecting ||
+        this == ServiceState.Reconnecting ||
+        this == ServiceState.Listening ||
+        this == ServiceState.Serving ||
+        this == ServiceState.Connected
+
+/** The tunnel is up (listening/serving/connected), as opposed to starting or stopped. */
+fun ServiceState.isTunnelRunning(): Boolean =
+    this == ServiceState.Listening ||
+        this == ServiceState.Serving ||
+        this == ServiceState.Connected
+
 @Serializable
 enum class NetworkType { UnmeteredWifi, MeteredWifi, Cellular, NoNetwork, Unknown }
 
