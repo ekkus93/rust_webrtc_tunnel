@@ -3,19 +3,20 @@ package com.phillipchin.webrtctunnel.viewmodel
 import android.content.Intent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.phillipchin.webrtctunnel.TunnelForegroundService
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.TunnelMode
 import com.phillipchin.webrtctunnel.model.TunnelStatus
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     val status: StateFlow<TunnelStatus> = deps.tunnelRepository.status
-    private val _configuredForwards = MutableStateFlow(deps.forwardsStore.loadForwards())
-    val configuredForwards: StateFlow<List<ForwardConfig>> = _configuredForwards.asStateFlow()
+
+    // Observe the shared forwards source of truth so Home reflects edits made elsewhere.
+    val configuredForwards: StateFlow<List<ForwardConfig>> = deps.forwardsRepository.forwards
 
     fun startTunnel(mode: TunnelMode) {
         val action =
@@ -47,6 +48,6 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     fun refresh() = deps.tunnelRepository.refreshStatus()
 
     fun refreshForwards() {
-        _configuredForwards.value = deps.forwardsStore.loadForwards()
+        viewModelScope.launch { deps.forwardsRepository.refresh() }
     }
 }

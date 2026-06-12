@@ -24,40 +24,36 @@ class ForwardsViewModel(
     private val ioDispatcher: CoroutineDispatcher = deps.dispatchers.io,
 ) : ViewModel() {
     val status: StateFlow<TunnelStatus> = deps.tunnelRepository.status
-    private val _forwards = MutableStateFlow(deps.forwardsStore.loadForwards())
-    val forwards: StateFlow<List<ForwardConfig>> = _forwards.asStateFlow()
+
+    // Observe the shared single source of truth so edits made on any screen are reflected.
+    val forwards: StateFlow<List<ForwardConfig>> = deps.forwardsRepository.forwards
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
     fun reload() {
-        viewModelScope.launch {
-            _forwards.value = withContext(ioDispatcher) { deps.forwardsStore.loadForwards() }
-        }
+        viewModelScope.launch { deps.forwardsRepository.refresh() }
     }
 
     fun saveForward(forward: ForwardConfig) {
         if (_isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
+            val before = deps.forwardsRepository.current()
+            val result = deps.forwardsRepository.upsert(forward)
             val message =
-                withContext(ioDispatcher) {
-                    val before = deps.forwardsStore.loadForwards()
-                    val result = deps.forwardsStore.upsertForward(forward)
-                    if (!result.valid) {
-                        result.message ?: "Forward update failed"
+                if (!result.valid) {
+                    result.message ?: "Forward update failed"
+                } else {
+                    val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
+                    if (!sync.valid) {
+                        deps.forwardsRepository.save(before)
+                        sync.message ?: "Forward update failed"
                     } else {
-                        val sync = regenerateActiveConfig()
-                        if (!sync.valid) {
-                            deps.forwardsStore.saveForwards(before)
-                            sync.message ?: "Forward update failed"
-                        } else {
-                            "Forward saved"
-                        }
+                        "Forward saved"
                     }
                 }
-            _forwards.value = withContext(ioDispatcher) { deps.forwardsStore.loadForwards() }
             _message.value = message
             _isBusy.value = false
         }
@@ -67,19 +63,16 @@ class ForwardsViewModel(
         if (_isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
+            val before = deps.forwardsRepository.current()
+            deps.forwardsRepository.delete(forwardId)
+            val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
             val message =
-                withContext(ioDispatcher) {
-                    val before = deps.forwardsStore.loadForwards()
-                    deps.forwardsStore.deleteForward(forwardId)
-                    val sync = regenerateActiveConfig()
-                    if (!sync.valid) {
-                        deps.forwardsStore.saveForwards(before)
-                        sync.message ?: "Forward delete failed"
-                    } else {
-                        "Forward deleted"
-                    }
+                if (!sync.valid) {
+                    deps.forwardsRepository.save(before)
+                    sync.message ?: "Forward delete failed"
+                } else {
+                    "Forward deleted"
                 }
-            _forwards.value = withContext(ioDispatcher) { deps.forwardsStore.loadForwards() }
             _message.value = message
             _isBusy.value = false
         }

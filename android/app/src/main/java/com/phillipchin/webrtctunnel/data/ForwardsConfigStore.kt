@@ -1,6 +1,7 @@
 package com.phillipchin.webrtctunnel.data
 
 import android.content.Context
+import android.util.Log
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.serialization.encodeToString
@@ -8,35 +9,61 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 private const val MAX_PORT = 65535
+private const val TAG = "ForwardsConfigStore"
 
 /** Persistence + validation for the configured local forwards (split from ConfigRepository). */
 class ForwardsConfigStore(private val context: Context) {
     private val forwardsFile: File get() = File(context.filesDir, "forwards.json")
 
-    fun loadForwards(): List<ForwardConfig> {
+    private fun defaultForwards(): List<ForwardConfig> =
+        listOf(
+            ForwardConfig(
+                id = "llama",
+                name = "Llama server",
+                localHost = "127.0.0.1",
+                localPort = 8080,
+                remoteForwardId = "llama",
+                enabled = true,
+            ),
+        )
+
+    /**
+     * Load forwards, distinguishing a corrupt file (failure) from a legitimately
+     * empty/missing one (success). On a missing file the defaults are seeded and
+     * returned; on corrupt JSON the error is logged and surfaced so callers can keep
+     * their existing in-memory list rather than silently erasing it.
+     */
+    fun loadForwardsResult(): Result<List<ForwardConfig>> {
         if (!forwardsFile.exists()) {
-            val defaults =
-                listOf(
-                    ForwardConfig(
-                        id = "llama",
-                        name = "Llama server",
-                        localHost = "127.0.0.1",
-                        localPort = 8080,
-                        remoteForwardId = "llama",
-                        enabled = true,
-                    ),
-                )
+            val defaults = defaultForwards()
             saveForwards(defaults)
-            return defaults
+            return Result.success(defaults)
         }
-        return runCatching {
-            Json.decodeFromString<List<ForwardConfig>>(forwardsFile.readText())
-        }.getOrElse { emptyList() }
+        return runCatching { Json.decodeFromString<List<ForwardConfig>>(forwardsFile.readText()) }
+            .onFailure { error ->
+                Log.w(TAG, "forwards.json is corrupt; keeping existing forwards instead of erasing", error)
+            }
     }
 
+    fun loadForwards(): List<ForwardConfig> = loadForwardsResult().getOrElse { emptyList() }
+
+    /**
+     * Atomically replace forwards.json via a temp file + rename, so a crash mid-write
+     * cannot leave a truncated/corrupt file.
+     */
     fun saveForwards(forwards: List<ForwardConfig>) {
-        forwardsFile.parentFile?.mkdirs()
-        forwardsFile.writeText(Json.encodeToString(forwards))
+        val dir = forwardsFile.parentFile
+        dir?.mkdirs()
+        val temp = File.createTempFile("forwards", ".json.tmp", dir)
+        try {
+            temp.writeText(Json.encodeToString(forwards))
+            if (!temp.renameTo(forwardsFile)) {
+                // Rename can fail on some filesystem states; fall back to a direct write.
+                forwardsFile.writeText(temp.readText())
+            }
+        } finally {
+            temp.delete()
+        }
     }
 
     fun upsertForward(forward: ForwardConfig): ValidationResult {

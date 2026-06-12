@@ -21,6 +21,9 @@ class AppDependencies(
 
     val forwardsStore: ForwardsConfigStore = ForwardsConfigStore(this.context)
 
+    // Single observable source of truth for configured forwards (Home + Forwards screens).
+    val forwardsRepository: ForwardsRepository = ForwardsRepository(forwardsStore, dispatchers)
+
     // TunnelRepository (runtime/status) and IdentityValidationClient (config/identity
     // validation) are separate collaborators that must share a single native bridge,
     // created lazily on first use.
