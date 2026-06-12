@@ -241,3 +241,18 @@ impl ActiveSession {
         }
     }
 }
+pub(crate) async fn cleanup_active_session(session: &mut ActiveSession) {
+    if let Some(handle) = session.bridge_handle.take() {
+        handle.abort();
+        let _ = handle.await;
+    }
+    session.bridge_state = BridgeSessionState::Closed;
+    session.data_channel = None;
+    if let Err(error) = session.peer.close().await {
+        tracing::warn!(
+            reason = %error,
+            session_id = %session.session_id,
+            "failed to close session peer during cleanup"
+        );
+    }
+}

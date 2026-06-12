@@ -3,7 +3,7 @@
 
 use p2p_core::AppConfig;
 
-use crate::{ActiveSession, BridgeSessionState};
+use crate::types::{ActiveSession, BridgeSessionState};
 pub(crate) fn should_attempt_offer_reconnect(
     config: &AppConfig,
     pending_stream_present: bool,
