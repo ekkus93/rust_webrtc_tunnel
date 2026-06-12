@@ -36,9 +36,12 @@ class NotificationController(
         id: Int,
         notification: android.app.Notification,
     ) {
-        // Explicit runtime check so Android lint can verify POST_NOTIFICATIONS is held
-        // (pre-Tiramisu this permission is install-granted, so the check passes there).
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        // POST_NOTIFICATIONS is a runtime permission only on Android 13+ (TIRAMISU);
+        // pre-Tiramisu it does not exist as a runtime grant, so notifications must not
+        // be gated on it there. On 13+ the inline checkSelfPermission also lets Android
+        // lint verify the permission is held before notify().
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             return

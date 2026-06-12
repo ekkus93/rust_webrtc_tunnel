@@ -77,4 +77,17 @@ class NotificationControllerTest {
             )
         failingController.show(controller.buildStatusNotification(ServiceState.Connected, "ok"))
     }
+
+    @Test
+    fun showPostsOnApiBelow33WithoutRequiringRuntimePermission() {
+        var count = 0
+        val preTiramisuController =
+            NotificationController(
+                context = context,
+                sdkIntProvider = { 30 },
+                notifyAction = { _, _ -> count += 1 },
+            )
+        preTiramisuController.show(controller.buildStatusNotification(ServiceState.Connected, "ok"))
+        assertEquals(1, count)
+    }
 }
