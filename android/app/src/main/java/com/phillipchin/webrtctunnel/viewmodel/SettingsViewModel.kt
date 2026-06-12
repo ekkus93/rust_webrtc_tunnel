@@ -7,7 +7,6 @@ import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.data.SensitiveDataRedactor
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.SetupConfigInput
-import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +19,9 @@ import java.io.File
 data class SettingsUiState(
     val publicIdentity: String? = null,
     val publicIdentityLoadError: String? = null,
+    val configValidationMessage: String? = null,
+    val configValid: Boolean? = null,
+    val isValidatingConfig: Boolean = false,
 )
 
 class SettingsViewModel(
@@ -36,7 +38,31 @@ class SettingsViewModel(
         refreshPublicIdentity()
     }
 
-    fun validateConfig(): ValidationResult = deps.identityValidation.validateConfig(deps.configRepository.configPath)
+    fun validateConfig() {
+        if (_uiState.value.isValidatingConfig) return
+        viewModelScope.launch {
+            _uiState.value =
+                _uiState.value.copy(isValidatingConfig = true, configValidationMessage = null, configValid = null)
+            val result =
+                withContext(deps.dispatchers.io) {
+                    runCatching { deps.identityValidation.validateConfig(deps.configRepository.configPath) }
+                }
+            val valid = result.map { it.valid }.getOrDefault(false)
+            val message =
+                result.fold(
+                    onSuccess = {
+                        if (it.valid) "Configuration is valid." else (it.message ?: "Configuration is invalid.")
+                    },
+                    onFailure = { it.message ?: "Validation failed." },
+                )
+            _uiState.value =
+                _uiState.value.copy(
+                    isValidatingConfig = false,
+                    configValid = valid,
+                    configValidationMessage = SensitiveDataRedactor.redactText(message),
+                )
+        }
+    }
 
     fun savePreferences(updated: AndroidAppPreferences) {
         viewModelScope.launch { deps.configRepository.savePreferences(updated) }

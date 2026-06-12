@@ -60,11 +60,15 @@ fun SettingsScreen(
     ScrollableScreenSurface(padding) {
         SectionHeader("Settings", "Tunnel and app behavior")
         Spacer(Modifier.height(12.dp))
-        SettingsTunnelSection(prefs = prefs, vm = vm, onOpenSetup = nav.onOpenSetup)
+        SettingsTunnelSection(onOpenSetup = nav.onOpenSetup)
         Spacer(Modifier.height(12.dp))
-        SettingsNetworkPolicySection(allowMetered = prefs.allowMetered, onOpenNetworkPolicy = nav.onOpenNetworkPolicy)
+        SettingsNetworkPolicySection(
+            allowMetered = prefs.allowMetered,
+            resumeOnUnmetered = prefs.resumeOnUnmetered,
+            onOpenNetworkPolicy = nav.onOpenNetworkPolicy,
+        )
         Spacer(Modifier.height(12.dp))
-        SettingsConfigurationSection(vm = vm, onReset = { showResetConfirmDialog = true })
+        SettingsConfigurationSection(vm = vm, uiState = uiState, onReset = { showResetConfirmDialog = true })
         Spacer(Modifier.height(12.dp))
         SettingsIdentitySection(uiState = uiState, onOpenImportExport = nav.onOpenImportExport)
         Spacer(Modifier.height(12.dp))
@@ -95,18 +99,8 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsTunnelSection(
-    prefs: AndroidAppPreferences,
-    vm: SettingsViewModel,
-    onOpenSetup: () -> Unit,
-) {
+private fun SettingsTunnelSection(onOpenSetup: () -> Unit) {
     SettingsSection("Tunnel") {
-        PreferenceSwitch("Start tunnel when app opens", prefs.startTunnelWhenAppOpens) {
-            vm.savePreferences(prefs.copy(startTunnelWhenAppOpens = it))
-        }
-        PreferenceSwitch("Resume tunnel when Wi-Fi returns", prefs.resumeOnUnmetered) {
-            vm.savePreferences(prefs.copy(resumeOnUnmetered = it))
-        }
         OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Run setup wizard again") }
     }
 }
@@ -114,11 +108,18 @@ private fun SettingsTunnelSection(
 @Composable
 private fun SettingsNetworkPolicySection(
     allowMetered: Boolean,
+    resumeOnUnmetered: Boolean,
     onOpenNetworkPolicy: () -> Unit,
 ) {
+    // Read-only summary; the canonical editable controls live in NetworkPolicyScreen.
     SettingsSection("Network Policy") {
         Text(
             "Cellular / metered: ${if (allowMetered) "Allowed" else "Blocked"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(color = 0xFF6B7280),
+        )
+        Text(
+            "Wi-Fi resume: ${if (resumeOnUnmetered) "On" else "Off"}",
             style = MaterialTheme.typography.bodySmall,
             color = Color(color = 0xFF6B7280),
         )
@@ -131,13 +132,24 @@ private fun SettingsNetworkPolicySection(
 @Composable
 private fun SettingsConfigurationSection(
     vm: SettingsViewModel,
+    uiState: SettingsUiState,
     onReset: () -> Unit,
 ) {
     SettingsSection("Configuration") {
         OutlinedButton(
             onClick = { vm.validateConfig() },
+            enabled = !uiState.isValidatingConfig,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Validate configuration") }
+        ) { Text(if (uiState.isValidatingConfig) "Validating…" else "Validate configuration") }
+        uiState.configValidationMessage?.let { message ->
+            val messageColor =
+                if (uiState.configValid == true) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            Text(message, style = MaterialTheme.typography.bodySmall, color = messageColor)
+        }
         DestructiveActionButton("Reset configuration") { onReset() }
     }
 }

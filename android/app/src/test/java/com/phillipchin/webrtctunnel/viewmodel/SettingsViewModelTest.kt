@@ -15,10 +15,24 @@ import org.robolectric.Shadows
 @RunWith(RobolectricTestRunner::class)
 class SettingsViewModelTest : AppViewModelTestBase() {
     @Test
-    fun settingsViewModelDelegatesValidation() {
+    fun settingsViewModelValidateConfigReportsValid() {
         val viewModel = SettingsViewModel(deps)
         recordingBridge.validationResult = ValidationResult(true, "ok")
-        assertEquals(ValidationResult(true, "ok"), viewModel.validateConfig())
+        viewModel.validateConfig()
+        val state = viewModel.uiState.value
+        assertEquals(true, state.configValid)
+        assertEquals(false, state.isValidatingConfig)
+        assertTrue(state.configValidationMessage?.contains("valid", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun settingsViewModelValidateConfigReportsInvalid() {
+        val viewModel = SettingsViewModel(deps)
+        recordingBridge.validationResult = ValidationResult(false, "missing broker host")
+        viewModel.validateConfig()
+        val state = viewModel.uiState.value
+        assertEquals(false, state.configValid)
+        assertTrue(state.configValidationMessage?.isNotBlank() == true)
     }
 
     @Test

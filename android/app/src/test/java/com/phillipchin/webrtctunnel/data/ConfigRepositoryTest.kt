@@ -82,7 +82,6 @@ class ConfigRepositoryTest {
                     allowMetered = false,
                     resumeOnUnmetered = true,
                     showMeteredWarning = true,
-                    startTunnelWhenAppOpens = false,
                     debugLogsEnabled = false,
                 ),
                 prefs,
@@ -97,7 +96,6 @@ class ConfigRepositoryTest {
                     allowMetered = true,
                     resumeOnUnmetered = false,
                     showMeteredWarning = false,
-                    startTunnelWhenAppOpens = true,
                     debugLogsEnabled = true,
                 )
             repository.savePreferences(update)

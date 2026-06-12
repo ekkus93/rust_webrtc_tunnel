@@ -50,7 +50,6 @@ class HomeViewModelTest : AppViewModelTestBase() {
                     allowMetered = false,
                     resumeOnUnmetered = true,
                     showMeteredWarning = true,
-                    startTunnelWhenAppOpens = false,
                     debugLogsEnabled = false,
                     advancedSettingsEnabled = false,
                 ),

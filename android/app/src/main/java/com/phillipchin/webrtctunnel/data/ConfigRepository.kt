@@ -33,7 +33,6 @@ class ConfigRepository(private val context: Context) {
             prefs[Keys.allowMetered] = update.allowMetered
             prefs[Keys.resumeOnUnmetered] = update.resumeOnUnmetered
             prefs[Keys.showMeteredWarning] = update.showMeteredWarning
-            prefs[Keys.startTunnelWhenAppOpens] = update.startTunnelWhenAppOpens
             prefs[Keys.debugLogsEnabled] = update.debugLogsEnabled
             prefs[Keys.advancedSettingsEnabled] = update.advancedSettingsEnabled
             prefs.remove(Keys.pauseOnMetered)
@@ -96,7 +95,6 @@ private object Keys {
     val pauseOnMetered = booleanPreferencesKey("pause_on_metered")
     val resumeOnUnmetered = booleanPreferencesKey("resume_on_unmetered")
     val showMeteredWarning = booleanPreferencesKey("show_metered_warning")
-    val startTunnelWhenAppOpens = booleanPreferencesKey("start_tunnel_when_app_opens")
     val debugLogsEnabled = booleanPreferencesKey("debug_logs_enabled")
     val advancedSettingsEnabled = booleanPreferencesKey("advanced_settings_enabled")
 }
@@ -106,7 +104,6 @@ private fun Preferences.toAppPreferences() =
         allowMetered = this[Keys.allowMetered] ?: false,
         resumeOnUnmetered = this[Keys.resumeOnUnmetered] ?: true,
         showMeteredWarning = this[Keys.showMeteredWarning] ?: true,
-        startTunnelWhenAppOpens = this[Keys.startTunnelWhenAppOpens] ?: false,
         debugLogsEnabled = this[Keys.debugLogsEnabled] ?: false,
         advancedSettingsEnabled = this[Keys.advancedSettingsEnabled] ?: false,
     )

@@ -113,7 +113,6 @@ data class AndroidAppPreferences(
     val allowMetered: Boolean = false,
     val resumeOnUnmetered: Boolean = true,
     val showMeteredWarning: Boolean = true,
-    val startTunnelWhenAppOpens: Boolean = false,
     val debugLogsEnabled: Boolean = false,
     val advancedSettingsEnabled: Boolean = false,
 )
