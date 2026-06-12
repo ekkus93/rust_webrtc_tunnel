@@ -7,11 +7,18 @@ import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 private const val MAX_PORT = 65535
 private const val TAG = "ForwardsConfigStore"
 
-/** Persistence + validation for the configured local forwards (split from ConfigRepository). */
+/**
+ * Low-level persistence + validation for the configured local forwards. Mutation /
+ * in-memory source-of-truth lives in [ForwardsRepository]; this class only loads,
+ * saves (atomically), and validates.
+ */
 class ForwardsConfigStore(private val context: Context) {
     private val forwardsFile: File get() = File(context.filesDir, "forwards.json")
 
@@ -45,11 +52,14 @@ class ForwardsConfigStore(private val context: Context) {
             }
     }
 
+    /** Read-only convenience for display paths. Mutation paths must use
+     * [loadForwardsResult] (or [ForwardsRepository]) so corruption is never treated as empty. */
     fun loadForwards(): List<ForwardConfig> = loadForwardsResult().getOrElse { emptyList() }
 
     /**
-     * Atomically replace forwards.json via a temp file + rename, so a crash mid-write
-     * cannot leave a truncated/corrupt file.
+     * Atomically replace forwards.json: write a temp file in the same directory and
+     * move it into place (atomic when the filesystem supports it, replace otherwise).
+     * Never direct-writes the destination, so a crash mid-write cannot truncate it.
      */
     fun saveForwards(forwards: List<ForwardConfig>) {
         val dir = forwardsFile.parentFile
@@ -57,35 +67,50 @@ class ForwardsConfigStore(private val context: Context) {
         val temp = File.createTempFile("forwards", ".json.tmp", dir)
         try {
             temp.writeText(Json.encodeToString(forwards))
-            if (!temp.renameTo(forwardsFile)) {
-                // Rename can fail on some filesystem states; fall back to a direct write.
-                forwardsFile.writeText(temp.readText())
+            try {
+                Files.move(
+                    temp.toPath(),
+                    forwardsFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temp.toPath(), forwardsFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
         } finally {
             temp.delete()
         }
     }
 
+    /**
+     * Disk-based upsert used by the setup wizard. Corrupt-safe: a corrupt existing file
+     * is reported as a failure rather than treated as empty and overwritten.
+     * (Home/Forwards mutate through [ForwardsRepository] on the in-memory list instead.)
+     */
     fun upsertForward(forward: ForwardConfig): ValidationResult {
+        val existing =
+            loadForwardsResult().getOrElse {
+                return ValidationResult(false, "Saved forwards file is corrupt; not overwriting")
+            }
         val updated =
-            loadForwards().toMutableList().apply {
+            existing.toMutableList().apply {
                 val index = indexOfFirst { it.id == forward.id }
-                if (index >= 0) {
-                    set(index, forward)
-                } else {
-                    add(forward)
-                }
+                if (index >= 0) set(index, forward) else add(forward)
             }
         val error = validateForwards(updated)
-        if (error != null) {
-            return ValidationResult(false, error)
+        return if (error != null) {
+            ValidationResult(false, error)
+        } else {
+            saveForwards(updated)
+            ValidationResult(true, null)
         }
-        saveForwards(updated)
-        return ValidationResult(true, null)
     }
 
+    /** Disk-based delete used by the setup wizard. Corrupt-safe: a corrupt file is left
+     * untouched rather than overwritten with a list that dropped the corrupt entries. */
     fun deleteForward(forwardId: String) {
-        saveForwards(loadForwards().filterNot { it.id == forwardId })
+        val existing = loadForwardsResult().getOrNull() ?: return
+        saveForwards(existing.filterNot { it.id == forwardId })
     }
 
     fun validateForwards(forwards: List<ForwardConfig>): String? {

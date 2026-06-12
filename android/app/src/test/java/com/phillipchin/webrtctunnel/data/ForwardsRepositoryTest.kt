@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -44,6 +46,44 @@ class ForwardsRepositoryTest {
             assertTrue(repo.forwards.value.any { it.id == "d" })
             repo.delete("d")
             assertTrue(repo.forwards.value.none { it.id == "d" })
+        }
+
+    @Test
+    fun mutationBlockedWhenStartupBaselineIsCorrupt() =
+        runBlocking {
+            file.writeText("{ corrupt json")
+            val corruptRepo = ForwardsRepository(ForwardsConfigStore(context), AppDispatchers())
+
+            val result = corruptRepo.upsert(forward("x", 1234))
+
+            assertFalse(result.valid)
+            // The corrupt file must not be overwritten with a fresh/empty baseline.
+            assertTrue(file.readText().contains("corrupt"))
+        }
+
+    @Test
+    fun upsertAfterDiskCorruptionPreservesInMemoryList() =
+        runBlocking {
+            repo.save(listOf(forward("keep", 1111)))
+            file.writeText("{ corrupt json")
+
+            val result = repo.upsert(forward("added", 2222))
+
+            assertTrue(result.valid)
+            assertTrue(repo.forwards.value.any { it.id == "keep" })
+            assertTrue(repo.forwards.value.any { it.id == "added" })
+        }
+
+    @Test
+    fun validationFailureLeavesObservableStateUnchanged() =
+        runBlocking {
+            repo.save(listOf(forward("a", 1111)))
+            val before = repo.forwards.value
+
+            val result = repo.upsert(forward("b", 1111)) // duplicate port
+
+            assertFalse(result.valid)
+            assertEquals(before, repo.forwards.value)
         }
 
     @Test

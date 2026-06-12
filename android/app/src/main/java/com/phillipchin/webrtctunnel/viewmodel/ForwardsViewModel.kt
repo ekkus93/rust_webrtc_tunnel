@@ -64,14 +64,18 @@ class ForwardsViewModel(
         viewModelScope.launch {
             _isBusy.value = true
             val before = deps.forwardsRepository.current()
-            deps.forwardsRepository.delete(forwardId)
-            val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
+            val result = deps.forwardsRepository.delete(forwardId)
             val message =
-                if (!sync.valid) {
-                    deps.forwardsRepository.save(before)
-                    sync.message ?: "Forward delete failed"
+                if (!result.valid) {
+                    result.message ?: "Forward delete failed"
                 } else {
-                    "Forward deleted"
+                    val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
+                    if (!sync.valid) {
+                        deps.forwardsRepository.save(before)
+                        sync.message ?: "Forward delete failed"
+                    } else {
+                        "Forward deleted"
+                    }
                 }
             _message.value = message
             _isBusy.value = false
@@ -109,7 +113,7 @@ class ForwardsViewModel(
 
     private fun regenerateActiveConfig(): ValidationResult {
         val input = deps.configRepository.loadSetupInput()
-        val forwards = deps.forwardsStore.loadForwards().filter { it.enabled }
+        val forwards = deps.forwardsRepository.current().filter { it.enabled }
         val candidate = deps.configRepository.renderOfferConfig(input, forwards)
         val temp = File(deps.context.cacheDir, "config-forwards-candidate.toml")
         val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()

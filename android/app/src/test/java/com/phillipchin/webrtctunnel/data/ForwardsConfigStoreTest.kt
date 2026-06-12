@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -53,6 +54,14 @@ class ForwardsConfigStoreTest {
         store.saveForwards(listOf(forward("a", 1111)))
         val temps = context.filesDir.listFiles { f -> f.name.startsWith("forwards") && f.name.endsWith(".tmp") }
         assertTrue(temps.isNullOrEmpty())
+    }
+
+    @Test
+    fun upsertOnCorruptFileIsRejectedAndDoesNotOverwrite() {
+        file.writeText("{ corrupt json")
+        val result = store.upsertForward(forward("x", 1234))
+        assertFalse(result.valid)
+        assertTrue(file.readText().contains("corrupt"))
     }
 
     @Test
