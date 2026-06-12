@@ -154,10 +154,12 @@ fun ScrollableScreenSurface(
 @Composable
 fun DestructiveActionButton(
     text: String,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
     ) {
         Text(text, color = Error)

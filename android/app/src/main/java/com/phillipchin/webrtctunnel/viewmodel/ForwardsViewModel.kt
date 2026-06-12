@@ -40,22 +40,24 @@ class ForwardsViewModel(
         if (_isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
-            val before = deps.forwardsRepository.current()
-            val result = deps.forwardsRepository.upsert(forward)
-            val message =
-                if (!result.valid) {
-                    result.message ?: "Forward update failed"
-                } else {
-                    val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
-                    if (!sync.valid) {
-                        deps.forwardsRepository.save(before)
-                        sync.message ?: "Forward update failed"
+            try {
+                val before = deps.forwardsRepository.current()
+                val result = deps.forwardsRepository.upsert(forward)
+                _message.value =
+                    if (!result.valid) {
+                        result.message ?: "Forward update failed"
                     } else {
-                        "Forward saved"
+                        val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
+                        if (!sync.valid) {
+                            deps.forwardsRepository.save(before)
+                            sync.message ?: "Forward update failed"
+                        } else {
+                            "Forward saved"
+                        }
                     }
-                }
-            _message.value = message
-            _isBusy.value = false
+            } finally {
+                _isBusy.value = false
+            }
         }
     }
 
@@ -63,22 +65,24 @@ class ForwardsViewModel(
         if (_isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
-            val before = deps.forwardsRepository.current()
-            val result = deps.forwardsRepository.delete(forwardId)
-            val message =
-                if (!result.valid) {
-                    result.message ?: "Forward delete failed"
-                } else {
-                    val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
-                    if (!sync.valid) {
-                        deps.forwardsRepository.save(before)
-                        sync.message ?: "Forward delete failed"
+            try {
+                val before = deps.forwardsRepository.current()
+                val result = deps.forwardsRepository.delete(forwardId)
+                _message.value =
+                    if (!result.valid) {
+                        result.message ?: "Forward delete failed"
                     } else {
-                        "Forward deleted"
+                        val sync = withContext(ioDispatcher) { regenerateActiveConfig() }
+                        if (!sync.valid) {
+                            deps.forwardsRepository.save(before)
+                            sync.message ?: "Forward delete failed"
+                        } else {
+                            "Forward deleted"
+                        }
                     }
-                }
-            _message.value = message
-            _isBusy.value = false
+            } finally {
+                _isBusy.value = false
+            }
         }
     }
 

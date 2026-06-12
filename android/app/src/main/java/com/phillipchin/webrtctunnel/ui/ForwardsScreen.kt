@@ -51,6 +51,7 @@ fun ForwardsScreen(
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val isBusy by vm.isBusy.collectAsStateWithLifecycle()
     var showAddDialog by remember { mutableStateOf(false) }
     LazyColumn(
         modifier =
@@ -67,7 +68,7 @@ fun ForwardsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SectionHeader("Forwards", "Manage local forwards")
-                IconButton(onClick = { showAddDialog = true }) {
+                IconButton(onClick = { showAddDialog = true }, enabled = !isBusy) {
                     Icon(Icons.Filled.Add, contentDescription = "Add forward")
                 }
             }
@@ -106,6 +107,7 @@ fun ForwardDetailsScreen(
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val isBusy by vm.isBusy.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     val forward = forwards.firstOrNull { it.id == forwardId }
@@ -118,23 +120,23 @@ fun ForwardDetailsScreen(
         }
         SectionHeader(forward.name, "Forward details")
         Spacer(Modifier.height(12.dp))
-        StatusCard {
-            Text("Status: ${runtime?.listenState ?: if (forward.enabled) "Configured" else "Disabled"}")
-            Text("Local address: ${localForwardAddress(forward)}")
-            Text("Remote forward ID: ${forward.remoteForwardId}")
-            runtime?.lastError?.let { Text("Last error: $it", color = MaterialTheme.colorScheme.error) }
-        }
+        ForwardStatusDetailCard(forward = forward, runtime = runtime)
         Spacer(Modifier.height(12.dp))
         ForwardDetailActions(
             forward = forward,
+            busy = isBusy,
             onTestPort = { vm.testLocalPort(forward) },
             onToggleEnabled = { vm.saveForward(forward.copy(enabled = !forward.enabled)) },
         )
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = { showEditDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit") }
+        OutlinedButton(
+            onClick = { showEditDialog = true },
+            enabled = !isBusy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Edit") }
         Spacer(Modifier.height(8.dp))
-        DestructiveActionButton("Delete Forward") { showDeleteDialog = true }
+        DestructiveActionButton("Delete Forward", enabled = !isBusy) { showDeleteDialog = true }
     }
 
     if (showDeleteDialog && forward != null) {
@@ -196,8 +198,22 @@ private fun ForwardListRow(
 }
 
 @Composable
+private fun ForwardStatusDetailCard(
+    forward: ForwardConfig,
+    runtime: com.phillipchin.webrtctunnel.model.ForwardStatus?,
+) {
+    StatusCard {
+        Text("Status: ${runtime?.listenState ?: if (forward.enabled) "Configured" else "Disabled"}")
+        Text("Local address: ${localForwardAddress(forward)}")
+        Text("Remote forward ID: ${forward.remoteForwardId}")
+        runtime?.lastError?.let { Text("Last error: $it", color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
 private fun ForwardDetailActions(
     forward: ForwardConfig,
+    busy: Boolean,
     onTestPort: () -> Unit,
     onToggleEnabled: () -> Unit,
 ) {
@@ -236,8 +252,10 @@ private fun ForwardDetailActions(
     }
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onTestPort, modifier = Modifier.weight(1f)) { Text("Test Local Port") }
-        OutlinedButton(onClick = onToggleEnabled, modifier = Modifier.weight(1f)) {
+        OutlinedButton(onClick = onTestPort, enabled = !busy, modifier = Modifier.weight(1f)) {
+            Text("Test Local Port")
+        }
+        OutlinedButton(onClick = onToggleEnabled, enabled = !busy, modifier = Modifier.weight(1f)) {
             Text(if (forward.enabled) "Disable" else "Enable")
         }
     }
