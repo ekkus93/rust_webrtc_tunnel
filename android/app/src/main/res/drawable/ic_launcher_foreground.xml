@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bidirectional arrow within the adaptive-icon safe zone: a "tunnel" between two ends. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,50 h36 a4,4 0 0 1 0,8 h-36 a4,4 0 0 1 0,-8 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,42 L24,54 L36,66 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,42 L84,54 L72,66 z" />
+</vector>
