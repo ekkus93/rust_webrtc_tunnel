@@ -156,8 +156,41 @@ class TunnelRepository(
     }
 }
 
+// Service states for which a run is genuinely in progress, so uptime should be shown.
+private val UPTIME_STATES =
+    setOf(
+        ServiceState.Starting,
+        ServiceState.Connecting,
+        ServiceState.Reconnecting,
+        ServiceState.Listening,
+        ServiceState.Serving,
+        ServiceState.Connected,
+    )
+
 private fun isPolicyPausedState(state: ServiceState): Boolean =
     state == ServiceState.PausedMeteredBlocked || state == ServiceState.NoNetwork
+
+// Truthful mapping: native "running" only means the daemon task is alive. Reserve
+// Connected for an actual active session/tunnel; otherwise show a listening/serving
+// label. Unknown native states map to Error, never silently to Stopped.
+private fun mapNativeServiceState(
+    state: String,
+    mode: TunnelMode,
+    activeSessionCount: Int,
+): ServiceState =
+    when (state) {
+        "running" ->
+            when {
+                activeSessionCount > 0 -> ServiceState.Connected
+                mode == TunnelMode.Answer -> ServiceState.Serving
+                else -> ServiceState.Listening
+            }
+        "starting" -> ServiceState.Starting
+        "stopping" -> ServiceState.Stopping
+        "stopped" -> ServiceState.Stopped
+        "error" -> ServiceState.Error
+        else -> ServiceState.Error
+    }
 
 private fun mapNativeListenState(
     state: String,
@@ -178,18 +211,17 @@ private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): Tunne
             "answer" -> TunnelMode.Answer
             else -> TunnelMode.Offer
         }
-    val stateValue =
-        when (state) {
-            "running" -> if (modeValue == TunnelMode.Answer) ServiceState.Serving else ServiceState.Connected
-            "starting" -> ServiceState.Starting
-            "stopping" -> ServiceState.Stopping
-            "error" -> ServiceState.Error
-            else -> ServiceState.Stopped
-        }
+    val stateValue = mapNativeServiceState(state, modeValue, activeSessionCount)
+    // Uptime is only meaningful while a run is in progress; never show it for
+    // stopped/error/paused states even if a stale timestamp were present.
     val uptimeSeconds =
-        startedAtUnixMs?.let { startedAt ->
-            val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
-            elapsedMs / MILLIS_PER_SECOND
+        if (stateValue in UPTIME_STATES) {
+            startedAtUnixMs?.let { startedAt ->
+                val elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
+                elapsedMs / MILLIS_PER_SECOND
+            }
+        } else {
+            null
         }
     val mappedForwards =
         forwards.map { forward ->

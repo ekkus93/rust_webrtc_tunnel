@@ -153,6 +153,16 @@ impl RuntimeInner {
     }
 }
 
+/// Clear measured/uptime metadata that must not outlive an active run, so the UI does
+/// not show stale uptime, MQTT/session counts, or per-forward state after the run ends.
+fn reset_runtime_metadata(state: &mut AndroidRuntimeStatus) {
+    state.started_at_unix_ms = None;
+    state.mqtt_connected = false;
+    state.active_session_count = 0;
+    state.session_capacity = None;
+    state.forwards = Vec::new();
+}
+
 fn record_start_error(inner: &mut RuntimeInner, message: String) -> String {
     inner.state.state = AndroidRuntimeState::Error;
     inner.state.active = false;
@@ -324,6 +334,9 @@ impl AndroidTunnelController {
                         inner.state.state = AndroidRuntimeState::Stopped;
                         inner.state.mode = None;
                         inner.state.active = false;
+                        inner.state.config_path = None;
+                        inner.state.last_error = None;
+                        reset_runtime_metadata(&mut inner.state);
                         inner.logs.push_back(AndroidLogEvent {
                             unix_ms: unix_ms(),
                             level: "info".to_owned(),
@@ -334,6 +347,8 @@ impl AndroidTunnelController {
                         inner.state.state = AndroidRuntimeState::Error;
                         inner.state.last_error = Some(error.to_string());
                         inner.state.active = false;
+                        // Preserve config_path for diagnostics; clear uptime/measured fields.
+                        reset_runtime_metadata(&mut inner.state);
                         inner.logs.push_back(AndroidLogEvent {
                             unix_ms: unix_ms(),
                             level: "error".to_owned(),
@@ -389,9 +404,11 @@ impl AndroidTunnelController {
             inner.state.state = AndroidRuntimeState::Stopped;
             inner.state.mode = None;
             inner.state.active = false;
-            if inner.state.last_error.is_none() {
-                inner.state.last_error = None;
-            }
+            // Clean stop: clear stale metadata so the UI shows no stale uptime, error,
+            // config path, or session/forward state after stopping.
+            inner.state.config_path = None;
+            inner.state.last_error = None;
+            reset_runtime_metadata(&mut inner.state);
             inner.logs.push_back(AndroidLogEvent {
                 unix_ms: unix_ms(),
                 level: "info".to_owned(),
@@ -543,6 +560,63 @@ mod tests {
         let logs = controller.recent_logs(10);
         assert!(logs.is_empty());
         let _ = generate_identity("android-test").expect("identity");
+    }
+
+    #[test]
+    fn reset_runtime_metadata_clears_measured_fields() {
+        let mut state = AndroidRuntimeStatus {
+            started_at_unix_ms: Some(123),
+            mqtt_connected: true,
+            active_session_count: 3,
+            session_capacity: Some(16),
+            forwards: vec![AndroidForwardRuntimeStatus::default()],
+            ..AndroidRuntimeStatus::default()
+        };
+        reset_runtime_metadata(&mut state);
+        assert_eq!(state.started_at_unix_ms, None);
+        assert!(!state.mqtt_connected);
+        assert_eq!(state.active_session_count, 0);
+        assert_eq!(state.session_capacity, None);
+        assert!(state.forwards.is_empty());
+    }
+
+    #[test]
+    fn clean_stop_clears_uptime_session_and_error() {
+        let controller = AndroidTunnelController::new();
+        {
+            let mut inner = controller.inner.lock().expect("lock");
+            inner.state.state = AndroidRuntimeState::Running;
+            inner.state.active = true;
+            inner.state.mode = Some(AndroidTunnelMode::Offer);
+            inner.state.config_path = Some("/tmp/config.toml".to_owned());
+            inner.state.started_at_unix_ms = Some(123);
+            inner.state.last_error = Some("transient".to_owned());
+            inner.state.active_session_count = 2;
+            inner.state.session_capacity = Some(16);
+        }
+        controller.stop();
+        let status = controller.status();
+        assert_eq!(status.state, AndroidRuntimeState::Stopped);
+        assert!(!status.active);
+        assert_eq!(status.started_at_unix_ms, None);
+        assert_eq!(status.last_error, None);
+        assert_eq!(status.config_path, None);
+        assert_eq!(status.active_session_count, 0);
+        assert_eq!(status.session_capacity, None);
+    }
+
+    #[test]
+    fn error_state_preserves_last_error_through_status() {
+        let controller = AndroidTunnelController::new();
+        {
+            let mut inner = controller.inner.lock().expect("lock");
+            inner.state.state = AndroidRuntimeState::Error;
+            inner.state.active = false;
+            inner.state.last_error = Some("native start failed".to_owned());
+        }
+        let status = controller.status();
+        assert_eq!(status.state, AndroidRuntimeState::Error);
+        assert_eq!(status.last_error, Some("native start failed".to_owned()));
     }
 
     #[test]

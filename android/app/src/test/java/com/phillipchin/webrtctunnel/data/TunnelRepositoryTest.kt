@@ -37,7 +37,8 @@ class TunnelRepositoryTest {
         val result = repository.start(TunnelMode.Offer, "/tmp/config.toml")
         assertTrue(result.isSuccess)
         assertEquals("/tmp/config.toml", bridge.offerConfigPath)
-        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+        // Offer "running" with no active session is Listening, not Connected.
+        assertEquals(ServiceState.Listening, repository.status.value.serviceState)
     }
 
     @Test
@@ -105,12 +106,12 @@ class TunnelRepositoryTest {
     fun startAnswerFailureKeepsExistingStatus() {
         bridge.statusPayload = statusJson("running", "offer")
         repository.refreshStatus()
-        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+        assertEquals(ServiceState.Listening, repository.status.value.serviceState)
 
         bridge.failAnswer = true
         val result = repository.start(TunnelMode.Answer, "/tmp/config.toml")
         assertTrue(result.isFailure)
-        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+        assertEquals(ServiceState.Listening, repository.status.value.serviceState)
     }
 
     @Test
@@ -201,7 +202,7 @@ class TunnelRepositoryTest {
         bridge.statusPayload = """{"state":"running","mode":"offer","active":true}"""
         repository.refreshStatus()
         val status = repository.status.value
-        assertEquals(ServiceState.Connected, status.serviceState)
+        assertEquals(ServiceState.Listening, status.serviceState)
         assertEquals(false, status.mqttConnected)
         assertEquals(0, status.activeSessionCount)
     }
@@ -271,6 +272,59 @@ class TunnelRepositoryTest {
         assertEquals(true, repository.status.value.allowMeteredForCurrentSession)
         repository.updateSessionMeteredAllowance(false)
         assertEquals(false, repository.status.value.allowMeteredForCurrentSession)
+    }
+
+    @Test
+    fun runningOfferWithActiveSessionMapsToConnected() {
+        bridge.statusPayload =
+            Json.encodeToString(
+                NativeRuntimeStatusDto(state = "running", mode = "offer", active = true, activeSessionCount = 1),
+            )
+        repository.refreshStatus()
+        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+    }
+
+    @Test
+    fun runningAnswerWithActiveSessionMapsToConnected() {
+        bridge.statusPayload =
+            Json.encodeToString(
+                NativeRuntimeStatusDto(state = "running", mode = "answer", active = true, activeSessionCount = 2),
+            )
+        repository.refreshStatus()
+        assertEquals(ServiceState.Connected, repository.status.value.serviceState)
+    }
+
+    @Test
+    fun unknownNativeStateMapsToErrorNotStopped() {
+        bridge.statusPayload = """{"state":"some_future_state","mode":"offer","active":true}"""
+        repository.refreshStatus()
+        assertEquals(ServiceState.Error, repository.status.value.serviceState)
+    }
+
+    @Test
+    fun uptimeIsHiddenForStoppedStateEvenWithStaleTimestamp() {
+        bridge.statusPayload =
+            Json.encodeToString(
+                NativeRuntimeStatusDto(state = "stopped", mode = "offer", startedAtUnixMs = 1L),
+            )
+        repository.refreshStatus()
+        assertEquals(null, repository.status.value.uptimeSeconds)
+    }
+
+    @Test
+    fun uptimeIsShownWhileConnected() {
+        bridge.statusPayload =
+            Json.encodeToString(
+                NativeRuntimeStatusDto(
+                    state = "running",
+                    mode = "offer",
+                    active = true,
+                    activeSessionCount = 1,
+                    startedAtUnixMs = 1L,
+                ),
+            )
+        repository.refreshStatus()
+        assertTrue((repository.status.value.uptimeSeconds ?: -1L) >= 0L)
     }
 
     private fun statusJson(
