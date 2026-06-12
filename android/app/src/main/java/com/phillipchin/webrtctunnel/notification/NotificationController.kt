@@ -81,9 +81,17 @@ class NotificationController(
             )
         val title =
             when (state) {
-                ServiceState.PausedMeteredBlocked -> "WebRTC Tunnel paused"
+                ServiceState.Stopped -> "WebRTC Tunnel stopped"
+                ServiceState.Starting,
+                ServiceState.Connecting,
+                ServiceState.Reconnecting,
+                -> "WebRTC Tunnel starting"
+                ServiceState.Listening -> "WebRTC Tunnel listening"
+                ServiceState.Serving -> "WebRTC Tunnel serving"
+                ServiceState.Connected -> "WebRTC Tunnel connected"
+                ServiceState.PausedMeteredBlocked, ServiceState.NoNetwork -> "WebRTC Tunnel paused"
+                ServiceState.Stopping -> "WebRTC Tunnel stopping"
                 ServiceState.Error, ServiceState.ConfigInvalid -> "WebRTC Tunnel error"
-                else -> "WebRTC Tunnel running"
             }
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(android.R.drawable.ic_dialog_info)

@@ -196,14 +196,16 @@ class TunnelForegroundService
                 val state = repository.status.value.serviceState
                 val text =
                     body ?: when (state) {
-                        ServiceState.Connected -> "Connected"
-                        ServiceState.Serving -> "Serving"
-                        ServiceState.Listening -> "Listening"
+                        ServiceState.Connected -> "Tunnel connected"
+                        ServiceState.Serving -> "Serving; waiting for a peer"
+                        ServiceState.Listening -> "Listening; waiting for a local client"
+                        ServiceState.Starting, ServiceState.Connecting, ServiceState.Reconnecting -> "Connecting…"
                         ServiceState.PausedMeteredBlocked -> "Cellular/metered network blocked"
-                        ServiceState.NoNetwork -> "No network"
+                        ServiceState.NoNetwork -> "No network available"
+                        ServiceState.Stopping -> "Stopping…"
+                        ServiceState.Stopped -> "Tunnel stopped"
                         ServiceState.Error, ServiceState.ConfigInvalid ->
                             repository.status.value.lastError?.message ?: "Error"
-                        else -> "WebRTC Tunnel running"
                     }
                 notifications.show(notifications.buildStatusNotification(state, SensitiveDataRedactor.redactText(text)))
             }

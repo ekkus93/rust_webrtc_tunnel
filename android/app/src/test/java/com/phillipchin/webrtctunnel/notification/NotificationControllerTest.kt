@@ -31,14 +31,22 @@ class NotificationControllerTest {
     }
 
     @Test
-    fun buildStatusNotificationUsesExpectedTitles() {
-        val paused = controller.buildStatusNotification(ServiceState.PausedMeteredBlocked, "body")
-        val error = controller.buildStatusNotification(ServiceState.Error, "body")
-        val running = controller.buildStatusNotification(ServiceState.Connected, "body")
-        assertEquals("WebRTC Tunnel paused", paused.extras.getString("android.title"))
-        assertEquals("WebRTC Tunnel error", error.extras.getString("android.title"))
-        assertEquals("WebRTC Tunnel running", running.extras.getString("android.title"))
-        assertNotNull(running.contentIntent)
+    fun buildStatusNotificationUsesExplicitPerStateTitles() {
+        fun title(state: ServiceState) =
+            controller.buildStatusNotification(state, "body").extras.getString("android.title")
+
+        assertEquals("WebRTC Tunnel stopped", title(ServiceState.Stopped))
+        assertEquals("WebRTC Tunnel starting", title(ServiceState.Starting))
+        assertEquals("WebRTC Tunnel starting", title(ServiceState.Connecting))
+        assertEquals("WebRTC Tunnel listening", title(ServiceState.Listening))
+        assertEquals("WebRTC Tunnel serving", title(ServiceState.Serving))
+        assertEquals("WebRTC Tunnel connected", title(ServiceState.Connected))
+        assertEquals("WebRTC Tunnel paused", title(ServiceState.PausedMeteredBlocked))
+        assertEquals("WebRTC Tunnel paused", title(ServiceState.NoNetwork))
+        assertEquals("WebRTC Tunnel stopping", title(ServiceState.Stopping))
+        assertEquals("WebRTC Tunnel error", title(ServiceState.Error))
+        assertEquals("WebRTC Tunnel error", title(ServiceState.ConfigInvalid))
+        assertNotNull(controller.buildStatusNotification(ServiceState.Connected, "body").contentIntent)
     }
 
     @Test
