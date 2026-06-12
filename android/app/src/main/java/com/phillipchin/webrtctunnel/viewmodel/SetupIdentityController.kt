@@ -2,171 +2,197 @@ package com.phillipchin.webrtctunnel.viewmodel
 
 import android.net.Uri
 import com.phillipchin.webrtctunnel.data.AppDependencies
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** Identity import/generate/validate slice of the setup wizard, split from SetupViewModel. */
+/**
+ * Identity import/generate/validate slice of the setup wizard. All identity disk /
+ * ContentResolver / native validation runs on the IO dispatcher inside a busy-guarded
+ * coroutine, so the wizard's main thread is never blocked.
+ */
 class SetupIdentityController(
     private val deps: AppDependencies,
     private val access: WizardStateAccess,
+    private val scope: CoroutineScope,
 ) {
-    fun loadStoredIdentity() {
-        val publicIdentity = deps.identityRepository.readPublicIdentity()
-        if (publicIdentity.isNotBlank()) {
-            access.applyState(access.state().copy(localPublicIdentity = publicIdentity))
-        }
-    }
-
-    fun importIdentityFromPath() {
-        val current = access.state()
-        val trimmed = current.importIdentityPath.trim()
-        if (trimmed.isBlank()) {
-            access.applyState(current.copy(errorMessage = "Choose an identity file path to import"))
-            return
-        }
-        val resolved =
-            runCatching {
-                val privateIdentity = deps.identityRepository.readPrivateIdentityFile(trimmed).getOrThrow()
-                val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
-                require(validated.valid) { validated.message ?: "Invalid private identity" }
-                val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
-                val canonicalPublic = validated.canonicalPublicIdentity.orEmpty()
-                peerId to canonicalPublic
+    fun loadStoredIdentity() =
+        launchBusy {
+            val publicIdentity = withContext(deps.dispatchers.io) { deps.identityRepository.readPublicIdentity() }
+            if (publicIdentity.isNotBlank()) {
+                access.applyState(access.state().copy(localPublicIdentity = publicIdentity))
             }
-        resolved.onSuccess { (peerId, canonicalPublic) ->
-            access.applyState(
-                current.copy(
-                    importIdentityPath = trimmed,
-                    identityPeerId = peerId,
-                    localPublicIdentity = canonicalPublic,
-                    input = current.input.copy(localPeerId = peerId),
-                    errorMessage = null,
-                    saveResult = "Identity imported",
-                ),
-            )
-        }.onFailure {
-            access.applyState(
-                current.copy(
-                    identityPeerId = null,
-                    localPublicIdentity = "",
-                    errorMessage = it.message ?: "Invalid private identity file",
-                    saveResult = null,
-                ),
-            )
         }
-    }
 
-    fun importIdentityFromUri(uri: Uri) {
-        val current = access.state()
-        val resolved =
-            runCatching {
-                val privateIdentity =
-                    deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: error("Unable to read private identity from selected URI")
-                val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
-                require(validated.valid) { validated.message ?: "Invalid private identity" }
-                val canonicalPrivate = validated.canonicalPrivateIdentity ?: privateIdentity
-                val canonicalPublic = validated.canonicalPublicIdentity.orEmpty()
-                val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
-                deps.identityRepository.storeEncryptedIdentity(canonicalPrivate.toByteArray(), canonicalPublic)
-                Triple(peerId, canonicalPublic, canonicalPrivate)
+    fun importIdentityFromPath() =
+        launchBusy {
+            val current = access.state()
+            val trimmed = current.importIdentityPath.trim()
+            if (trimmed.isBlank()) {
+                access.applyState(current.copy(errorMessage = "Choose an identity file path to import"))
+                return@launchBusy
             }
-        resolved.onSuccess { (peerId, canonicalPublic, _) ->
-            access.applyState(
-                current.copy(
-                    identityPeerId = peerId,
-                    localPublicIdentity = canonicalPublic,
-                    input = current.input.copy(localPeerId = peerId),
-                    importIdentityPath = "",
-                    errorMessage = null,
-                    saveResult = "Identity imported",
-                ),
-            )
-        }.onFailure {
-            access.applyState(
-                current.copy(
-                    errorMessage = it.message ?: "Invalid private identity file",
-                    saveResult = null,
-                ),
-            )
-        }
-    }
-
-    fun validateRemotePublicIdentity() {
-        val current = access.state()
-        val value = current.importPublicIdentity.trim()
-        if (value.isBlank()) {
-            access.applyState(
-                current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity is required"),
-            )
-            return
-        }
-
-        val validated = deps.identityValidation.validatePublicIdentity(value)
-        val updated =
-            when {
-                !validated.valid ->
+            val resolved =
+                withContext(deps.dispatchers.io) {
+                    runCatching {
+                        val privateIdentity = deps.identityRepository.readPrivateIdentityFile(trimmed).getOrThrow()
+                        val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
+                        require(validated.valid) { validated.message ?: "Invalid private identity" }
+                        val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
+                        peerId to validated.canonicalPublicIdentity.orEmpty()
+                    }
+                }
+            resolved.onSuccess { (peerId, canonicalPublic) ->
+                access.applyState(
                     current.copy(
-                        remoteIdentityPeerId = null,
-                        errorMessage = validated.message ?: "Invalid remote public identity",
-                    )
-                validated.peerId == current.input.localPeerId ->
-                    current.copy(
-                        remoteIdentityPeerId = null,
-                        errorMessage = "Remote public identity cannot match local identity",
-                    )
-                else ->
-                    current.copy(
-                        importPublicIdentity = validated.canonicalPublicIdentity ?: value,
-                        remoteIdentityPeerId = validated.peerId,
+                        importIdentityPath = trimmed,
+                        identityPeerId = peerId,
+                        localPublicIdentity = canonicalPublic,
+                        input = current.input.copy(localPeerId = peerId),
                         errorMessage = null,
-                        saveResult = "Remote public identity validated",
-                    )
+                        saveResult = "Identity imported",
+                    ),
+                )
+            }.onFailure {
+                access.applyState(
+                    current.copy(
+                        identityPeerId = null,
+                        localPublicIdentity = "",
+                        errorMessage = it.message ?: "Invalid private identity file",
+                        saveResult = null,
+                    ),
+                )
             }
-        access.applyState(updated)
-    }
+        }
 
-    fun importPublicIdentityFromUri(uri: Uri) {
-        runCatching {
-            deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                ?: error("Unable to read remote public identity from selected URI")
-        }.onSuccess { text ->
-            access.applyState(
-                access.state().copy(
-                    importPublicIdentity = text,
+    fun importIdentityFromUri(uri: Uri) =
+        launchBusy {
+            val current = access.state()
+            val resolved =
+                withContext(deps.dispatchers.io) {
+                    runCatching {
+                        val privateIdentity =
+                            deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                                ?: error("Unable to read private identity from selected URI")
+                        val validated = deps.identityValidation.validatePrivateIdentity(privateIdentity)
+                        require(validated.valid) { validated.message ?: "Invalid private identity" }
+                        val canonicalPrivate = validated.canonicalPrivateIdentity ?: privateIdentity
+                        val canonicalPublic = validated.canonicalPublicIdentity.orEmpty()
+                        val peerId = validated.peerId ?: throw IllegalArgumentException("Missing identity peer id")
+                        deps.identityRepository.storeEncryptedIdentity(canonicalPrivate.toByteArray(), canonicalPublic)
+                        peerId to canonicalPublic
+                    }
+                }
+            resolved.onSuccess { (peerId, canonicalPublic) ->
+                access.applyState(
+                    current.copy(
+                        identityPeerId = peerId,
+                        localPublicIdentity = canonicalPublic,
+                        input = current.input.copy(localPeerId = peerId),
+                        importIdentityPath = "",
+                        errorMessage = null,
+                        saveResult = "Identity imported",
+                    ),
+                )
+            }.onFailure {
+                access.applyState(
+                    current.copy(errorMessage = it.message ?: "Invalid private identity file", saveResult = null),
+                )
+            }
+        }
+
+    fun validateRemotePublicIdentity() =
+        launchBusy {
+            val current = access.state()
+            access.applyState(resolveRemotePublicIdentity(current, current.importPublicIdentity.trim()))
+        }
+
+    fun importPublicIdentityFromUri(uri: Uri) =
+        launchBusy {
+            val current = access.state()
+            val text =
+                withContext(deps.dispatchers.io) {
+                    runCatching {
+                        deps.context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                            ?: error("Unable to read remote public identity from selected URI")
+                    }
+                }
+            text.onSuccess { value ->
+                val withText =
+                    current.copy(importPublicIdentity = value, remoteIdentityPeerId = null, errorMessage = null)
+                access.applyState(resolveRemotePublicIdentity(withText, value.trim()))
+            }.onFailure {
+                access.applyState(current.copy(errorMessage = it.message ?: "Failed importing remote public identity"))
+            }
+        }
+
+    fun generateIdentity() =
+        launchBusy {
+            val current = access.state()
+            val generated =
+                withContext(deps.dispatchers.io) { deps.identityValidation.generateIdentity(current.input.localPeerId) }
+            val privateIdentity = generated.canonicalPrivateIdentity
+            val publicIdentity = generated.canonicalPublicIdentity
+            when {
+                !generated.valid ->
+                    access.applyState(current.copy(errorMessage = generated.message ?: "Identity generation failed"))
+                privateIdentity.isNullOrBlank() || publicIdentity.isNullOrBlank() ->
+                    access.applyState(current.copy(errorMessage = "Identity generation returned incomplete data"))
+                else -> {
+                    withContext(deps.dispatchers.io) {
+                        deps.identityRepository.storeEncryptedIdentity(privateIdentity.toByteArray(), publicIdentity)
+                    }
+                    val peerId = generated.peerId ?: current.input.localPeerId
+                    access.applyState(
+                        current.copy(
+                            input = current.input.copy(localPeerId = peerId),
+                            localPublicIdentity = publicIdentity,
+                            identityPeerId = peerId,
+                            errorMessage = null,
+                            saveResult = "Identity generated",
+                        ),
+                    )
+                }
+            }
+        }
+
+    private suspend fun resolveRemotePublicIdentity(
+        current: SetupWizardState,
+        value: String,
+    ): SetupWizardState {
+        if (value.isBlank()) {
+            return current.copy(remoteIdentityPeerId = null, errorMessage = "Remote public identity is required")
+        }
+        val validated = withContext(deps.dispatchers.io) { deps.identityValidation.validatePublicIdentity(value) }
+        return when {
+            !validated.valid ->
+                current.copy(
                     remoteIdentityPeerId = null,
+                    errorMessage = validated.message ?: "Invalid remote public identity",
+                )
+            validated.peerId == current.input.localPeerId ->
+                current.copy(
+                    remoteIdentityPeerId = null,
+                    errorMessage = "Remote public identity cannot match local identity",
+                )
+            else ->
+                current.copy(
+                    importPublicIdentity = validated.canonicalPublicIdentity ?: value,
+                    remoteIdentityPeerId = validated.peerId,
                     errorMessage = null,
-                ),
-            )
-            validateRemotePublicIdentity()
-        }.onFailure {
-            access.applyState(
-                access.state().copy(errorMessage = it.message ?: "Failed importing remote public identity"),
-            )
+                    saveResult = "Remote public identity validated",
+                )
         }
     }
 
-    fun generateIdentity() {
-        val current = access.state()
-        val generated = deps.identityValidation.generateIdentity(current.input.localPeerId)
-        if (!generated.valid) {
-            access.applyState(current.copy(errorMessage = generated.message ?: "Identity generation failed"))
-            return
+    private fun launchBusy(block: suspend () -> Unit) {
+        scope.launch {
+            access.applyState(access.state().copy(isBusy = true))
+            try {
+                block()
+            } finally {
+                access.applyState(access.state().copy(isBusy = false))
+            }
         }
-        val privateIdentity = generated.canonicalPrivateIdentity
-        val publicIdentity = generated.canonicalPublicIdentity
-        if (privateIdentity.isNullOrBlank() || publicIdentity.isNullOrBlank()) {
-            access.applyState(current.copy(errorMessage = "Identity generation returned incomplete data"))
-            return
-        }
-        deps.identityRepository.storeEncryptedIdentity(privateIdentity.toByteArray(), publicIdentity)
-        val peerId = generated.peerId ?: current.input.localPeerId
-        access.applyState(
-            current.copy(
-                input = current.input.copy(localPeerId = peerId),
-                localPublicIdentity = publicIdentity,
-                identityPeerId = peerId,
-                errorMessage = null,
-                saveResult = "Identity generated",
-            ),
-        )
     }
 }

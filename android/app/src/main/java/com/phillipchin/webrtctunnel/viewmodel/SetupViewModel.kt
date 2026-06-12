@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal const val MAX_PORT = 65535
 
@@ -37,6 +39,7 @@ data class SetupWizardState(
     val canAdvance: Boolean = false,
     val errorMessage: String? = null,
     val saveResult: String? = null,
+    val isBusy: Boolean = false,
 )
 
 class SetupViewModel(
@@ -74,9 +77,9 @@ class SetupViewModel(
             access = stateAccess,
         )
 
-    val identity = SetupIdentityController(deps, stateAccess)
+    val identity = SetupIdentityController(deps, stateAccess, viewModelScope)
 
-    val forwardsEditor = SetupForwardsController(deps, stateAccess)
+    val forwardsEditor = SetupForwardsController(deps, stateAccess, viewModelScope)
 
     init {
         loadStoredSetupInput(deps, stateAccess)
@@ -139,21 +142,29 @@ class SetupViewModel(
     }
 
     fun goNext() {
-        val current = _state.value
-        val validationError = validateStep(deps, current.currentStep, current)
-        if (validationError != null) {
-            _state.value =
-                current
-                    .copy(errorMessage = validationError)
-                    .withCanAdvance(deps, _forwards.value)
-            return
-        }
-        val index = steps.indexOf(current.currentStep)
-        if (index < steps.lastIndex) {
-            _state.value =
-                current
-                    .copy(currentStep = steps[index + 1], errorMessage = null)
-                    .withCanAdvance(deps, _forwards.value)
+        if (_state.value.isBusy) return
+        viewModelScope.launch {
+            val current = _state.value
+            _state.value = current.copy(isBusy = true)
+            try {
+                // Step validation can call native code; keep it off the main thread.
+                val validationError =
+                    withContext(deps.dispatchers.io) { validateStep(deps, current.currentStep, current) }
+                if (validationError != null) {
+                    _state.value =
+                        current.copy(errorMessage = validationError).withCanAdvance(deps, _forwards.value)
+                    return@launch
+                }
+                val index = steps.indexOf(current.currentStep)
+                if (index < steps.lastIndex) {
+                    _state.value =
+                        current
+                            .copy(currentStep = steps[index + 1], errorMessage = null)
+                            .withCanAdvance(deps, _forwards.value)
+                }
+            } finally {
+                _state.value = _state.value.copy(isBusy = false)
+            }
         }
     }
 

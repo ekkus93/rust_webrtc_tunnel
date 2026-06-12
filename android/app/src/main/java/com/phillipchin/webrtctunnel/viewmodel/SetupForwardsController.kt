@@ -2,12 +2,18 @@ package com.phillipchin.webrtctunnel.viewmodel
 
 import com.phillipchin.webrtctunnel.data.AppDependencies
 import com.phillipchin.webrtctunnel.model.ForwardConfig
-import com.phillipchin.webrtctunnel.model.ValidationResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
-/** Forward CRUD/validation slice of the setup wizard, split from SetupViewModel. */
+/**
+ * Forward CRUD/validation slice of the setup wizard. Mutations go through the shared
+ * ForwardsRepository (off the main thread, corrupt-safe) and mirror the result into the
+ * wizard's forwards state so Home/Forwards and the wizard stay in sync.
+ */
 class SetupForwardsController(
     private val deps: AppDependencies,
     private val access: WizardStateAccess,
+    private val scope: CoroutineScope,
 ) {
     fun validateForwardDraft(
         draft: ForwardConfig,
@@ -20,27 +26,42 @@ class SetupForwardsController(
         return deps.forwardsStore.validateForwards(updated)
     }
 
-    fun loadSavedForwards(): List<ForwardConfig> = deps.forwardsStore.loadForwards()
-
     fun refreshForwards() {
-        access.setForwards(deps.forwardsStore.loadForwards())
-        access.applyState(access.state())
+        scope.launch {
+            deps.forwardsRepository.refresh()
+            access.setForwards(deps.forwardsRepository.current())
+            access.applyState(access.state())
+        }
     }
 
-    fun upsertForward(forward: ForwardConfig): ValidationResult {
-        val result = deps.forwardsStore.upsertForward(forward)
-        if (!result.valid) {
-            access.applyState(access.state().copy(errorMessage = result.message ?: "Forward update failed"))
-            return result
+    fun upsertForward(forward: ForwardConfig) {
+        launchBusy {
+            val result = deps.forwardsRepository.upsert(forward)
+            access.setForwards(deps.forwardsRepository.current())
+            if (!result.valid) {
+                access.applyState(access.state().copy(errorMessage = result.message ?: "Forward update failed"))
+            } else {
+                access.applyState(access.state().copy(errorMessage = null, saveResult = "Forward saved"))
+            }
         }
-        refreshForwards()
-        access.applyState(access.state().copy(errorMessage = null, saveResult = "Forward saved"))
-        return result
     }
 
     fun deleteForward(forwardId: String) {
-        deps.forwardsStore.deleteForward(forwardId)
-        refreshForwards()
-        access.applyState(access.state().copy(errorMessage = null, saveResult = "Forward deleted"))
+        launchBusy {
+            deps.forwardsRepository.delete(forwardId)
+            access.setForwards(deps.forwardsRepository.current())
+            access.applyState(access.state().copy(errorMessage = null, saveResult = "Forward deleted"))
+        }
+    }
+
+    private fun launchBusy(block: suspend () -> Unit) {
+        scope.launch {
+            access.applyState(access.state().copy(isBusy = true))
+            try {
+                block()
+            } finally {
+                access.applyState(access.state().copy(isBusy = false))
+            }
+        }
     }
 }

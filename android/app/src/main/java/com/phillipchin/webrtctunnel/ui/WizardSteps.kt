@@ -62,9 +62,14 @@ internal fun IdentityStepContent(
             vm.setInput(state.input.copy(localPeerId = it))
         }, label = { Text("Local peer id") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onImportIdentityFile, modifier = Modifier.weight(1f)) { Text("Import identity file") }
+            Button(
+                onClick = onImportIdentityFile,
+                enabled = !state.isBusy,
+                modifier = Modifier.weight(1f),
+            ) { Text("Import identity file") }
             OutlinedButton(
                 onClick = vm.identity::generateIdentity,
+                enabled = !state.isBusy,
                 modifier = Modifier.weight(1f),
             ) { Text("Generate identity") }
         }
@@ -84,6 +89,7 @@ internal fun IdentityStepContent(
             )
             OutlinedButton(
                 onClick = vm.identity::importIdentityFromPath,
+                enabled = !state.isBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Import from path") }
         }
@@ -197,6 +203,7 @@ internal fun PeerStepContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = vm.identity::validateRemotePublicIdentity,
+                enabled = !state.isBusy,
                 modifier = Modifier.weight(1f),
             ) { Text("Validate remote identity") }
         }
