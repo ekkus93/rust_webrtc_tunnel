@@ -4,7 +4,9 @@
 #
 # Drives the real Android app on a running emulator/device through a from-scratch
 # setup wizard against a real MQTT broker, then asserts the offer tunnel reaches a
-# live "Connected" state with its forward "Listening", and that Stop reverts it.
+# live "Listening" state (broker-connected, forward listening; no peer is connected
+# in this smoke, so the truthful label is Listening, not Connected) and that Stop
+# reverts it.
 #
 # This is the SMOKE tier: it proves the Android .so/JNI/Kotlin/foreground-service
 # stack connects to a real broker over TLS and binds its local forward listener.
@@ -189,12 +191,13 @@ log "wizard: Review -> Start Tunnel"
 $ADB shell input swipe "$(( W/2 ))" "$(( H*78/100 ))" "$(( W/2 ))" "$(( H*25/100 ))" 300; sleep 1
 tap_text "Start Tunnel" || fail "could not find Start Tunnel on review"
 
-# ---- assert: Connected + Listening ----
-log "waiting for Connected"
-wait_for_text "Connected" 60 || { dump; tr '>' '\n' < "$XML" | grep -oE 'text="[^"]+"' | sed -E 's/text="(.*)"/\1/' | grep -iE "error|mqtt|tls|connect|stopped" | head; fail "tunnel did not reach Connected"; }
-log "waiting for forward Listening"
-wait_for_text "Listening" 30 || fail "forward did not reach Listening"
-log "PASS: Connected + Listening"
+# ---- assert: Listening (broker-connected, forward listening; no peer in this smoke) ----
+# With truthful status mapping, offer mode without an active peer session shows
+# "Listening" (status card) rather than "Connected"; Connected is reserved for an
+# actual session. The forward chip also reads "Listening".
+log "waiting for Listening"
+wait_for_text "Listening" 60 || { dump; tr '>' '\n' < "$XML" | grep -oE 'text="[^"]+"' | sed -E 's/text="(.*)"/\1/' | grep -iE "error|mqtt|tls|connect|stopped|listen" | head; fail "tunnel did not reach Listening"; }
+log "PASS: Listening"
 
 # ---- Stop -> assert Stopped ----
 log "stopping tunnel"
