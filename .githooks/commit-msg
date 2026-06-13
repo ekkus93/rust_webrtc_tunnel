@@ -12,3 +12,13 @@ Remove this line before committing:
 EOF
     exit 1
 fi
+
+if grep -Eiq '^[[:space:]]*Co-authored-by:.*(claude|noreply@anthropic\.com)' "$commit_msg_file"; then
+    cat >&2 <<'EOF'
+Error: refusing commit with Claude/Anthropic co-author trailer.
+
+Remove this line before committing:
+  Co-Authored-By: Claude ... <noreply@anthropic.com>
+EOF
+    exit 1
+fi
