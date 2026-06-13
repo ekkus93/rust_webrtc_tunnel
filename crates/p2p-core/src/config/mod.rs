@@ -1,9 +1,19 @@
+mod forward;
+mod paths;
+
 use std::collections::HashSet;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+pub use forward::{ForwardLookupError, ForwardTable, OfferForwardBind, TargetAddr};
+use forward::{validate_forward_id, validate_listen_host};
+pub use paths::expand_home;
+use paths::{
+    expand_optional_path, validate_non_world_writable, validate_optional_file,
+    validate_required_file,
+};
 
 use crate::error::ConfigError;
 use crate::ids::PeerId;
@@ -466,95 +476,6 @@ pub struct ForwardAnswerConfig {
     pub allow_remote_peers: Vec<PeerId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OfferForwardBind {
-    pub forward_id: String,
-    pub listen_host: String,
-    pub listen_port: u16,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TargetAddr {
-    pub host: String,
-    pub port: u16,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ForwardLookupError {
-    UnknownForward,
-    ForbiddenForward,
-    MissingOfferConfig,
-    MissingAnswerConfig,
-}
-
-#[derive(Clone, Debug)]
-pub struct ForwardTable {
-    by_id: std::collections::HashMap<String, ForwardRule>,
-}
-
-impl ForwardTable {
-    pub fn new(forwards: &[ForwardRule]) -> Self {
-        Self {
-            by_id: forwards.iter().map(|forward| (forward.id.clone(), forward.clone())).collect(),
-        }
-    }
-
-    pub fn get(&self, forward_id: &str) -> Option<&ForwardRule> {
-        self.by_id.get(forward_id)
-    }
-
-    pub fn offer_listeners(&self) -> Result<Vec<OfferForwardBind>, ForwardLookupError> {
-        let mut listeners = Vec::new();
-        for forward in self.by_id.values() {
-            let offer = forward.offer.as_ref().ok_or(ForwardLookupError::MissingOfferConfig)?;
-            listeners.push(OfferForwardBind {
-                forward_id: forward.id.clone(),
-                listen_host: offer.listen_host.clone(),
-                listen_port: offer.listen_port,
-            });
-        }
-        listeners.sort_by(|left, right| left.forward_id.cmp(&right.forward_id));
-        Ok(listeners)
-    }
-
-    pub fn target_for(
-        &self,
-        forward_id: &str,
-        remote_peer_id: &PeerId,
-    ) -> Result<TargetAddr, ForwardLookupError> {
-        let forward = self.by_id.get(forward_id).ok_or(ForwardLookupError::UnknownForward)?;
-        let answer = forward.answer.as_ref().ok_or(ForwardLookupError::MissingAnswerConfig)?;
-        if !answer.allow_remote_peers.contains(remote_peer_id) {
-            return Err(ForwardLookupError::ForbiddenForward);
-        }
-        Ok(TargetAddr { host: answer.target_host.clone(), port: answer.target_port })
-    }
-}
-
-fn validate_forward_id(id: &str) -> Result<(), ConfigError> {
-    if id.is_empty() {
-        return Err(ConfigError::InvalidConfig("forward id must not be empty".to_owned()));
-    }
-    if id.len() > 64 {
-        return Err(ConfigError::InvalidConfig(format!("forward id '{id}' exceeds 64 characters")));
-    }
-    if !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')) {
-        return Err(ConfigError::InvalidConfig(format!(
-            "forward id '{id}' contains invalid characters"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_listen_host(host: &str, forward_id: &str) -> Result<(), ConfigError> {
-    if host.is_empty() {
-        return Err(ConfigError::InvalidConfig(format!(
-            "forward '{forward_id}' listen_host must be set"
-        )));
-    }
-    Ok(())
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReconnectConfig {
@@ -606,85 +527,6 @@ pub struct HealthConfig {
     pub status_socket: PathBuf,
     pub write_status_file: bool,
     pub status_file: PathBuf,
-}
-
-pub fn expand_home(path: &Path) -> Result<PathBuf, ConfigError> {
-    let path_string = path.to_string_lossy();
-    if !path_string.starts_with("~/") {
-        return Ok(path.to_path_buf());
-    }
-
-    let home = env::var_os("HOME").ok_or_else(|| {
-        ConfigError::InvalidConfig("HOME environment variable is not set".to_owned())
-    })?;
-
-    let relative = path_string.trim_start_matches("~/");
-    Ok(PathBuf::from(home).join(relative))
-}
-
-fn expand_optional_path(path: &Path) -> Result<PathBuf, ConfigError> {
-    if path.as_os_str().is_empty() {
-        return Ok(PathBuf::new());
-    }
-
-    expand_home(path)
-}
-
-fn validate_required_file(path: &Path, field_name: &'static str) -> Result<(), ConfigError> {
-    validate_optional_file(path, field_name, true)
-}
-
-fn validate_optional_file(
-    path: &Path,
-    field_name: &'static str,
-    required: bool,
-) -> Result<(), ConfigError> {
-    if path.as_os_str().is_empty() {
-        if required {
-            return Err(ConfigError::InvalidConfig(format!("{field_name} must be set")));
-        }
-        return Ok(());
-    }
-    if !path.is_file() {
-        return Err(ConfigError::InvalidConfig(format!(
-            "{field_name} file '{}' does not exist",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn validate_non_world_writable(path: &Path, field_name: &'static str) -> Result<(), ConfigError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    if path.as_os_str().is_empty() {
-        return Ok(());
-    }
-
-    let mut candidate = path;
-    while !candidate.exists() {
-        candidate = candidate.parent().ok_or_else(|| {
-            ConfigError::InvalidConfig(format!(
-                "{field_name} must be inside an existing directory for path security checks"
-            ))
-        })?;
-    }
-
-    let metadata =
-        fs::metadata(candidate).map_err(|error| ConfigError::io_path(candidate, error))?;
-    if metadata.permissions().mode() & 0o002 != 0 {
-        return Err(ConfigError::InvalidConfig(format!(
-            "{field_name} path '{}' must not be world-writable",
-            candidate.display()
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn validate_non_world_writable(_path: &Path, _field_name: &'static str) -> Result<(), ConfigError> {
-    Ok(())
 }
 
 #[cfg(test)]
