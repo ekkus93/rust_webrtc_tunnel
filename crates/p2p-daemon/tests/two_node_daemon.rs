@@ -6,7 +6,7 @@
 //! single test binary that shares one harness (and avoids the cross-binary
 //! dead-code pitfalls of a `tests/common` layout).
 
-#[path = "two_node_daemon/harness.rs"]
+#[path = "two_node_daemon/harness/mod.rs"]
 mod harness;
 
 #[path = "two_node_daemon/basics_tests.rs"]
