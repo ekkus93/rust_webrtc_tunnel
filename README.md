@@ -1,6 +1,6 @@
 # rust_webrtc_tunnel
 
-[![CI](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ekkus93/rust_webrtc/actions/workflows/ci.yml)
+[![CI](https://github.com/ekkus93/rust_webrtc_tunnel/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ekkus93/rust_webrtc_tunnel/actions/workflows/ci.yml)
 
 `rust_webrtc` is a CLI-only secure TCP tunnel that carries multiple logical TCP streams over one reliable ordered WebRTC data channel per peer session while using MQTT only as an untrusted signaling transport.
 
@@ -160,7 +160,7 @@ Parse-tested sample configs are maintained in `docs/examples/offer-config.toml` 
 - `[forwards.offer]`: offer-side local listen host/port for that forward
 - `[forwards.answer]`: answer-side target host/port and per-forward peer allowlist
 - `[reconnect]`: ICE restart, renegotiation, and backoff settings
-- `[security]`: mandatory v0.2 security requirements such as TLS, encryption, signatures, replay limits, and strict config parsing
+- `[security]`: mandatory v0.3 security requirements such as TLS, encryption, signatures, replay limits, and strict config parsing
 - `[logging]`: text/json output, stdout/file logging, and redaction flags
 - `[health]`: local status file path
 
@@ -379,7 +379,7 @@ write_status_file = true
 status_file = "~/.local/state/p2ptunnel/status.json"
 ```
 
-The examples above use `broker.emqx.io:8883`, a real public test broker listener with a normal X.509v3 certificate chain that works with the current Rust TLS stack when `broker.tls.ca_file` points at the system CA bundle. The `client_cert_file` and `client_key_file` settings are only for brokers that require mutual TLS client authentication: `client_cert_file` is the client certificate presented to the broker, and `client_key_file` is the matching private key for that certificate. If your broker does not require client certificates, leave both empty as shown above. If your broker does require them, set both together; v0.2 rejects configs where only one of the two is set. For brokers that require a password, `password_file` should point to a local text file containing only the broker password or token, typically as a single line. In v0.2, the supported broker auth modes are anonymous or certificate-only (`username = ""`, `password_file = ""`), username-only (`username` set, `password_file = ""`), or username plus password file (`username` set, `password_file` pointing at the password file). In v0.2, `connect_timeout_secs` must stay `5`, `session_expiry_secs` must stay `0`, TLS server name is derived from the broker URL host, and broker TLS verification cannot be disabled. If you use a public broker, choose a unique `topic_prefix` and treat it as test-only infrastructure.
+The examples above use `broker.emqx.io:8883`, a real public test broker listener with a normal X.509v3 certificate chain that works with the current Rust TLS stack when `broker.tls.ca_file` points at the system CA bundle. The `client_cert_file` and `client_key_file` settings are only for brokers that require mutual TLS client authentication: `client_cert_file` is the client certificate presented to the broker, and `client_key_file` is the matching private key for that certificate. If your broker does not require client certificates, leave both empty as shown above. If your broker does require them, set both together; v0.3 rejects configs where only one of the two is set. For brokers that require a password, `password_file` should point to a local text file containing only the broker password or token, typically as a single line. In v0.3, the supported broker auth modes are anonymous or certificate-only (`username = ""`, `password_file = ""`), username-only (`username` set, `password_file = ""`), or username plus password file (`username` set, `password_file` pointing at the password file). In v0.3, `connect_timeout_secs` must stay `5`, `session_expiry_secs` must stay `0`, TLS server name is derived from the broker URL host, and broker TLS verification cannot be disabled. If you use a public broker, choose a unique `topic_prefix` and treat it as test-only infrastructure.
 
 Each answer-side forward owns its target mapping. The offer side sends only the configured `forward_id` in the tunnel `OPEN` frame, never a target host or port. A successful answer-side `OPEN` acknowledges the stream with an empty `OPEN` payload; malformed `OPEN` requests, `unknown_forward`, `forbidden_forward`, and `target_connect_failed` are stream-level errors and do not require closing the session or other streams.
 
@@ -387,9 +387,9 @@ Each answer-side forward owns its target mapping. The offer side sends only the 
 
 To migrate from v0.1, replace `[tunnel.offer]` and `[tunnel.answer]` with matching `[[forwards]]` entries. For example, old `listen_port = 2222` and `target_port = 22` become `id = "ssh"`, `[forwards.offer].listen_port = 2223` on the offer node, and `[forwards.answer].target_port = 22` on the answer node.
 
-The fixed v0.2 protocol constants for ICE timing behavior, WebRTC message size, tunnel frame version, and stream handling live in code and the spec rather than in the public config file.
+The fixed v0.3 protocol constants for ICE timing behavior, WebRTC message size, tunnel frame version, and stream handling live in code and the spec rather than in the public config file.
 
-The `[security]` section is intentionally fail-closed in v0.2: required TLS, encryption, signatures, authorized keys, strict unknown-key rejection, and path/identity safety checks must stay enabled rather than being treated as optional tuning knobs.
+The `[security]` section is intentionally fail-closed in v0.3: required TLS, encryption, signatures, authorized keys, strict unknown-key rejection, and path/identity safety checks must stay enabled rather than being treated as optional tuning knobs.
 
 During negotiation, additional local clients are accepted into a bounded pending queue; queue overflow closes the new client without a plaintext banner. During an active answer-side session, only a fully allowed peer may receive an encrypted `busy` response; unauthorized or disallowed peers receive no response, and duplicate replays of the same foreign offer are dropped from the active-session dedupe cache before they can trigger repeated `busy` replies or a second full reclassification pass.
 
@@ -417,7 +417,7 @@ p2p-answer run \
   --broker-url mqtts://broker.emqx.io:8883
 ```
 
-Target host/port are configured per forward in `[[forwards]]`; v0.2 no longer accepts first-forward-only target override flags.
+Target host/port are configured per forward in `[[forwards]]`; v0.3 no longer accepts first-forward-only target override flags.
 
 ### Laptop offer daemon
 
@@ -433,7 +433,7 @@ p2p-offer run \
   --broker-url mqtts://broker.emqx.io:8883
 ```
 
-Listen ports are configured per forward in `[[forwards]]`; v0.2 no longer accepts first-forward-only listen override flags.
+Listen ports are configured per forward in `[[forwards]]`; v0.3 no longer accepts first-forward-only listen override flags.
 
 Then point your local client at the offer listener, for example:
 
@@ -479,7 +479,7 @@ The offer side owns recovery.
 - while negotiation is still pending for a local client, try same-session ICE restart only when the data channel is already open
 - if same-session ICE restart is unavailable or fails during negotiation, fall back to renegotiation with a new offer
 - use exponential backoff with jitter
-- do **not** preserve live TCP streams across WebRTC reconnect in v0.2
+- do **not** preserve live TCP streams across WebRTC reconnect in v0.3
 
 ## Security notes
 
@@ -494,9 +494,9 @@ MQTT can reorder, replay, retain, or expose traffic if treated as trusted. This 
 
 Using both keeps authentication and key agreement explicit and separate.
 
-### Why TURN is unsupported in v0.2
+### Why TURN is unsupported in v0.3
 
-v0.2 remains intentionally conservative:
+v0.3 remains intentionally conservative:
 
 - STUN-only keeps the network model simpler
 - the trust and credential surface is smaller
