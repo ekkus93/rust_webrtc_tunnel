@@ -1,45 +1,39 @@
-//! Offer-role daemon: binds local listeners, dials the configured remote peer,
-//! runs a single multiplexed peer session at a time, and transparently attempts
-//! ICE-restart reconnects before returning to the waiting-for-local-client steady
-//! state. Startup/security failures are fatal; transport turbulence is recoverable.
+//! Offer-side peer session: dials the remote with an SDP offer, runs the single
+//! multiplexed bridge loop (data channel, ICE, signaling, ack retries) for the
+//! accepted local client, dispatches inbound session frames, and transparently
+//! drives ICE-restart reconnect before the daemon returns to its steady state.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use p2p_core::{
-    AppConfig, ConfigError, DaemonState, FailureCode, ForwardOfferConfig, ForwardTable, SessionId,
-};
-use p2p_crypto::{AuthorizedKey, AuthorizedKeys, IdentityFile};
+use p2p_core::{AppConfig, DaemonState, FailureCode, SessionId};
+use p2p_crypto::AuthorizedKey;
 use p2p_signaling::{
-    AckBody, AnswerBody, CloseBody, InnerMessage, InnerMessageBuilder, MessageBody,
-    MqttSignalingTransport, OfferBody, OuterEnvelope, SignalCodec, SignalingError,
+    AckBody, AnswerBody, CloseBody, InnerMessage, InnerMessageBuilder, MessageBody, OfferBody,
+    OuterEnvelope, SignalCodec, SignalingError,
 };
-use p2p_tunnel::{OfferClient, OfferListener};
+use p2p_tunnel::OfferClient;
 use p2p_webrtc::{IceConnectionState, WebRtcPeer};
 use tokio::sync::mpsc;
-use tokio::time::{interval, sleep};
+use tokio::time::interval;
 
 use crate::DaemonError;
 use crate::config::*;
 use crate::messages::*;
 use crate::predicates::*;
 use crate::signaling::*;
-use crate::status::*;
 use crate::types::*;
-#[cfg(any(test, debug_assertions))]
-#[derive(Clone)]
-pub struct OfferSessionTestHandle {
-    pub session_id: SessionId,
-    pub ice_state_injector: p2p_webrtc::IceStateInjectorForTests,
-}
 
-struct OfferSessionIo<'a> {
-    client: OfferClient,
-    accepted_clients: &'a mut mpsc::Receiver<Result<OfferClient, p2p_tunnel::TunnelError>>,
-    remote: &'a AuthorizedKey,
+#[cfg(any(test, debug_assertions))]
+use super::OfferSessionTestHandle;
+pub(crate) struct OfferSessionIo<'a> {
+    pub(crate) client: OfferClient,
+    pub(crate) accepted_clients:
+        &'a mut mpsc::Receiver<Result<OfferClient, p2p_tunnel::TunnelError>>,
+    pub(crate) remote: &'a AuthorizedKey,
     #[cfg(any(test, debug_assertions))]
-    session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
+    pub(crate) session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
 }
 
 type OfferAcceptedClients<'a> =
@@ -53,190 +47,7 @@ type OfferBridgeFuture<'a> = Pin<
     >,
 >;
 
-pub async fn run_offer_daemon(
-    config: AppConfig,
-    local_identity: IdentityFile,
-    authorized_keys: AuthorizedKeys,
-) -> Result<(), DaemonError> {
-    let transport = MqttSignalingTransport::connect(&config)?;
-    run_offer_daemon_with_transport(config, local_identity, authorized_keys, transport).await
-}
-
-pub async fn run_offer_daemon_with_transport<T: DaemonSignalingTransport>(
-    config: AppConfig,
-    local_identity: IdentityFile,
-    authorized_keys: AuthorizedKeys,
-    transport: T,
-) -> Result<(), DaemonError> {
-    #[cfg(any(test, debug_assertions))]
-    {
-        run_offer_daemon_with_transport_and_test_hook(
-            config,
-            local_identity,
-            authorized_keys,
-            transport,
-            None,
-        )
-        .await
-    }
-
-    #[cfg(not(any(test, debug_assertions)))]
-    {
-        let mut transport = transport;
-        run_offer_daemon_inner(config, local_identity, authorized_keys, &mut transport, None, None)
-            .await
-    }
-}
-
-/// Offer daemon entry point that streams live `DaemonStatus` to `status_sink` in
-/// addition to the usual status-file behavior. Used by the Android runtime so the
-/// UI reflects real daemon/connection state. Behaves identically to
-/// [`run_offer_daemon`] otherwise.
-pub async fn run_offer_daemon_with_status(
-    config: AppConfig,
-    local_identity: IdentityFile,
-    authorized_keys: AuthorizedKeys,
-    status_sink: tokio::sync::watch::Sender<DaemonStatus>,
-) -> Result<(), DaemonError> {
-    let mut transport = MqttSignalingTransport::connect(&config)?;
-    run_offer_daemon_inner(
-        config,
-        local_identity,
-        authorized_keys,
-        &mut transport,
-        None,
-        Some(status_sink),
-    )
-    .await
-}
-
-#[cfg(any(test, debug_assertions))]
-pub async fn run_offer_daemon_with_transport_and_test_hook<T: DaemonSignalingTransport>(
-    config: AppConfig,
-    local_identity: IdentityFile,
-    authorized_keys: AuthorizedKeys,
-    mut transport: T,
-    session_hook: Option<mpsc::UnboundedSender<OfferSessionTestHandle>>,
-) -> Result<(), DaemonError> {
-    run_offer_daemon_inner(
-        config,
-        local_identity,
-        authorized_keys,
-        &mut transport,
-        session_hook,
-        None,
-    )
-    .await
-}
-
-async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
-    config: AppConfig,
-    local_identity: IdentityFile,
-    authorized_keys: AuthorizedKeys,
-    transport: &mut T,
-    #[cfg(any(test, debug_assertions))] session_hook: Option<
-        mpsc::UnboundedSender<OfferSessionTestHandle>,
-    >,
-    #[cfg(not(any(test, debug_assertions)))] _session_hook: Option<()>,
-    status_sink: Option<tokio::sync::watch::Sender<DaemonStatus>>,
-) -> Result<(), DaemonError> {
-    validate_config_authorized_peers(&config, &authorized_keys)?;
-    let codec = SignalCodec::new(
-        &local_identity,
-        &authorized_keys,
-        config.security.max_clock_skew_secs,
-        config.security.max_message_age_secs,
-    );
-    transport.subscribe_own_topic().await?;
-
-    let status = match status_sink {
-        Some(sink) => StatusWriter::with_sink(&config, sink),
-        None => StatusWriter::new(&config),
-    };
-    let mut runtime = DaemonRuntimeState::new_connected();
-    let mut ctx = RuntimeContext { config: &config, status: &status, runtime: &mut runtime };
-    write_steady_state_status(&ctx).await;
-
-    let (listeners, forward_statuses) = bind_offer_listeners(&config).await?;
-    ctx.runtime.forward_statuses = forward_statuses;
-    write_steady_state_status(&ctx).await;
-    let mut accepted_clients = spawn_offer_accept_loops(listeners);
-    let mut replay_cache = p2p_signaling::ReplayCache::new(config.security.replay_cache_size);
-    let remote_peer_id = offer_remote_peer_id(&config)?;
-    let remote = authorized_keys
-        .get_by_peer_id(&remote_peer_id)
-        .cloned()
-        .ok_or_else(|| DaemonError::MissingAuthorizedPeer(remote_peer_id.to_string()))?;
-
-    loop {
-        write_steady_state_status(&ctx).await;
-        tokio::select! {
-            client = accepted_clients.recv() => {
-                let client = client
-                    .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
-                tracing::info!("accepted local client and entering busy offer session state");
-                let result =
-                    run_offer_session(
-                        &config,
-                        &codec,
-                        transport,
-                        &mut ctx,
-                        OfferSessionIo {
-                            client,
-                            accepted_clients: &mut accepted_clients,
-                            remote: &remote,
-                            #[cfg(any(test, debug_assertions))]
-                            session_hook: session_hook.clone(),
-                        },
-                    )
-                    .await;
-                recover_daemon_after_session(&ctx, result).await;
-                tracing::info!("offer daemon returned to waiting state");
-            }
-            payload = poll_idle_signal_payload(&mut ctx, transport) => {
-                let Some(payload) = payload else {
-                    continue;
-                };
-
-                tracing::debug!(
-                    payload_len = payload.len(),
-                    role = ?config.node.role,
-                    "received signaling payload while waiting for local client"
-                );
-
-                let decode_result =
-                    decode_idle_signaling_message(&codec, &payload, &mut replay_cache);
-                let (envelope, message, sender) = match decode_result {
-                    Ok(decoded) => decoded,
-                    Err(error) => {
-                        tracing::warn!(reason = %error, "rejecting signaling message");
-                        continue;
-                    }
-                };
-
-                tracing::debug!(
-                    session_id = %message.session_id,
-                    sender_peer_id = %sender.peer_id,
-                    sender_kid = %envelope.sender_kid,
-                    message_type = ?message.message_type,
-                    role = ?config.node.role,
-                    "decoded idle signaling message"
-                );
-
-                match &message.body {
-                    MessageBody::Hello(_) => {
-                        tracing::info!("received optional hello from {}", sender.peer_id);
-                    }
-                    _ => {
-                        tracing::warn!("ignoring unexpected idle message {:?}", message.message_type);
-                    }
-                }
-            }
-        }
-    }
-}
-
-async fn run_offer_session<'a, T: DaemonSignalingTransport>(
+pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
     config: &'a AppConfig,
     codec: &SignalCodec<'_>,
     transport: &mut T,
@@ -590,92 +401,6 @@ pub(crate) async fn handle_offer_session_message(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) fn spawn_offer_accept_loop(
-    listener: OfferListener,
-) -> mpsc::Receiver<Result<OfferClient, p2p_tunnel::TunnelError>> {
-    spawn_offer_accept_loops(vec![listener])
-}
-
-/// Bind a local TCP listener for each configured offer forward. Individual forwards
-/// that fail to bind are recorded as `Error` (soft-fail) so one bad forward does not
-/// take down the others; the per-forward outcomes are returned alongside the bound
-/// listeners. It is still a daemon-level error if forwards are configured but none
-/// could bind.
-pub(crate) async fn bind_offer_listeners(
-    config: &AppConfig,
-) -> Result<(Vec<OfferListener>, Vec<ForwardRuntimeStatus>), DaemonError> {
-    let table = ForwardTable::new(&config.forwards);
-    let mut listeners = Vec::new();
-    let mut statuses = Vec::new();
-    for bind in table.offer_listeners().map_err(|error| {
-        DaemonError::Config(ConfigError::InvalidConfig(format!(
-            "invalid offer forward listeners: {error:?}"
-        )))
-    })? {
-        let forward_id = bind.forward_id.to_string();
-        let offer =
-            ForwardOfferConfig { listen_host: bind.listen_host, listen_port: bind.listen_port };
-        match OfferListener::bind(bind.forward_id, &offer).await {
-            Ok(listener) => {
-                tracing::info!(
-                    forward_id = listener.forward_id(),
-                    local_addr = %listener.local_addr()?,
-                    "listening for local forward clients"
-                );
-                statuses.push(ForwardRuntimeStatus::listening(forward_id));
-                listeners.push(listener);
-            }
-            Err(error) => {
-                tracing::warn!(
-                    forward_id = %forward_id,
-                    reason = %error,
-                    "failed to bind local forward listener; marking forward as error"
-                );
-                statuses.push(ForwardRuntimeStatus::error(forward_id, error.to_string()));
-            }
-        }
-    }
-    if !statuses.is_empty() && listeners.is_empty() {
-        return Err(DaemonError::Config(ConfigError::InvalidConfig(
-            "no offer forward listeners could be bound".to_owned(),
-        )));
-    }
-    Ok((listeners, statuses))
-}
-
-fn spawn_offer_accept_loops(
-    listeners: Vec<OfferListener>,
-) -> mpsc::Receiver<Result<OfferClient, p2p_tunnel::TunnelError>> {
-    let (tx, rx) = mpsc::channel(64);
-    for listener in listeners {
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            loop {
-                match listener.accept_client().await {
-                    Ok(accepted) => match tx.try_send(Ok(accepted)) {
-                        Ok(()) => {}
-                        Err(mpsc::error::TrySendError::Full(Ok(dropped))) => {
-                            tracing::warn!(
-                                forward_id = dropped.forward_id(),
-                                "offer pending client queue is full; closing local client"
-                            );
-                        }
-                        Err(mpsc::error::TrySendError::Closed(_)) => return,
-                        Err(mpsc::error::TrySendError::Full(Err(_))) => {}
-                    },
-                    Err(error) => {
-                        tracing::warn!(reason = %error, "offer accept loop hit recoverable listener error");
-                        sleep(DAEMON_RUNTIME_RETRY_DELAY).await;
-                    }
-                }
-            }
-        });
-    }
-    drop(tx);
-    rx
 }
 
 pub(crate) async fn process_offer_session_payload<T: DaemonSignalingTransport>(
