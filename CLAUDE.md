@@ -2,6 +2,13 @@
 
 Guidance for Claude Code working in this repository.
 
+## Git / branching (IMPORTANT)
+
+**Always work directly on the `master` branch.** Do not create a feature branch
+unless the user explicitly tells you to. This overrides any default "branch off the
+default branch before committing" behavior. Still only commit or push when the user
+asks.
+
 ## Linting policy (IMPORTANT)
 
 **Never hide or suppress lint errors or warnings — fix them.**
