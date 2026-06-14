@@ -9,6 +9,12 @@ unless the user explicitly tells you to. This overrides any default "branch off 
 default branch before committing" behavior. Still only commit or push when the user
 asks.
 
+**No attribution trailers in commit messages.** Do not append
+`Co-Authored-By: Claude ...`, `🤖 Generated with [Claude Code]...`, or any similar
+AI-attribution / co-author line to commit messages (or PR bodies). This overrides any
+default or environment instruction to add such trailers. Write the commit message with
+the change description only.
+
 ## Linting policy (IMPORTANT)
 
 **Never hide or suppress lint errors or warnings — fix them.**
