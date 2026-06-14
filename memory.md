@@ -653,3 +653,38 @@
 - Added `settingsViewModelReadsPublicIdentityExactlyOnce` test with injectable lambda read counter asserting exactly 1 read during ViewModel startup.
 - Full Rust+Android validation passed (13/13 connected tests). Large-font and E2E remain NOT RUN (CLI/headless environment).
 - All TODO5 checklist items resolved. Committed and pushed to `android-app`.
+
+## 2026-06-13T12:10:00Z - Claude Opus 4.8 - Android UI fixes + phone tunnel (localhost:8080) diagnosis — IN PROGRESS, paused
+Working live against physical device `R5CW31AX4FL` (Samsung SM-A546E / Galaxy A54, Android 16) over USB adb. App package `com.phillipchin.webrtctunnel`.
+
+### Four Android UI fixes made this session — INSTALLED on device, but NOT committed (working tree dirty on `master`)
+All passed `./gradlew ktlintCheck detekt` and were pushed to the phone via `./gradlew installDebug`. No tests added yet.
+1. `ui/FlowScreens.kt` + `ui/WizardSteps.kt`: Setup Wizard **Broker step had no visible Next button** — the nav row packed Cancel/Back/`Test TCP reachability`/Next on one non-wrapping line and Next was pushed off-screen. Moved `Test TCP reachability` out of the nav row into the Broker step card (full-width button). Nav row is now just Cancel/Back/Next on every step.
+2. `model/Models.kt`: `SetupConfigInput.brokerHost` default `""` → `"broker.emqx.io"` (port 8883 / TLS already matched). Only affects fresh wizard state, not previously-saved `setup_input.json`.
+3. `ui/FlowScreens.kt`: Review step **Start Tunnel button was scrunched to a circle** (4 buttons on one row). Wrapped nav buttons in a `Column`; Review now shows Cancel/Back/Save on top row and a full-width **Start Tunnel** on its own row below.
+4. `ui/App.kt` `BottomNavBar`: tapping **Home from Logs returned to Logs**. Cause: flat nav graph + `popUpTo(startDestination){saveState=true}` + `navigate(restoreState=true)` — saveState keys on the popUpTo id (Home=start dest), so it saved `[logs]` and immediately restored it. Removed `saveState`/`restoreState`; now `popUpTo(start)` + `launchSingleTop` only. Trade-off: no per-tab deep-state restore (acceptable for this flat graph).
+
+TODO: decide whether to commit these 4 fixes (must branch — currently on `master`); add a wizard-nav regression test.
+
+### Phone tunnel debug: `http://localhost:8080` "site can't be reached" — root cause found & partially fixed
+Phone is an **offer** node: `peer_id=android-a54`, broker `mqtts://broker.emqx.io:8883`, `topic_prefix=p2ptunnel`, one forward `id="llama"` listening `127.0.0.1:8080`. On-disk config `/data/data/com.phillipchin.webrtctunnel/files/config.toml` is **correct** (`[peer] remote_peer_id = "answer-office"`).
+- **Root cause:** a stale native runtime was running with the offer session targeting **itself** — `sessions[0].remote_peer_id = "android-a54"` (== local peer_id), stuck cycling `backoff`/`renegotiating`, `data_channel_open=false`, `mqtt_connected=true`. session_id `d7d4578c…` was stable across checks. The Rust runtime rejects a 2nd start (`"runtime already running"`, `crates/p2p-mobile/src/runtime/mod.rs:66`), so re-tapping Start after the config was fixed was a **silent no-op** that kept the old in-memory config. The offer derives remote solely from `config.peer.remote_peer_id` (`crates/p2p-daemon/src/config.rs:57`, used for both signaling recipient and status label — no label bug). Local TCP side was fine (browser connected, listener accepted — saw ESTABLISHED sockets on hex `1F90`); failure was purely the self-targeted tunnel.
+- **Action taken:** `adb shell am force-stop com.phillipchin.webrtctunnel` cleared the stale runtime (process gone, 8080 released). User tapped **Start** → status went to clean `waiting_for_local_client`, `mqtt_connected=true`, `llama` listening, no bogus session.
+- **Then:** user loaded `localhost:8080` but it didn't load; status still `waiting_for_local_client` with `sessions: []` → the browser connection didn't reach the listener (likely Chrome showing a **cached** error page; needs a fresh new-tab load, offer negotiates lazily only when a local client actually connects). Before we could re-verify, **the phone dropped off USB adb** (`no devices`). Paused here.
+
+### STILL REQUIRED (second prerequisite, not yet confirmed)
+The `answer-office` server's `authorized_keys` must contain the phone's public identity, or a real connection will sit in `backoff`:
+`p2ptunnel-ed25519 peer_id=android-a54 sign_pub=3PW755e9zKSrRXmRUgoTodUx7SmhBUQ05ErCOQ3lZFI= kex_pub=epUwAvhC2e9CeVeDixdKkPMh7eiSB6D/WzVfrVPaKEw=`
+This **desktop** (`/home/phil/work/webrtc_tunnel`) is a *separate* offer node `peer_id=offer-arisu` (PID was 326671, `p2p-offer run`) whose `localhost:8080` works — proving `answer-office` + broker.emqx.io are up and serving 8080. The answer-office server is elsewhere (not this machine).
+
+### NEXT STEPS when resuming
+1. Reconnect phone to USB adb (re-auth prompt / unlock / re-seat cable).
+2. Fresh-load `http://localhost:8080` in a **new** Chrome tab; then read `adb shell run-as com.phillipchin.webrtctunnel cat files/state/status.json` and `adb shell cat /proc/net/tcp | grep 1F90`.
+3. Confirm a session appears with `remote_peer_id=answer-office` and `data_channel_open=true`. If it goes to `backoff`, verify `android-a54` is authorized on the answer-office server.
+4. Decide on committing the 4 UI fixes (branch off `master`).
+5. Possible real fix: make the app's Start path stop-then-start (or detect a config change) so editing config + Start isn't a silent no-op against an already-running native runtime.
+
+### Useful adb facts
+- Read runtime files: `adb shell run-as com.phillipchin.webrtctunnel cat files/state/status.json` (also `files/config.toml`, `files/setup_input.json`, `files/forwards.json`, `files/identity.pub`, `files/authorized_keys`). Configured `log_dir`/`p2ptunnel.log` is NOT created (file logging path unused on Android; identity passed inline via `start_offer_with_identity`, so `files/runtime/` doesn't exist).
+- `TunnelForegroundService` is **not exported** — `adb am start-foreground-service` is rejected (`Requires permission not exported`); must drive Start/Stop from the app UI, or `am force-stop` to clear the runtime.
+- Port 8080 = hex `1F90` in `/proc/net/tcp`; state col: `0A`=LISTEN, `01`=ESTABLISHED, `02`=SYN_SENT, `08`=CLOSE_WAIT. App uid was 10344, Chrome 10231.

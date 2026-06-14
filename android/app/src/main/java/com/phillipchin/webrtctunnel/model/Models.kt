@@ -177,7 +177,7 @@ data class IdentityValidationResult(
 @Serializable
 data class SetupConfigInput(
     val localPeerId: String = "android-phone",
-    val brokerHost: String = "",
+    val brokerHost: String = "broker.emqx.io",
     val brokerPort: Int = 8883,
     val brokerUseTls: Boolean = true,
     val brokerUsername: String = "",

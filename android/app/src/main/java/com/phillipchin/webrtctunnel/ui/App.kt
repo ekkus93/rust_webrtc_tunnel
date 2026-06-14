@@ -234,11 +234,12 @@ private fun BottomNavBar(navController: NavHostController) {
                 selected = currentDestination.isOnRoute(tab.route.value),
                 onClick = {
                     navController.navigate(tab.route.value) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
-                        }
+                        // Pop any secondary screens back to the start destination, then show the
+                        // tapped tab's root. saveState/restoreState are intentionally omitted: with a
+                        // flat graph they key on the start destination and would restore the previous
+                        // tab on top of Home (tapping Home from Logs returned to Logs).
+                        popUpTo(navController.graph.findStartDestination().id)
                         launchSingleTop = true
-                        restoreState = true
                     }
                 },
                 icon = tab.icon,

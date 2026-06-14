@@ -183,6 +183,11 @@ internal fun BrokerStepContent(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        OutlinedButton(
+            onClick = vm.save::testBrokerConnection,
+            enabled = !state.isBusy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Test TCP reachability") }
     }
 }
 

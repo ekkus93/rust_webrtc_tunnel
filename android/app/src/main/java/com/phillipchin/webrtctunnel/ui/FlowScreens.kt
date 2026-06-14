@@ -3,6 +3,7 @@ package com.phillipchin.webrtctunnel.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -153,29 +154,27 @@ private fun WizardNavigationButtons(
     onStartSuccess: () -> Unit,
 ) {
     val busy = state.isBusy
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = vm::cancel, enabled = !busy) { Text("Cancel") }
-            OutlinedButton(
-                onClick = vm::goBack,
-                enabled = state.currentStep != SetupStep.Mode && !busy,
-            ) { Text("Back") }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.currentStep == SetupStep.Broker) {
-                OutlinedButton(onClick = vm.save::testBrokerConnection, enabled = !busy) {
-                    Text("Test TCP reachability")
-                }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = vm::cancel, enabled = !busy) { Text("Cancel") }
+                OutlinedButton(
+                    onClick = vm::goBack,
+                    enabled = state.currentStep != SetupStep.Mode && !busy,
+                ) { Text("Back") }
             }
             if (state.currentStep == SetupStep.Review) {
                 OutlinedButton(onClick = vm.save::saveAndApplyConfig, enabled = canAdvance && !busy) { Text("Save") }
-                Button(
-                    onClick = { vm.save.startTunnelFromReview(onStartSuccess) },
-                    enabled = canAdvance && !busy,
-                ) { Text("Start Tunnel") }
             } else {
                 Button(onClick = vm::goNext, enabled = canAdvance && !busy) { Text("Next") }
             }
+        }
+        if (state.currentStep == SetupStep.Review) {
+            Button(
+                onClick = { vm.save.startTunnelFromReview(onStartSuccess) },
+                enabled = canAdvance && !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Start Tunnel") }
         }
     }
 }
