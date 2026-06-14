@@ -229,6 +229,9 @@ private fun NativeRuntimeStatusDto.toTunnelStatus(previous: TunnelStatus): Tunne
     return previous.copy(
         serviceState = stateValue,
         mode = modeValue,
+        // Surface the real remote peer from the active session; retain the last-known
+        // value between sessions rather than flicker to null.
+        remotePeerId = remotePeerId ?: previous.remotePeerId,
         mqttConnected = mqttConnected,
         activeSessionCount = activeSessionCount,
         sessionCapacity = sessionCapacity ?: previous.sessionCapacity,

@@ -40,6 +40,8 @@ impl RuntimeInner {
                 status.mqtt_connected = daemon.mqtt_connected;
                 status.active_session_count = daemon.active_session_count;
                 status.session_capacity = Some(daemon.session_capacity);
+                status.remote_peer_id =
+                    daemon.sessions.first().map(|session| session.remote_peer_id.to_string());
                 status.state = android_state_from_daemon(daemon.current_state);
                 status.forwards = daemon
                     .forwards
@@ -64,6 +66,7 @@ impl RuntimeInner {
             _ => {
                 status.mqtt_connected = false;
                 status.active_session_count = 0;
+                status.remote_peer_id = None;
                 status.forwards = Vec::new();
             }
         }
@@ -78,6 +81,7 @@ pub(crate) fn reset_runtime_metadata(state: &mut AndroidRuntimeStatus) {
     state.mqtt_connected = false;
     state.active_session_count = 0;
     state.session_capacity = None;
+    state.remote_peer_id = None;
     state.forwards = Vec::new();
 }
 

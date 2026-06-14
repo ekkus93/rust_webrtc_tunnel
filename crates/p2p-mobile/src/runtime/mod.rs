@@ -236,6 +236,7 @@ impl AndroidTunnelController {
             mqtt_connected: false,
             active_session_count: 0,
             session_capacity: None,
+            remote_peer_id: None,
             forwards: Vec::new(),
         })
     }

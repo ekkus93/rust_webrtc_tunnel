@@ -26,7 +26,13 @@ fn snapshot_status_overlays_daemon_status_when_active() {
         DaemonState::TunnelOpen,
         vec!["ssh".to_owned()],
         16,
-        Vec::new(),
+        vec![p2p_daemon::SessionStatus::new(
+            p2p_core::SessionId::new([7_u8; 16]),
+            "answer-office".parse().expect("remote peer id"),
+            DaemonState::TunnelOpen,
+            true,
+            vec!["ssh".to_owned()],
+        )],
     );
     let (tx, rx) = tokio::sync::watch::channel(connected);
     inner.status_rx = Some(rx);
@@ -35,6 +41,8 @@ fn snapshot_status_overlays_daemon_status_when_active() {
     assert!(snapshot.mqtt_connected);
     assert_eq!(snapshot.session_capacity, Some(16));
     assert_eq!(snapshot.state, AndroidRuntimeState::Running);
+    // The active session's real remote peer is surfaced (never the local peer id).
+    assert_eq!(snapshot.remote_peer_id.as_deref(), Some("answer-office"));
     drop(tx);
 }
 
@@ -104,6 +112,7 @@ fn reset_runtime_metadata_clears_measured_fields() {
         mqtt_connected: true,
         active_session_count: 3,
         session_capacity: Some(16),
+        remote_peer_id: Some("answer-office".to_owned()),
         forwards: vec![AndroidForwardRuntimeStatus::default()],
         ..AndroidRuntimeStatus::default()
     };
@@ -112,6 +121,7 @@ fn reset_runtime_metadata_clears_measured_fields() {
     assert!(!state.mqtt_connected);
     assert_eq!(state.active_session_count, 0);
     assert_eq!(state.session_capacity, None);
+    assert_eq!(state.remote_peer_id, None);
     assert!(state.forwards.is_empty());
 }
 

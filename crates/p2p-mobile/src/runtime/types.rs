@@ -38,6 +38,9 @@ pub struct AndroidRuntimeStatus {
     pub mqtt_connected: bool,
     pub active_session_count: usize,
     pub session_capacity: Option<usize>,
+    /// Real remote peer id of the active offer session (offer role has at most one),
+    /// so the UI can show who the offer is talking to. `None` when no session is active.
+    pub remote_peer_id: Option<String>,
     /// Per-forward runtime status (offer role). Empty unless the daemon is running
     /// and reporting forwards.
     pub forwards: Vec<AndroidForwardRuntimeStatus>,

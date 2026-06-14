@@ -109,6 +109,9 @@ data class NativeRuntimeStatusDto(
     // Per-forward runtime status (offer role). Defaulted for backward compatibility
     // with native status JSON that predates per-forward reporting.
     val forwards: List<NativeRuntimeForwardStatusDto> = emptyList(),
+    // Real remote peer of the active offer session, surfaced so the UI shows who the
+    // offer is talking to instead of "Not configured". Null when no session is active.
+    @SerialName("remote_peer_id") val remotePeerId: String? = null,
 )
 
 @Serializable
