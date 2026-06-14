@@ -1,10 +1,13 @@
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use ipnet::IpNet;
 use tokio::sync::{Mutex, mpsc};
 use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::setting_engine::SettingEngine;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -16,6 +19,9 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc_util::ifaces;
+use webrtc_util::vnet::interface::Interface;
+use webrtc_util::vnet::net::Net;
 
 use p2p_core::{DATA_CHANNEL_LABEL, DATA_CHANNEL_ORDERED, DATA_CHANNEL_RELIABLE, WebRtcConfig};
 
@@ -167,7 +173,10 @@ impl WebRtcPeer {
         let rtc_config = build_rtc_configuration(config)?;
         let mut media_engine = MediaEngine::default();
         media_engine.register_default_codecs()?;
-        let api = APIBuilder::new().with_media_engine(media_engine).build();
+        let api = APIBuilder::new()
+            .with_media_engine(media_engine)
+            .with_setting_engine(build_setting_engine())
+            .build();
         let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
 
         let (local_candidate_tx, local_candidate_rx) = mpsc::channel(64);
@@ -202,6 +211,10 @@ impl WebRtcPeer {
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
             let ice_state_tx = ice_state_tx.clone();
             Box::pin(async move {
+                // State names (new/checking/connected/failed/...) carry no address
+                // and are the key signal for diagnosing whether a peer connection
+                // ever establishes, so log every transition unconditionally.
+                tracing::info!(target: "ice", state = %state, "ICE connection state changed");
                 let _ = ice_state_tx.send(state.into()).await;
             })
         }));
@@ -367,6 +380,75 @@ impl WebRtcPeer {
                     "local description was not set after SDP creation".to_owned(),
                 )
             })
+    }
+}
+
+/// Build the WebRTC `SettingEngine`.
+///
+/// On platforms where the OS interface enumeration works (desktop), this is the
+/// default engine. On platforms where it fails — notably Android 11+ (API 30+),
+/// where `getifaddrs`/NETLINK interface enumeration is restricted for apps — webrtc-rs
+/// gathers no host candidate and can never connect to a peer on the same LAN. In that
+/// case we discover the primary local IPv4 directly (via a connect-less UDP socket,
+/// which needs no interface enumeration) and inject a real-socket `Net` carrying that
+/// interface, so a host candidate is gathered. Desktop behaviour is unchanged because
+/// the fallback only engages when enumeration yields no usable host address.
+fn build_setting_engine() -> SettingEngine {
+    let mut engine = SettingEngine::default();
+    if os_interface_enumeration_works() {
+        return engine;
+    }
+    match fallback_net() {
+        Some(net) => {
+            engine.set_vnet(Some(Arc::new(net)));
+            tracing::warn!(
+                target: "ice",
+                "OS interface enumeration unavailable (e.g. Android NETLINK restriction); \
+                 injecting a fallback host interface so ICE can gather a host candidate",
+            );
+        }
+        None => {
+            tracing::warn!(
+                target: "ice",
+                "OS interface enumeration unavailable and no fallback local IP found; \
+                 ICE may gather no host candidate and fail to connect on a LAN",
+            );
+        }
+    }
+    engine
+}
+
+/// Whether webrtc-rs's own interface enumeration yields at least one usable
+/// (non-loopback IPv4) host address. `getifaddrs` returning an error (Android) or an
+/// empty / loopback-only list both count as "not working".
+fn os_interface_enumeration_works() -> bool {
+    match ifaces::ifaces() {
+        Ok(list) => list.iter().any(
+            |iface| matches!(iface.addr, Some(addr) if addr.is_ipv4() && !addr.ip().is_loopback()),
+        ),
+        Err(_) => false,
+    }
+}
+
+/// A real-socket `Net` whose single interface carries the host's primary local IPv4.
+fn fallback_net() -> Option<Net> {
+    let ip = primary_local_ipv4()?;
+    // The prefix length is irrelevant to candidate gathering (which only reads the
+    // address); /24 is a reasonable placeholder for a LAN.
+    let ipnet = IpNet::new(IpAddr::V4(ip), 24).ok()?;
+    let interface = Interface::new("p2p-fallback".to_owned(), vec![ipnet]);
+    Some(Net::Ifs(vec![interface]))
+}
+
+/// The OS-chosen source IPv4 for outbound traffic, discovered without interface
+/// enumeration by "connecting" a UDP socket to a public address (no packets are sent)
+/// and reading the bound local address.
+fn primary_local_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(addr) if !addr.is_loopback() && !addr.is_unspecified() => Some(addr),
+        _ => None,
     }
 }
 

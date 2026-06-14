@@ -44,6 +44,34 @@ pub fn redact_candidate(config: &LoggingConfig, value: &str) -> String {
     }
 }
 
+/// Build a diagnostic summary of an ICE candidate line for logging.
+///
+/// The candidate *type* (`host`/`srflx`/`prflx`/`relay`) and transport
+/// (`udp`/`tcp`) reveal no address and are exactly what is needed to diagnose ICE
+/// gathering and connectivity problems, so they are always included. The full
+/// candidate line — which contains IP addresses and ports — is only appended when
+/// candidate redaction is disabled (`logging.redact_candidates = false`), so the
+/// "no candidate logging by default" policy is preserved.
+pub fn candidate_log_summary(config: &LoggingConfig, value: &str) -> String {
+    let typ = candidate_token_after(value, "typ").unwrap_or("unknown");
+    // SDP candidate grammar: `candidate:<foundation> <component> <transport> ...`,
+    // so the transport is the third whitespace-separated token.
+    let transport = value.split_whitespace().nth(2).unwrap_or("unknown");
+    format!("typ={typ} transport={transport} line={}", redact_candidate(config, value))
+}
+
+/// Return the token immediately following the first occurrence of `key` in a
+/// whitespace-separated candidate line (e.g. the value after `typ`).
+fn candidate_token_after<'a>(value: &'a str, key: &str) -> Option<&'a str> {
+    let mut tokens = value.split_whitespace();
+    while let Some(token) = tokens.next() {
+        if token == key {
+            return tokens.next();
+        }
+    }
+    None
+}
+
 fn build_writer(config: &LoggingConfig) -> Result<BoxMakeWriter, DaemonError> {
     let file = if config.file_logging {
         ensure_parent_exists(&config.log_file)?;
@@ -114,7 +142,7 @@ mod tests {
 
     use p2p_core::LoggingConfig;
 
-    use super::{redact_candidate, redact_sdp, redact_secret};
+    use super::{candidate_log_summary, redact_candidate, redact_sdp, redact_secret};
 
     fn config() -> LoggingConfig {
         LoggingConfig {
@@ -147,5 +175,37 @@ mod tests {
         let redacted = redact_candidate(&config(), "candidate:1 1 UDP 2122252543 192.0.2.1 12345");
         assert!(redacted.starts_with("<redacted>:candidate:"));
         assert!(!redacted.contains("192.0.2.1"));
+    }
+
+    #[test]
+    fn candidate_summary_keeps_type_and_transport_but_redacts_address_by_default() {
+        let summary = candidate_log_summary(
+            &config(),
+            "candidate:1 1 udp 2122252543 192.168.1.5 54321 typ host",
+        );
+        // Type and transport stay visible — that is the whole point of the summary.
+        assert!(summary.contains("typ=host"), "summary was: {summary}");
+        assert!(summary.contains("transport=udp"), "summary was: {summary}");
+        // The address is still redacted while redact_candidates is on.
+        assert!(!summary.contains("192.168.1.5"), "address leaked: {summary}");
+    }
+
+    #[test]
+    fn candidate_summary_includes_address_when_redaction_disabled() {
+        let mut config = config();
+        config.redact_candidates = false;
+        let summary = candidate_log_summary(
+            &config,
+            "candidate:2 1 udp 1686052607 203.0.113.7 54321 typ srflx raddr 192.168.1.5 rport 54321",
+        );
+        assert!(summary.contains("typ=srflx"), "summary was: {summary}");
+        assert!(summary.contains("transport=udp"), "summary was: {summary}");
+        assert!(summary.contains("203.0.113.7"), "address missing: {summary}");
+    }
+
+    #[test]
+    fn candidate_summary_tolerates_malformed_lines() {
+        let summary = candidate_log_summary(&config(), "garbage");
+        assert!(summary.contains("typ=unknown"), "summary was: {summary}");
     }
 }

@@ -139,6 +139,19 @@ class RustValidationBridge : TunnelValidationBridge {
     private external fun nativeGenerateIdentity(peerId: String): String
 }
 
+// Stateless on-device WebRTC self-diagnostic; own JNI declaration
+// (Java_..._RustWebRtcProbe_*). Returns a JSON report of OS local IP, ICE candidate
+// gathering (host/srflx counts), and a loopback handshake — used to check how
+// `p2p-webrtc` behaves on Android without a broker, remote peer, or NAT traversal.
+class RustWebRtcProbe {
+    fun probe(timeoutSecs: Long): String {
+        requireNativeLoaded()
+        return nativeWebrtcProbe(timeoutSecs)
+    }
+
+    private external fun nativeWebrtcProbe(timeoutSecs: Long): String
+}
+
 class RustTunnelBridge(
     private val validation: RustValidationBridge = RustValidationBridge(),
 ) : TunnelNativeBridge, TunnelValidationBridge by validation {

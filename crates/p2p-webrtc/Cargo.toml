@@ -9,10 +9,12 @@ rust-version.workspace = true
 bytes.workspace = true
 p2p-core = { path = "../p2p-core" }
 futures-util.workspace = true
+ipnet = "2"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 webrtc.workspace = true
+webrtc-util = "0.7"
 
 [lints]
 workspace = true

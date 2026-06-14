@@ -13,11 +13,14 @@ crate-type = ["cdylib", "rlib"]
 p2p-core = { path = "../p2p-core" }
 p2p-crypto = { path = "../p2p-crypto" }
 p2p-daemon = { path = "../p2p-daemon" }
+p2p-webrtc = { path = "../p2p-webrtc" }
+webrtc-util = "0.7"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 jni = "0.21.1"
 
 [dev-dependencies]

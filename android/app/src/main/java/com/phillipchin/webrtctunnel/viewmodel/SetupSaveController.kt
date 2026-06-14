@@ -11,6 +11,7 @@ import com.phillipchin.webrtctunnel.model.SetupConfigInput
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -104,7 +105,8 @@ class SetupSaveController(
                     importPublicIdentity(deps, current.importPublicIdentity, input.remotePeerId)
                         .getOrElse { saveError(it.message ?: "Failed importing public identity", redact = true) }
                 }
-                val candidate = deps.configRepository.renderOfferConfig(input, enabledForwards)
+                val debugLogs = deps.configRepository.preferences.first().debugLogsEnabled
+                val candidate = deps.configRepository.renderOfferConfig(input, enabledForwards, debugLogs)
                 val validation =
                     withContext(ioDispatcher) { validateCandidateConfig(deps, candidate, identity.first) }
                 if (!validation.valid) {

@@ -83,7 +83,15 @@ class ConfigRepository(private val context: Context) {
     fun renderOfferConfig(
         input: SetupConfigInput,
         forwards: List<ForwardConfig>,
-    ): String = buildOfferConfig(input, forwards, context.filesDir, resolveBrokerPasswordFile(input, context.filesDir))
+        debugLogs: Boolean = false,
+    ): String =
+        buildOfferConfig(
+            input,
+            forwards,
+            context.filesDir,
+            resolveBrokerPasswordFile(input, context.filesDir),
+            debugLogs,
+        )
 
     fun redactConfig(config: String): String {
         return SensitiveDataRedactor.redactText(config)

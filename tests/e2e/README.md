@@ -67,8 +67,9 @@ tests/e2e/android_smoke.sh
 ```
 
 Drives the real Android app on a running emulator/device through a from-scratch
-setup wizard against a real MQTT broker, then asserts the offer tunnel reaches
-**Connected** with its forward **Listening**, and that **Stop** reverts it.
+setup wizard against a real MQTT broker, then asserts the offer tunnel reaches a live
+**Listening** state (broker-connected, forward listening; no peer in this smoke) and
+that **Stop** reverts it.
 
 It proves the Android `.so` / JNI / Kotlin / foreground-service stack connects to a
 real broker over TLS and binds its local forward listener on-device.
@@ -86,21 +87,42 @@ webpki-roots, so no local CA provisioning is needed). Override with
 This is a **smoke** test (local/manual, not a CI gate): UI automation is inherently
 emulator/AVD-sensitive, and it needs a booted emulator + internet.
 
-### Why no full Android data-path E2E yet
+## Phase B (full data path) — Android emulator offer → dockerized answer (local/manual)
 
-The full path (Android offer → WebRTC → Linux answer → target, with real bytes) is
-**blocked**: the emulator is behind qemu user-mode NAT, and `p2p-webrtc`'s
-`build_rtc_configuration` rejects `turn:` URLs ("TURN URLs are not supported in v1")
-and sets no ICE relay credentials, so the emulator and an external answer cannot
-reliably establish a peer connection. Enabling it requires either:
+```
+tests/e2e/android_tunnel_e2e.sh
+```
 
-- adding TURN support to the code (config + `RTCIceServer` credentials + a coturn
-  relay) — a real product change to security-relevant networking, to be specced and
-  signed off separately, or
-- bridged/TAP emulator networking so direct ICE works.
+Drives the app through the same wizard (shared automation in
+`lib/android_wizard.sh`), then pushes **real bytes through the tunnel**:
 
-Until then, the data path is covered by Phase A (desktop↔desktop over a real broker)
-and the headless `bind_offer_listeners_soft_fails_individual_forward` /
-`snapshot_status_overlays_daemon_status_when_active` tests, while this smoke test
-covers the Android-on-device connect/listen/stop lifecycle. See
-`docs/archive/DOCKER_TESTS1_TODO.md` (Phase B, B2) for details.
+```
+host curl --(adb forward)--> emulator 127.0.0.1:8080 (offer listener)
+  --WebRTC data channel--> dockerized p2p-answer --> target (127.0.0.1:<port>) --> back
+```
+
+It runs `p2p-answer` in a container (`ubuntu:24.04`, `--network host`, mounting the
+host-built release binary and the system CA bundle) that authorizes the app's own
+generated identity, then asserts a unique marker is pulled all the way through. A host
+`python -m http.server` on a free port is the answer's forward target.
+
+Prerequisites: the smoke prerequisites plus `docker`, `curl`, `python3`, and the host
+CA bundle at `/etc/ssl/certs/ca-certificates.crt`.
+
+### Why this works now (it used to be blocked)
+
+This path was previously deferred because the emulator gathered **no host ICE
+candidate**: webrtc-rs enumerates interfaces via `getifaddrs`, which is **restricted
+on Android 11+ (API 30+)**, so the emulator only offered a server-reflexive candidate
+that an external answer could not reach. `p2p-webrtc`'s `build_setting_engine` now
+detects that failure and injects a real-socket interface (the OS-discovered LAN IP)
+via the WebRTC `SettingEngine`, so a host candidate is gathered. The emulator then
+initiates ICE outbound through qemu's NAT to the host-networked answer (whose address
+is reachable), and the response returns via the NAT mapping — so a valid pair forms
+and the data channel opens. No TURN is involved.
+
+The answer uses `--network host` so it advertises a reachable address; a bridge-only
+container address is not reliably reachable from the emulator. This is still a
+**local/manual** tier (UI-automation- and emulator-sensitive), not a CI gate. The
+on-device WebRTC behaviour (host-candidate gathering + loopback handshake) is also
+guarded headlessly by `WebRtcProbeInstrumentationTest`.

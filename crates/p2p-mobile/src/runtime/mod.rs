@@ -12,10 +12,12 @@ use p2p_crypto::{AuthorizedKeys, IdentityFile};
 use p2p_daemon::DaemonStatus;
 use tokio::runtime::Runtime;
 
+mod log_bridge;
 mod state;
 mod types;
 mod validate;
 
+use log_bridge::install_tracing_once;
 use state::{RuntimeInner, record_start_error, reset_runtime_metadata, unix_ms};
 
 pub use types::{
@@ -102,6 +104,13 @@ impl AndroidTunnelController {
             }
         }
 
+        // Route the shared daemon/WebRTC `tracing` output (including ICE diagnostics)
+        // into the in-app log feed. No-op after the first start, so the configured
+        // level is fixed for the process lifetime — set `logging.level = "debug"` and
+        // `logging.redact_candidates = false` before the first start to capture ICE
+        // candidate details for diagnosis.
+        install_tracing_once(inner.logs.clone(), &config.logging.level);
+
         let runtime =
             Runtime::new().map_err(|error| record_start_error(&mut inner, error.to_string()))?;
         let log_state = Arc::clone(&self.inner);
@@ -142,7 +151,7 @@ impl AndroidTunnelController {
                         inner.state.config_path = None;
                         inner.state.last_error = None;
                         reset_runtime_metadata(&mut inner.state);
-                        inner.logs.push_back(AndroidLogEvent {
+                        inner.logs.push(AndroidLogEvent {
                             unix_ms: unix_ms(),
                             level: "info".to_owned(),
                             message: "runtime completed".to_owned(),
@@ -154,15 +163,12 @@ impl AndroidTunnelController {
                         inner.state.active = false;
                         // Preserve config_path for diagnostics; clear uptime/measured fields.
                         reset_runtime_metadata(&mut inner.state);
-                        inner.logs.push_back(AndroidLogEvent {
+                        inner.logs.push(AndroidLogEvent {
                             unix_ms: unix_ms(),
                             level: "error".to_owned(),
                             message: error.to_string(),
                         });
                     }
-                }
-                while inner.logs.len() > 256 {
-                    inner.logs.pop_front();
                 }
                 inner.task = None;
             }
@@ -187,14 +193,11 @@ impl AndroidTunnelController {
                     .map(|offer| (forward.id.clone(), offer.listen_host.clone(), offer.listen_port))
             })
             .collect();
-        inner.logs.push_back(AndroidLogEvent {
+        inner.logs.push(AndroidLogEvent {
             unix_ms: unix_ms(),
             level: "info".to_owned(),
             message: "runtime started".to_owned(),
         });
-        while inner.logs.len() > 256 {
-            inner.logs.pop_front();
-        }
         Ok(())
     }
 
@@ -214,14 +217,11 @@ impl AndroidTunnelController {
             inner.state.config_path = None;
             inner.state.last_error = None;
             reset_runtime_metadata(&mut inner.state);
-            inner.logs.push_back(AndroidLogEvent {
+            inner.logs.push(AndroidLogEvent {
                 unix_ms: unix_ms(),
                 level: "info".to_owned(),
                 message: "runtime stopped".to_owned(),
             });
-            while inner.logs.len() > 256 {
-                inner.logs.pop_front();
-            }
         }
     }
 
@@ -241,11 +241,7 @@ impl AndroidTunnelController {
     }
 
     pub fn recent_logs(&self, max_events: usize) -> Vec<AndroidLogEvent> {
-        let max_events = max_events.max(1);
-        self.inner
-            .lock()
-            .map(|inner| inner.logs.iter().rev().take(max_events).cloned().collect())
-            .unwrap_or_default()
+        self.inner.lock().map(|inner| inner.logs.recent(max_events)).unwrap_or_default()
     }
 
     pub fn last_error(&self) -> Option<String> {

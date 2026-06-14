@@ -2,21 +2,22 @@
 //! maintain it: overlaying the live daemon status onto the lifecycle snapshot,
 //! clearing measured metadata between runs, and recording start failures.
 
-use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use p2p_daemon::DaemonStatus;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
+use super::log_bridge::LogBuffer;
 use super::types::{
     AndroidForwardRuntimeStatus, AndroidLogEvent, AndroidRuntimeState, AndroidRuntimeStatus,
     android_state_from_daemon, forward_listen_state_str,
 };
 
+#[derive(Default)]
 pub(crate) struct RuntimeInner {
     pub(crate) state: AndroidRuntimeStatus,
-    pub(crate) logs: VecDeque<AndroidLogEvent>,
+    pub(crate) logs: LogBuffer,
     pub(crate) task: Option<JoinHandle<()>>,
     pub(crate) runtime: Option<Runtime>,
     /// Latest daemon status from the running offer daemon, if any. Overlaid onto the
@@ -70,19 +71,6 @@ impl RuntimeInner {
     }
 }
 
-impl Default for RuntimeInner {
-    fn default() -> Self {
-        Self {
-            state: AndroidRuntimeStatus::default(),
-            logs: VecDeque::with_capacity(256),
-            task: None,
-            runtime: None,
-            status_rx: None,
-            forward_config: Vec::new(),
-        }
-    }
-}
-
 /// Clear measured/uptime metadata that must not outlive an active run, so the UI does
 /// not show stale uptime, MQTT/session counts, or per-forward state after the run ends.
 pub(crate) fn reset_runtime_metadata(state: &mut AndroidRuntimeStatus) {
@@ -97,14 +85,11 @@ pub(crate) fn record_start_error(inner: &mut RuntimeInner, message: String) -> S
     inner.state.state = AndroidRuntimeState::Error;
     inner.state.active = false;
     inner.state.last_error = Some(message.clone());
-    inner.logs.push_back(AndroidLogEvent {
+    inner.logs.push(AndroidLogEvent {
         unix_ms: unix_ms(),
         level: "error".to_owned(),
         message: message.clone(),
     });
-    while inner.logs.len() > 256 {
-        inner.logs.pop_front();
-    }
     message
 }
 

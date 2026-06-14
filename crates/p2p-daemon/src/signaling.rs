@@ -198,13 +198,26 @@ pub(crate) async fn send_local_candidate<T: DaemonSignalingTransport>(
     remote: &AuthorizedKey,
     candidate: IceCandidateSignal,
 ) -> Result<(), DaemonError> {
-    let body = if candidate.candidate.is_some() {
+    let body = if let Some(candidate_line) = candidate.candidate {
+        tracing::debug!(
+            target: "ice",
+            session_id = %session.session_id,
+            remote_peer_id = %session.remote_peer_id,
+            candidate = %crate::candidate_log_summary(&ctx.config.logging, &candidate_line),
+            "gathered local ICE candidate",
+        );
         MessageBody::IceCandidate(IceCandidateBody {
-            candidate: candidate.candidate,
+            candidate: Some(candidate_line),
             sdp_mid: candidate.sdp_mid,
             sdp_mline_index: candidate.sdp_mline_index,
         })
     } else {
+        tracing::debug!(
+            target: "ice",
+            session_id = %session.session_id,
+            remote_peer_id = %session.remote_peer_id,
+            "local ICE gathering complete (end-of-candidates)",
+        );
         MessageBody::EndOfCandidates(EndOfCandidatesBody::default())
     };
 

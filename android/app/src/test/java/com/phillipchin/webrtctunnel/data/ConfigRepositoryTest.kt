@@ -203,6 +203,29 @@ class ConfigRepositoryTest {
     }
 
     @Test
+    fun renderOfferConfigDefaultsToInfoLogLevel() {
+        val text =
+            repository.renderOfferConfig(
+                SetupConfigInput(localPeerId = "android-peer", brokerHost = "broker.local"),
+                listOf(ForwardConfig(id = "llama", name = "Llama", localPort = 8080, remoteForwardId = "llama")),
+            )
+        assertTrue(text.contains("level = \"info\""))
+        assertFalse(text.contains("level = \"debug\""))
+    }
+
+    @Test
+    fun renderOfferConfigUsesDebugLogLevelWhenEnabled() {
+        val text =
+            repository.renderOfferConfig(
+                SetupConfigInput(localPeerId = "android-peer", brokerHost = "broker.local"),
+                listOf(ForwardConfig(id = "llama", name = "Llama", localPort = 8080, remoteForwardId = "llama")),
+                debugLogs = true,
+            )
+        assertTrue(text.contains("level = \"debug\""))
+        assertFalse(text.contains("level = \"info\""))
+    }
+
+    @Test
     fun renderOfferConfigEscapesInjectedTomlStrings() {
         val input =
             SetupConfigInput(

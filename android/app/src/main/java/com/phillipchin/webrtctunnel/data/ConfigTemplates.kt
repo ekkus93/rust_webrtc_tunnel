@@ -77,10 +77,13 @@ private fun pathsSection(filesDir: File): String =
     log_dir = ${tomlString(File(filesDir, "state/log").absolutePath)}
     """.trimIndent()
 
-private fun loggingHealthSections(filesDir: File): String =
+private fun loggingHealthSections(
+    filesDir: File,
+    debugLogs: Boolean,
+): String =
     """
     [logging]
-    level = "info"
+    level = ${if (debugLogs) "\"debug\"" else "\"info\""}
     format = "text"
     file_logging = true
     stdout_logging = true
@@ -96,7 +99,10 @@ private fun loggingHealthSections(filesDir: File): String =
     status_file = ${tomlString(File(filesDir, "state/status.json").absolutePath)}
     """.trimIndent()
 
-internal fun buildDefaultConfigTemplate(filesDir: File): String =
+internal fun buildDefaultConfigTemplate(
+    filesDir: File,
+    debugLogs: Boolean = false,
+): String =
     listOf(
         """
         # Generated for Android app-private storage.
@@ -133,7 +139,7 @@ internal fun buildDefaultConfigTemplate(filesDir: File): String =
         remote_peer_id = "home-server"
         """.trimIndent(),
         STATIC_RECONNECT_SECURITY_SECTIONS,
-        loggingHealthSections(filesDir),
+        loggingHealthSections(filesDir, debugLogs),
     ).joinToString("\n\n")
 
 internal fun buildOfferConfig(
@@ -141,6 +147,7 @@ internal fun buildOfferConfig(
     forwards: List<ForwardConfig>,
     filesDir: File,
     passwordFile: String,
+    debugLogs: Boolean = false,
 ): String {
     val scheme = if (input.brokerUseTls) "mqtts" else "mqtt"
     val forwardsToml =
@@ -184,6 +191,6 @@ internal fun buildOfferConfig(
         STATIC_TLS_WEBRTC_TUNNEL_SECTIONS,
         listOf(forwardsToml, peerSection).joinToString("\n\n"),
         STATIC_RECONNECT_SECURITY_SECTIONS,
-        loggingHealthSections(filesDir),
+        loggingHealthSections(filesDir, debugLogs),
     ).joinToString("\n\n")
 }

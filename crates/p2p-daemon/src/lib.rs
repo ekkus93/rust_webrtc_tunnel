@@ -34,7 +34,9 @@ pub use config::{
     apply_answer_overrides, apply_env_overrides, apply_offer_overrides, compute_backoff_delay,
 };
 pub use error::DaemonError;
-pub use logging::{redact_candidate, redact_sdp, redact_secret, setup_logging};
+pub use logging::{
+    candidate_log_summary, redact_candidate, redact_sdp, redact_secret, setup_logging,
+};
 pub use offer::{run_offer_daemon, run_offer_daemon_with_status, run_offer_daemon_with_transport};
 pub use status::{
     DaemonStatus, ForwardListenState, ForwardRuntimeStatus, SessionStatus, StatusWriter,

@@ -303,6 +303,13 @@ pub unsafe extern "C" fn p2ptunnel_generate_identity(peer_id: *const c_char) -> 
 }
 
 #[unsafe(no_mangle)]
+/// Run the on-device WebRTC self-diagnostic and return a JSON report. Stateless;
+/// takes no pointers. `timeout_secs` bounds candidate gathering and the handshake.
+pub extern "C" fn p2ptunnel_webrtc_probe_json(timeout_secs: u64) -> *mut c_char {
+    catch_api_string(|| crate::diagnostics::run_webrtc_probe(timeout_secs))
+}
+
+#[unsafe(no_mangle)]
 /// # Safety
 ///
 /// `ptr` must have been returned by one of the bridge string functions and must

@@ -1,4 +1,5 @@
 mod c_abi;
+mod diagnostics;
 mod jni_bridge;
 mod runtime;
 

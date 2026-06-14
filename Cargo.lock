@@ -1787,12 +1787,15 @@ dependencies = [
  "p2p-core",
  "p2p-crypto",
  "p2p-daemon",
+ "p2p-webrtc",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "webrtc-util",
 ]
 
 [[package]]
@@ -1847,11 +1850,13 @@ version = "0.3.1"
 dependencies = [
  "bytes",
  "futures-util",
+ "ipnet",
  "p2p-core",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "webrtc",
+ "webrtc-util",
 ]
 
 [[package]]

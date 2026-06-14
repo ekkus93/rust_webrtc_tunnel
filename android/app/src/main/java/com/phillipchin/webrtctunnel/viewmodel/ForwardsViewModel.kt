@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -115,10 +116,11 @@ class ForwardsViewModel(
         }
     }
 
-    private fun regenerateActiveConfig(): ValidationResult {
+    private suspend fun regenerateActiveConfig(): ValidationResult {
         val input = deps.configRepository.loadSetupInput()
         val forwards = deps.forwardsRepository.current().filter { it.enabled }
-        val candidate = deps.configRepository.renderOfferConfig(input, forwards)
+        val debugLogs = deps.configRepository.preferences.first().debugLogsEnabled
+        val candidate = deps.configRepository.renderOfferConfig(input, forwards, debugLogs)
         val temp = File(deps.context.cacheDir, "config-forwards-candidate.toml")
         val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
         return runCatching {

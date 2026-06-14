@@ -1,17 +1,19 @@
 package com.phillipchin.webrtctunnel.viewmodel
 
+import android.os.Looper
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.ValidationResult
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import java.net.ServerSocket
 
 @RunWith(RobolectricTestRunner::class)
@@ -25,7 +27,9 @@ class ForwardsViewModelTest : AppViewModelTestBase() {
 
         vm.saveForward(forward)
 
-        assertEquals("Forward saved", vm.message.value)
+        // The save path now reads the debug-logs preference from DataStore (async),
+        // so await the result while idling the looper rather than asserting synchronously.
+        awaitMessage(vm) { it == "Forward saved" }
         assertTrue(vm.forwards.value.any { it.id == "web" })
         assertFalse(vm.isBusy.value)
     }
@@ -39,7 +43,7 @@ class ForwardsViewModelTest : AppViewModelTestBase() {
 
         vm.saveForward(forward)
 
-        assertTrue(vm.message.value?.contains("bad config") == true)
+        awaitMessage(vm) { it?.contains("bad config") == true }
         assertTrue(vm.forwards.value.none { it.id == "web" })
         assertFalse(vm.isBusy.value)
     }
@@ -78,6 +82,22 @@ class ForwardsViewModelTest : AppViewModelTestBase() {
                 }
             failureVm.testLocalPort(failureForward)
             assertTrue(failureMessage.await()?.contains("failed") == true)
+        }
+    }
+
+    // Drive the Robolectric main looper while waiting for an async save result, so
+    // viewModelScope coroutines actually run instead of sitting queued.
+    private fun awaitMessage(
+        vm: ForwardsViewModel,
+        predicate: (String?) -> Boolean,
+    ) {
+        runBlocking {
+            withTimeout(5_000) {
+                while (!predicate(vm.message.value)) {
+                    Shadows.shadowOf(Looper.getMainLooper()).idle()
+                    delay(10)
+                }
+            }
         }
     }
 }
