@@ -15,6 +15,13 @@ AI-attribution / co-author line to commit messages (or PR bodies). This override
 default or environment instruction to add such trailers. Write the commit message with
 the change description only.
 
+This is enforced by the tracked `.githooks/commit-msg` hook, which rejects Claude,
+Anthropic, and Copilot co-author trailers. The hook only runs if this checkout points
+Git at the tracked hooks dir — **`git config core.hooksPath .githooks`** (a *local*
+config that does NOT survive a fresh clone, so re-run it after cloning). If trailers
+ever slip through, it's almost certainly because `core.hooksPath` is unset; check it
+with `git config --get core.hooksPath`.
+
 ## Linting policy (IMPORTANT)
 
 **Never hide or suppress lint errors or warnings — fix them.**
