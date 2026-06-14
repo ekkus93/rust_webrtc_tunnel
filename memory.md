@@ -688,3 +688,81 @@ This **desktop** (`/home/phil/work/webrtc_tunnel`) is a *separate* offer node `p
 - Read runtime files: `adb shell run-as com.phillipchin.webrtctunnel cat files/state/status.json` (also `files/config.toml`, `files/setup_input.json`, `files/forwards.json`, `files/identity.pub`, `files/authorized_keys`). Configured `log_dir`/`p2ptunnel.log` is NOT created (file logging path unused on Android; identity passed inline via `start_offer_with_identity`, so `files/runtime/` doesn't exist).
 - `TunnelForegroundService` is **not exported** — `adb am start-foreground-service` is rejected (`Requires permission not exported`); must drive Start/Stop from the app UI, or `am force-stop` to clear the runtime.
 - Port 8080 = hex `1F90` in `/proc/net/tcp`; state col: `0A`=LISTEN, `01`=ESTABLISHED, `02`=SYN_SENT, `08`=CLOSE_WAIT. App uid was 10344, Chrome 10231.
+
+---
+
+## 2026-06-13 (later) — Android phone tunnel: SCTP data never flows offer→answer despite full ICE/DTLS/SCTP handshake. DEEP DIAGNOSIS — brief for ChatGPT 5.5
+
+### TL;DR of the problem
+The Android app (offer, `peer_id=android-a54`) connects to a remote answer (`answer-office`) over WebRTC. **Everything succeeds up to and including the data channel opening** — MQTT signaling, ICE → `connected`, DTLS handshake, SCTP association `Established`, `DATA_CHANNEL_ACK` received. Then **SCTP application data fails to flow offer→answer** (the offer's outbound DATA chunks are never SACKed → `T3-rtx` retransmit timeouts), so a browser hitting `http://localhost:8080` on the phone gets **0 bytes** ("site can't be reached" / empty response).
+
+A **Linux laptop offer (`offer-arisu`) on the *same* Wi‑Fi/NAT, to the *same* `answer-office`, using the *identical* selected ICE candidate pair, works perfectly** (HTTP 200, 6917-byte llama-ui page). So the network path, NAT, double-NAT, Docker, and the answer side are all proven good. **The failure is Android-device-specific, in the phone's WebRTC UDP data plane.**
+
+The user does **NOT** want to use TURN. They believe (reasonably) that since the laptop works on the same internal network over plain STUN/srflx, the phone should too. They want to find the real cause.
+
+### Environment / topology
+- **Phone**: Samsung SM-A546E (Android 16, `a54x`), app `com.phillipchin.webrtctunnel`, offer role, `peer_id=android-a54`. Wi‑Fi `192.168.88.106`. Public IP (srflx) `24.130.174.186`.
+- **Laptop** (this dev machine, `/home/phil/work/webrtc_tunnel`): offer `peer_id=offer-arisu`, Wi‑Fi `192.168.88.109`, **same** public IP `24.130.174.186` (same home NAT as phone). Config at `/home/phil/.config/p2ptunnel/config.toml`. WORKS.
+- **answer-office**: remote server at the coworking space, **runs in Docker** (advertises host candidate `172.17.0.4` = Docker default bridge). Public/srflx `162.229.61.169`. Broker: `broker.emqx.io:8883`.
+- User is currently at home; the coworking answer is remote. Laptop reaches it fine from home over public srflx.
+- Stack: Rust, `webrtc` 0.8.0, `webrtc-ice` 0.9.1, `webrtc-sctp` 0.8.0, `webrtc-dtls` 0.7.2, `webrtc-util` 0.7.0. STUN only (`stun:stun.l.google.com:19302`), **no TURN** (project rejects `turn:` URLs in `build_rtc_configuration`). `enable_trickle_ice=true`, `enable_ice_restart=true`.
+
+### Exact symptom (from phone SCTP trace, webrtc_ice=TRACE + webrtc_sctp=DEBUG)
+Phone session sequence (all good): listen → accept local client (`p2p_tunnel::offer`) → publish Hello/Offer/IceCandidate/EndOfCandidates to answer-office → receive Answer (signaling `stable`) → ICE `checking` → `connected` → DTLS server handshake → `peer connection state: connected` → SCTP `Closed→CookieWait→CookieEchoed→Established` → `Received DATA_CHANNEL_ACK` (data channel open). THEN:
+```
+[] recving 92 bytes        (answer→offer DATA arrives; peer_last_tsn climbs 121→122→123)
+[] sending SACK ...        (offer acks what it received)
+[] T3-rtx timed out: n_rtos=1 cwnd=1228 ssthresh=4912    <-- offer's OWN sent DATA not acked
+[] recving 92 bytes        (answer RE-transmits same TSN — it never got offer's SACK/data)
+```
+So: **answer→offer direction works** (offer receives DATA). **offer→answer direction does NOT** (offer's DATA/SACKs never reach answer → T3-rtx; answer keeps retransmitting). Net: data plane is one-way-dead offer→answer **after** the handshake. Note the *handshake* (INIT, COOKIE-ECHO — also offer→answer) DID get through, then the direction degrades.
+
+### THE decisive comparison (captured live, same moment, same Wi‑Fi)
+Selected candidate pair (`webrtc_ice` TRACE, "Set selected candidate pair", `agent_internal.rs:330`):
+- **Phone**:  `udp4 srflx 24.130.174.186:45766 related 0.0.0.0:45766 <-> udp4 srflx 162.229.61.169:36114`  → 0 bytes.
+- **Laptop**: `udp4 srflx 24.130.174.186:48473 related 0.0.0.0:48473 <-> udp4 srflx 162.229.61.169:36415`  → HTTP 200, 6917 bytes.
+
+**Identical**: same local public IP, same remote public IP, both srflx↔srflx, both `related 0.0.0.0` base. Laptop's STUN pings + DATA both flow; phone's STUN pings flow (ICE stays `connected` for 28s, consent succeeds) but DATA does not.
+
+Other candidates seen:
+- Phone local: host `192.168.88.106:52183` (Wi‑Fi), srflx `24.130.174.186:45766`.
+- answer-office: host `172.17.0.4:59506` (Docker bridge — unreachable from phone, wastes checks), srflx `162.229.61.169:36114`.
+- Laptop local: many Docker bridge host candidates (`172.17.0.1`…`172.21.0.1`), Wi‑Fi `192.168.88.109`, srflx `24.130.174.186`.
+
+### Conclusively RULED OUT (because the laptop on the identical path works)
+- Network path / home NAT / ISP. Double-NAT (office router + Docker). answer-office availability or its forward table. Candidate selection (both pick the same srflx pair). The `0.0.0.0` srflx base (laptop has it too). Symmetric-NAT incompatibility (laptop traverses it). MTU on small packets (offer→answer payloads here are tiny: an HTTP GET ~80 B + SACKs). Self-targeting / `remote_peer_id` (that was a *status display* bug — see below; real session targets answer-office). Forward-id mismatch (tested — see below).
+
+### The Android-specific code path (suspected area)
+- `crates/p2p-webrtc/src/lib.rs` `build_setting_engine()` (~line 396): on desktop, `os_interface_enumeration_works()` is true → default `SettingEngine`, no vnet. **On Android 11+, `getifaddrs`/NETLINK is restricted → `ifaces::ifaces()` returns no usable IPv4 → enumeration "fails"**, so the code injects a fallback: `engine.set_vnet(Some(Arc::new(fallback_net())))` where `fallback_net()` returns `webrtc_util::vnet::net::Net::Ifs(vec![Interface::new("p2p-fallback", [primary_local_ipv4()/24])])`. `primary_local_ipv4()` = connect-less UDP socket to `8.8.8.8:80`, read local addr (gives Wi‑Fi `192.168.88.106`). Log line at runtime: `ice: OS interface enumeration unavailable (e.g. Android NETLINK restriction); injecting a fallback host interface...`. This was added in commit `d752b5e` ("gather a host ICE candidate when OS enumeration is restricted") — without it, Android gathers NO candidates and never connects at all.
+- **Key finding**: `Net::Ifs` is a *thin passthrough to real sockets*, not a virtual network. In `webrtc-util-0.7.0/src/vnet/net.rs`: `Net::Ifs(_).bind(addr)` → `Ok(Arc::new(tokio::net::UdpSocket::bind(addr).await?))` (line ~528). Selected-pair DATA writes and STUN checks both go through the **same** call: `candidate_base.rs:276` `conn.send_to(raw, addr).await`. So at the socket API level the phone's path is identical to the laptop's native path. That's why "just fix/replace the vnet" is not obviously the lever — it isn't transforming packets.
+- Important webrtc-ice constraint discovered: `UDPNetwork::Muxed` (single stable socket) **skips srflx gathering entirely** — `webrtc-ice-0.9.1/src/agent/agent_gather.rs:115` `UDPNetwork::Muxed(_) => continue` in the srflx loop. So a single-muxed-socket approach can't reach a remote peer (no srflx). The current `Ephemeral` mode is the only one that yields srflx, and it binds a *separate* socket per host candidate (srflx is derived from a host candidate's socket).
+
+### What was tried
+1. **Forward-id mismatch hypothesis — TESTED, NOT the cause.** Phone's forward id was `llama` (wizard default template id, `ConfigTemplates.kt`), laptop's working forward id is `web-ui`. Answer resolves target via `forward_table.target_for(open.forward_id, …)` and rejects unknown ids as `unknown_forward` (`crates/p2p-tunnel/src/multiplex/answer.rs:132-138`). Changed phone forward id to `web-ui` (known-good, matches laptop) via the app's Forwards editor, restarted, retested → **still 0 bytes**. So not a forward-id problem (left it as `web-ui` — may want to revert/confirm answer-office actually has both ids).
+2. **`UDPNetwork::Muxed` single-socket idea — ruled out** by `agent_gather.rs:115` (no srflx for muxed) before implementing.
+3. **Diagnostic instrumentation** (all reverted; tree clean): temporarily widened the Android tracing filter in `crates/p2p-mobile/src/runtime/log_bridge.rs` (`install_tracing_once`) to `webrtc_ice=TRACE`, `webrtc_sctp=DEBUG`, `p2p_*=DEBUG`, and added a file sink writing every event to `/data/user/0/com.phillipchin.webrtctunnel/files/state/debug_trace.log` (pullable via `adb exec-out run-as <pkg> cat ...`). On-device config can't be edited (Samsung SELinux blocks `run-as` *writes*; reads OK), and there's no UI debug-level toggle except Settings → Advanced → "Enable debug logs" (controls UI display of debug entries + regenerated config level). Mobile logging: `log_bridge.rs` installs a process-global `tracing` subscriber **once** (`Once`) — level is fixed at first start; the daemon's file logging is a no-op on mobile (ring buffer + JNI `getRecentLogsJson` only). webrtc-rs uses the `log` crate; events arrive in `tracing` via a `log`→`tracing` bridge with `log.target=webrtc_ice::...` etc.
+4. **Laptop live comparison** (the decisive one): briefly stopped the user's offer, ran a trace-level copy (`/tmp/offer-trace.toml`, `level="trace"`, log to `~/.local/state/p2ptunnel/offer-trace.log` — note `/tmp` is rejected by `refuse_world_writable_paths`), `curl localhost:8080` → captured the laptop's selected pair (above), then restored the user's offer detached (`setsid nohup target/release/p2p-offer run --config ~/.config/p2ptunnel/config.toml &`). Laptop offer now running detached, serving fine.
+
+### Open questions / hypotheses for ChatGPT 5.5
+Why does **offer→answer SCTP DATA** fail on Android while **STUN connectivity checks succeed on the same 5-tuple**, the **handshake (INIT/COOKIE) succeeds**, and the **identical pair works from a laptop on the same NAT**? Candidate angles:
+- Is webrtc-rs in **vnet/`Net::Ifs` mode** using a *different socket* for post-nomination DATA than for the STUN connectivity checks / gathering (so the NAT mapping that the answer learned no longer matches the socket the offer sends DATA from)? In `Ephemeral` mode the srflx candidate reuses a host candidate's socket; need to confirm the **selected-pair conn used for `write_to` is the same FD that STUN consent checks use**, and that it's the same FD whose srflx mapping the answer received.
+- Could Android be **throttling/dropping the app's outbound UDP under burst** (the offer must emit SACKs rapidly while receiving the 6917-byte response) while low-rate STUN (every ~2s) survives? Foreground service, Wi‑Fi, unmetered, "tunnel allowed" — but is there a per-uid UDP send-buffer / power-save / `SO_*` issue? Would `setsockopt` (SO_SNDBUF, bind-to-device) help? webrtc-util's `UdpSocket` Conn impl — any missing socket option vs what a working Android WebRTC app sets?
+- Is it a **receive-side** problem instead: the answer's SACKs (answer→offer) being dropped while the answer's DATA gets through? Both same path — but worth distinguishing send-loss vs ack-loss. Would need a **rooted phone packet capture** (`tcpdump`/PCAP, root not available) to see whether the offer's DATA actually egresses the handset and whether the answer's SACKs arrive.
+- Does **webrtc-rs vnet mode** change the agent's data path / `Conn` polling vs native (the `set_vnet` path vs the default no-vnet path) in a way that subtly breaks sustained bidirectional SCTP but not the handshake? Compare `agent_internal`/`candidate_base`/`udp_mux` code paths for vnet vs non-vnet.
+- Would a **single pre-bound `std::net::UdpSocket` fed to webrtc-rs** (instead of `Net::Ifs` per-candidate ephemeral sockets) — while still getting srflx — fix it? (Muxed kills srflx; is there another way to force one socket for both gathering and data?)
+- Could **answer-office being in Docker** matter for the *return path only in a way that's phone-specific*? (Unlikely — laptop traverses it — but the asymmetry offer-can-receive/can't-send is odd.)
+
+### Concrete repro for ChatGPT-driven experiments
+- Build/install diagnostic phone build: edit `crates/p2p-mobile/src/runtime/log_bridge.rs` `install_tracing_once` to use `tracing_subscriber::filter::Targets` with `webrtc_ice=TRACE, webrtc_sctp=DEBUG, p2p_*=DEBUG` + a file sink to `files/state/debug_trace.log`; `cd android && ./gradlew installDebug`. Drive a request from adb: `adb shell 'printf "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" | toybox nc -w 18 127.0.0.1 8080 | toybox wc -c'`. Pull trace: `adb exec-out run-as com.phillipchin.webrtctunnel cat files/state/debug_trace.log`.
+- Laptop trace: copy `~/.config/p2ptunnel/config.toml`, set `level="trace"` and a non-world-writable log path, stop the running offer, run, `curl localhost:8080`, grep `Set selected candidate pair`.
+
+### Side bugs found (real, separate from the data-plane issue; all uncommitted/none fixed yet)
+1. **Status `remote_peer_id` mislabel** — `crates/p2p-daemon/src/status.rs:99-101` (`DaemonStatus::new`) stamps the single offer session's `remote_peer_id` with the **local** `peer_id` instead of the real remote. This made `status.json`/Home show `remote_peer_id=android-a54` / "Remote peer: Not configured" and caused an earlier *false* "self-targeting" diagnosis. Answer path (`write_answer_status` → `with_sessions`) is correct; only the offer single-session `new()` path is wrong.
+2. **`status.json` file writer freezes** — the file stops updating (stale mtime) while live JNI status keeps changing; UI is fine (reads JNI) but the file is unreliable.
+3. **Wedged `tunnel_open` session** — a stuck session stops serving new local clients until a manual Stop→Start (the offer serves one local client at a time; if a session wedges in the `data_channel.is_open()` wait loop `offer/session/mod.rs:156`, new clients queue unserved).
+4. **answer-office advertises Docker-internal `172.17.0.4`** host candidate — config smell (wastes ICE checks); consider filtering RFC1918/docker host candidates or binding answer to host network.
+
+### State at handoff
+- Repo tree CLEAN (all diagnostic edits reverted). Laptop offer restored & serving (detached `setsid` process; original was a foreground terminal process the user had running).
+- Phone still has the **diagnostic-logging APK** installed (harmless; extra logging + writes `files/state/debug_trace.log`) because USB kept dropping before a clean reinstall. Reinstall clean with `cd android && ./gradlew installDebug` on the reverted tree when the phone reconnects. Phone's forward id is currently `web-ui` (changed during testing).
+- adb/USB on this Samsung is flaky — it repeatedly drops mid-session (`adb reconnect`/re-seat cable needed). UI driving via `adb shell input tap` + `uiautomator dump`; long log messages need `adb exec-out screencap` (uiautomator drops them). Note: `Net::Ifs` bind etc. confirmed by reading `~/.cargo/registry/src/index.crates.io-*/webrtc-*`.
