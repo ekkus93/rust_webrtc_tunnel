@@ -55,14 +55,23 @@ tap_text() {
 screen_w() { $ADB shell wm size | sed -E 's/.*: ([0-9]+)x([0-9]+).*/\1/' | tail -1; }
 screen_h() { $ADB shell wm size | sed -E 's/.*: ([0-9]+)x([0-9]+).*/\2/' | tail -1; }
 
-# Tap "Next"; on the Broker step it is pushed off-screen by "Test TCP reachability",
-# so fall back to the rightmost slot of the nav row (~95% width, ~79% height).
+# Tap "Next". Long step content (e.g. the generated identity on the Identity step)
+# can scroll the bottom nav row off-screen, so if "Next" isn't visible, scroll the
+# content up and retry — uiautomator-located, hence screen-size independent.
 tap_next() {
   dump
   local xy; xy="$(bounds_of_text "Next")"
   if [ -n "$xy" ]; then tap_xy $xy; return 0; fi
   local w h; w="$(screen_w)"; h="$(screen_h)"
-  tap_xy "$(( w * 95 / 100 ))" "$(( h * 79 / 100 ))"
+  local _
+  for _ in 1 2 3; do
+    $ADB shell input swipe "$(( w/2 ))" "$(( h*70/100 ))" "$(( w/2 ))" "$(( h*25/100 ))" 250
+    sleep 1
+    dump
+    xy="$(bounds_of_text "Next")"
+    if [ -n "$xy" ]; then tap_xy $xy; return 0; fi
+  done
+  return 1
 }
 
 # Wait until a node with text $1 appears, up to $2 seconds.
@@ -130,7 +139,9 @@ android_run_wizard_to_listening() {
   if ! bounds_of_text "Settings" >/dev/null 2>&1; then
     wait_for_text "Settings" 15 || fail "home never rendered"
   fi
-  tap_xy "$(( W * 88 / 100 ))" "$(( H * 95 / 100 ))"   # Settings tab
+  # Settings tab: locate it via uiautomator (the bottom nav sits above any system
+  # gesture area, so a hardcoded % of screen height misses on tall/physical devices).
+  tap_text "Settings" || fail "could not find Settings nav tab"
   sleep 1
   tap_text "Run setup wizard again" || fail "could not open setup wizard"
   wait_for_text "Step 1 of 7: Mode" 15 || fail "wizard did not open at Mode step"
@@ -149,6 +160,10 @@ android_run_wizard_to_listening() {
   dump
   local HOSTXY; HOSTXY="$(editext_center 1)"; [ -n "$HOSTXY" ] || fail "broker host field not found"
   tap_xy $HOSTXY; sleep 1
+  # The broker host field is pre-filled with a default (broker.emqx.io), so move to the
+  # end and backspace it clear before typing — otherwise the value concatenates.
+  # shellcheck disable=SC2046  # intentional word-splitting of the repeated keycodes
+  $ADB shell input keyevent 123 $(printf '67 %.0s' $(seq 1 40)); sleep 1
   $ADB shell input text "$broker_host"; sleep 1
   if [ "$broker_port" != "8883" ]; then
     dump; local PORTXY; PORTXY="$(editext_center 2)"; tap_xy $PORTXY
@@ -165,8 +180,11 @@ android_run_wizard_to_listening() {
   dump
   local PUBXY; PUBXY="$(editext_center 2)"; tap_xy $PUBXY; sleep 1
   $ADB shell input text "$PUB_INPUT"; hide_kbd; sleep 1
-  tap_text "Validate remote identity" || fail "no Validate button"
-  wait_for_text "Remote public identity validated" 15 || fail "remote identity not validated"
+  # Validation is optional for advancing (the step gates only on both fields being
+  # non-blank; the identity is also validated at save). Tap it best-effort — there is
+  # no on-Peer-step success banner to wait for (the "validated" text is on Review).
+  tap_text "Validate remote identity" || true
+  sleep 1
   tap_next; sleep 2
   wait_for_text "Step 5 of 7: Forwards" 15 || fail "did not reach Forwards step (default forward expected)"
 
