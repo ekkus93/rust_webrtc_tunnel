@@ -224,6 +224,27 @@ mod tests {
     }
 
     #[test]
+    fn ping_pong_round_trip_on_stream_zero() {
+        for frame in [TunnelFrame::ping(vec![1, 2, 3, 4]), TunnelFrame::pong(vec![5, 6, 7, 8])] {
+            assert_eq!(frame.stream_id, 0);
+            let encoded = TunnelFrameCodec::encode(&frame).expect("ping/pong should encode");
+            let decoded = TunnelFrameCodec::decode(&encoded).expect("ping/pong should decode");
+            assert_eq!(decoded, frame);
+        }
+    }
+
+    #[test]
+    fn reject_session_control_frame_on_nonzero_stream_id() {
+        for frame_type in [TunnelFrameType::Ping, TunnelFrameType::Pong] {
+            let frame = TunnelFrame::new(frame_type, 7, Vec::new());
+            assert!(matches!(
+                TunnelFrameCodec::encode(&frame),
+                Err(TunnelError::SessionControlStreamId(7))
+            ));
+        }
+    }
+
+    #[test]
     fn reject_unsupported_versions() {
         let mut encoded = TunnelFrameCodec::encode(&TunnelFrame::data(1, vec![9])).expect("encode");
         encoded[0] = FRAME_VERSION + 1;

@@ -28,6 +28,8 @@ pub enum DaemonError {
     MissingDataChannel,
     #[error("data channel did not open within {0:?} after session start")]
     DataChannelOpenTimeout(std::time::Duration),
+    #[error("data-plane probe failed after data channel open: {0}")]
+    DataPlaneProbeFailed(p2p_tunnel::TunnelError),
     #[error("logging setup error: {0}")]
     Logging(String),
 }

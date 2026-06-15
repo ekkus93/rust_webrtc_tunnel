@@ -32,11 +32,17 @@ insecure_skip_verify = false
 stun_urls = ["stun:stun.l.google.com:19302"]
 enable_trickle_ice = true
 enable_ice_restart = true
+# ICE candidate-gathering strategy: "auto" (default), "native", or "vnet".
+# Honored on all platforms. Optional; omitting it defaults to "auto".
+android_ice_mode = "auto"
 
 [tunnel]
 read_chunk_size = 16384
 local_eof_grace_ms = 250
 remote_eof_grace_ms = 250
+# Data-plane probe timeout (ms) used by the offer side; harmless on the answer.
+# Optional; defaults to 5000. Valid range: 100..=60000.
+data_plane_probe_timeout_ms = 5000
 
 [[forwards]]
 id = "ssh"

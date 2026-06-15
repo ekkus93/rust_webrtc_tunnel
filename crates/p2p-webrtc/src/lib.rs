@@ -23,7 +23,9 @@ use webrtc_util::ifaces;
 use webrtc_util::vnet::interface::Interface;
 use webrtc_util::vnet::net::Net;
 
-use p2p_core::{DATA_CHANNEL_LABEL, DATA_CHANNEL_ORDERED, DATA_CHANNEL_RELIABLE, WebRtcConfig};
+use p2p_core::{
+    AndroidIceMode, DATA_CHANNEL_LABEL, DATA_CHANNEL_ORDERED, DATA_CHANNEL_RELIABLE, WebRtcConfig,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WebRtcError {
@@ -175,7 +177,7 @@ impl WebRtcPeer {
         media_engine.register_default_codecs()?;
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
-            .with_setting_engine(build_setting_engine())
+            .with_setting_engine(build_setting_engine(config)?)
             .build();
         let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
 
@@ -383,39 +385,114 @@ impl WebRtcPeer {
     }
 }
 
-/// Build the WebRTC `SettingEngine`.
+/// The resolved ICE candidate-gathering path, decided from the configured
+/// [`AndroidIceMode`] and whether OS interface enumeration works.
 ///
-/// On platforms where the OS interface enumeration works (desktop), this is the
-/// default engine. On platforms where it fails — notably Android 11+ (API 30+),
-/// where `getifaddrs`/NETLINK interface enumeration is restricted for apps — webrtc-rs
-/// gathers no host candidate and can never connect to a peer on the same LAN. In that
-/// case we discover the primary local IPv4 directly (via a connect-less UDP socket,
-/// which needs no interface enumeration) and inject a real-socket `Net` carrying that
-/// interface, so a host candidate is gathered. Desktop behaviour is unchanged because
-/// the fallback only engages when enumeration yields no usable host address.
-fn build_setting_engine() -> SettingEngine {
+/// Kept as a pure value so the decision can be unit-tested without touching real
+/// network interfaces (`decide_ice_path`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IcePath {
+    /// Use the native/default `SettingEngine`; never call `set_vnet`.
+    Native,
+    /// Force the `Net::Ifs` vnet fallback. `required` means a missing fallback IPv4 is a
+    /// hard error (explicit `vnet` mode) rather than a best-effort warning (`auto`).
+    Vnet { required: bool },
+}
+
+/// Pure decision: which ICE path to use given the mode and enumeration result.
+///
+/// `android_ice_mode` is honored on **all** platforms — the name is historical. The vnet
+/// fallback is selected at runtime by interface-enumeration success, not by
+/// `#[cfg(target_os = "android")]`, so desktop integration tests can force `native`/`vnet`
+/// too. There is no silent cross-mode fallback: `native` never engages vnet and `vnet`
+/// never silently downgrades to native (a missing fallback IPv4 is a hard error).
+const fn decide_ice_path(mode: AndroidIceMode, enumeration_works: bool) -> IcePath {
+    match mode {
+        AndroidIceMode::Native => IcePath::Native,
+        AndroidIceMode::Vnet => IcePath::Vnet { required: true },
+        AndroidIceMode::Auto => {
+            if enumeration_works {
+                IcePath::Native
+            } else {
+                IcePath::Vnet { required: false }
+            }
+        }
+    }
+}
+
+/// A short, stable reason string for the decision log.
+const fn ice_decision_reason(mode: AndroidIceMode, enumeration_works: bool) -> &'static str {
+    match mode {
+        AndroidIceMode::Native => "mode_native",
+        AndroidIceMode::Vnet => "mode_vnet",
+        AndroidIceMode::Auto if enumeration_works => "interface_enumeration_ok",
+        AndroidIceMode::Auto => "interface_enumeration_failed",
+    }
+}
+
+/// Build the WebRTC `SettingEngine`, honoring [`WebRtcConfig::android_ice_mode`].
+///
+/// `auto` (default) preserves the historical behavior: use the native/default engine when
+/// OS interface enumeration works (desktop), else inject a real-socket `Net::Ifs` fallback
+/// carrying the primary local IPv4 — needed on Android 11+ (API 30+) where
+/// `getifaddrs`/NETLINK enumeration is restricted, so webrtc-rs otherwise gathers no host
+/// candidate. `native` always uses the default engine (never `set_vnet`) and fails loudly
+/// through the normal connect path if no candidate is gathered. `vnet` always forces the
+/// fallback and returns an error if a fallback local IPv4 cannot be determined. Every call
+/// logs the requested mode and the selected path + reason; there is no silent fallback.
+fn build_setting_engine(config: &WebRtcConfig) -> Result<SettingEngine, WebRtcError> {
     let mut engine = SettingEngine::default();
-    if os_interface_enumeration_works() {
-        return engine;
-    }
-    match fallback_net() {
-        Some(net) => {
-            engine.set_vnet(Some(Arc::new(net)));
-            tracing::warn!(
+    let mode = config.android_ice_mode;
+    let enumeration_works = os_interface_enumeration_works();
+    let reason = ice_decision_reason(mode, enumeration_works);
+
+    match decide_ice_path(mode, enumeration_works) {
+        IcePath::Native => {
+            tracing::info!(
                 target: "ice",
-                "OS interface enumeration unavailable (e.g. Android NETLINK restriction); \
-                 injecting a fallback host interface so ICE can gather a host candidate",
+                ?mode,
+                selected_path = "native",
+                set_vnet = false,
+                enumeration_works,
+                reason,
+                "ICE setting engine decision",
             );
         }
-        None => {
-            tracing::warn!(
-                target: "ice",
-                "OS interface enumeration unavailable and no fallback local IP found; \
-                 ICE may gather no host candidate and fail to connect on a LAN",
-            );
-        }
+        IcePath::Vnet { required } => match fallback_net() {
+            Some(net) => {
+                engine.set_vnet(Some(Arc::new(net)));
+                tracing::info!(
+                    target: "ice",
+                    ?mode,
+                    selected_path = "vnet",
+                    set_vnet = true,
+                    enumeration_works,
+                    reason,
+                    "ICE setting engine decision",
+                );
+            }
+            None if required => {
+                return Err(WebRtcError::InvalidConfig(
+                    "android_ice_mode = \"vnet\" was requested but no fallback local IPv4 \
+                     could be determined; refusing to silently fall back to the native engine"
+                        .to_owned(),
+                ));
+            }
+            None => {
+                tracing::warn!(
+                    target: "ice",
+                    ?mode,
+                    selected_path = "native",
+                    set_vnet = false,
+                    enumeration_works,
+                    reason,
+                    "auto mode wanted the vnet fallback but no fallback local IPv4 was found; \
+                     continuing with the native engine (ICE may gather no host candidate)",
+                );
+            }
+        },
     }
-    engine
+    Ok(engine)
 }
 
 /// Whether webrtc-rs's own interface enumeration yields at least one usable
@@ -487,8 +564,10 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        IceConnectionState, WebRtcPeer, build_rtc_configuration, expected_data_channel_label,
+        IceConnectionState, IcePath, WebRtcPeer, build_rtc_configuration, build_setting_engine,
+        decide_ice_path, expected_data_channel_label,
     };
+    use p2p_core::AndroidIceMode;
     use p2p_core::DATA_CHANNEL_LABEL;
     use p2p_core::WebRtcConfig;
     use tokio::time::timeout;
@@ -498,6 +577,7 @@ mod tests {
             stun_urls: vec!["stun:stun.l.google.com:19302".to_owned()],
             enable_trickle_ice: true,
             enable_ice_restart: true,
+            android_ice_mode: Default::default(),
         }
     }
 
@@ -526,6 +606,35 @@ mod tests {
     #[test]
     fn data_channel_label_is_fixed_to_protocol_constant() {
         assert_eq!(expected_data_channel_label(), DATA_CHANNEL_LABEL);
+    }
+
+    #[test]
+    fn ice_path_decision_covers_all_modes() {
+        // auto follows enumeration; vnet fallback when auto can't enumerate is best-effort.
+        assert_eq!(decide_ice_path(AndroidIceMode::Auto, true), IcePath::Native);
+        assert_eq!(decide_ice_path(AndroidIceMode::Auto, false), IcePath::Vnet { required: false });
+        // native is always native, regardless of enumeration; never engages vnet.
+        assert_eq!(decide_ice_path(AndroidIceMode::Native, true), IcePath::Native);
+        assert_eq!(decide_ice_path(AndroidIceMode::Native, false), IcePath::Native);
+        // vnet always forces the fallback and treats a missing IPv4 as a hard error.
+        assert_eq!(decide_ice_path(AndroidIceMode::Vnet, true), IcePath::Vnet { required: true });
+        assert_eq!(decide_ice_path(AndroidIceMode::Vnet, false), IcePath::Vnet { required: true });
+    }
+
+    #[test]
+    fn native_mode_builds_engine_without_fallback() {
+        // native must never fail on the decision itself (it never requires a fallback IPv4),
+        // independent of the host's actual interfaces.
+        let mut config = sample_config();
+        config.android_ice_mode = AndroidIceMode::Native;
+        assert!(build_setting_engine(&config).is_ok());
+    }
+
+    #[test]
+    fn auto_mode_builds_engine() {
+        let mut config = sample_config();
+        config.android_ice_mode = AndroidIceMode::Auto;
+        assert!(build_setting_engine(&config).is_ok());
     }
 
     #[tokio::test]

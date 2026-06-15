@@ -109,6 +109,39 @@ generated identity, then asserts a unique marker is pulled all the way through. 
 Prerequisites: the smoke prerequisites plus `docker`, `curl`, `python3`, and the host
 CA bundle at `/etc/ssl/certs/ca-certificates.crt`.
 
+Env knobs:
+
+- `ANSWER_NET=host|bridge` — answer networking (default `host`). `bridge` puts the answer
+  behind Docker NAT (closer to a Dockerized answer-office); the forward target is reached
+  via the `docker0` gateway.
+- `ANDROID_ICE_MODE=auto|native|vnet` — force the app's `android_ice_mode` via the
+  `debug.p2p.android_ice_mode` system property (read by the **debug** build at config-render
+  time). Device-agnostic: works on emulators *and* physical devices, and (unlike patching
+  app-private config) survives the SELinux restriction on `run-as` **writes**. The script
+  sets the prop **before** the wizard, then verifies the generated config picked it up.
+  `native` on an emulator/Android 11+ is expected to fail (no candidates gathered → fails
+  via the ~30s first-open timeout, not the probe). Empty leaves the app default (`auto`).
+- `BLACK_HOLE=1` — run the answer with `P2P_TUNNEL_DEBUG_DROP_PING=1` so it opens the data
+  channel but never replies to the tunnel `Ping`. The offer's data-plane probe then times
+  out; the test asserts **fast failure with no byte delivery** (and that the answer logged a
+  dropped PING) instead of marker delivery. This is the only e2e path that exercises the
+  probe-failure teardown end-to-end, since no local network shape actually breaks the data
+  plane.
+
+On the healthy path the script also asserts the answer logged `received tunnel PING; sending
+PONG`, proving the post-DCEP data-plane probe round-tripped before bridging.
+
+### Matrix runner (`android_tunnel_matrix.sh`)
+
+```
+tests/e2e/android_tunnel_matrix.sh
+```
+
+Runs `android_tunnel_e2e.sh` across `auto|vnet` × `host|bridge`, the `native × host`
+diagnostic row (reported `EXPECTED_FAIL` on emulator/Android 11+ unless
+`EXPECT_NATIVE_ICE_PASS=1`), and the `BLACK_HOLE` probe-failure row, then prints a summary.
+The APK/answer are built once (first row) and reused (`REBUILD=0`) thereafter.
+
 ### Why this works now (it used to be blocked)
 
 This path was previously deferred because the emulator gathered **no host ICE

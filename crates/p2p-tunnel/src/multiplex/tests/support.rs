@@ -36,11 +36,21 @@ pub(super) fn stream(stream_id: u32, forward_id: &str) -> StreamState {
 }
 
 pub(super) fn sample_tunnel_config() -> TunnelConfig {
-    TunnelConfig { read_chunk_size: 16_384, local_eof_grace_ms: 250, remote_eof_grace_ms: 250 }
+    TunnelConfig {
+        read_chunk_size: 16_384,
+        local_eof_grace_ms: 250,
+        remote_eof_grace_ms: 250,
+        data_plane_probe_timeout_ms: 5000,
+    }
 }
 
 pub(super) fn sample_webrtc_config() -> WebRtcConfig {
-    WebRtcConfig { stun_urls: Vec::new(), enable_trickle_ice: false, enable_ice_restart: true }
+    WebRtcConfig {
+        stun_urls: Vec::new(),
+        enable_trickle_ice: false,
+        enable_ice_restart: true,
+        android_ice_mode: Default::default(),
+    }
 }
 
 pub(super) fn forward_table(target_port: u16) -> ForwardTable {

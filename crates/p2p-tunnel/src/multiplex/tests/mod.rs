@@ -8,5 +8,6 @@ mod support;
 mod answer_frames;
 mod end_to_end;
 mod offer_frames;
+mod probe;
 mod state;
 mod stream_runtime;

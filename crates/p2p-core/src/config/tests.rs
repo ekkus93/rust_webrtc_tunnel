@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::{AppConfig, expand_home};
+use super::{AndroidIceMode, AppConfig, expand_home};
 
 fn sample_config(config_dir: &Path, state_dir: &Path) -> String {
     format!(
@@ -561,4 +561,95 @@ fn missing_config_file_error_names_path() {
     let error = AppConfig::load_from_file(&path).expect_err("config load should fail");
 
     assert!(error.to_string().contains(path.to_string_lossy().as_ref()));
+}
+
+// ── New data-plane / ICE-mode config fields ─────────────────────────────────────
+
+/// Helper: write required files + load `config`, returning the parse/validate result.
+fn load_config(config: &str, config_dir: &Path, state_dir: &Path) -> Result<AppConfig, String> {
+    fs::create_dir_all(config_dir).expect("create config dir");
+    fs::create_dir_all(state_dir.join("log")).expect("create state dir");
+    write_required_files(config_dir);
+    let config_path = config_dir.join("config.toml");
+    fs::write(&config_path, config).expect("write config");
+    AppConfig::load_from_file(&config_path).map_err(|error| error.to_string())
+}
+
+#[test]
+fn missing_new_fields_default_to_auto_and_5000() {
+    // The base sample omits both new fields, proving backward compatibility: existing
+    // configs still parse and the documented defaults apply.
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let config_dir = temp_dir.path().join("config");
+    let state_dir = temp_dir.path().join("state");
+    let config = load_config(&sample_config(&config_dir, &state_dir), &config_dir, &state_dir)
+        .expect("base config should load");
+    assert_eq!(config.webrtc.android_ice_mode, AndroidIceMode::Auto);
+    assert_eq!(config.tunnel.data_plane_probe_timeout_ms, 5000);
+}
+
+#[test]
+fn android_ice_mode_parses_all_variants() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    for (toml_value, expected) in [
+        ("auto", AndroidIceMode::Auto),
+        ("native", AndroidIceMode::Native),
+        ("vnet", AndroidIceMode::Vnet),
+    ] {
+        let config_dir = temp_dir.path().join(format!("config-{toml_value}"));
+        let state_dir = temp_dir.path().join(format!("state-{toml_value}"));
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "enable_ice_restart = true",
+            &format!("enable_ice_restart = true\nandroid_ice_mode = \"{toml_value}\""),
+        );
+        let loaded = load_config(&config, &config_dir, &state_dir)
+            .unwrap_or_else(|error| panic!("{toml_value} should load: {error}"));
+        assert_eq!(loaded.webrtc.android_ice_mode, expected);
+    }
+}
+
+#[test]
+fn invalid_android_ice_mode_is_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let config_dir = temp_dir.path().join("config");
+    let state_dir = temp_dir.path().join("state");
+    let config = sample_config(&config_dir, &state_dir).replace(
+        "enable_ice_restart = true",
+        "enable_ice_restart = true\nandroid_ice_mode = \"turn\"",
+    );
+    assert!(load_config(&config, &config_dir, &state_dir).is_err());
+}
+
+#[test]
+fn probe_timeout_out_of_range_is_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    for value in ["0", "50", "60001", "120000"] {
+        let config_dir = temp_dir.path().join(format!("config-{value}"));
+        let state_dir = temp_dir.path().join(format!("state-{value}"));
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "remote_eof_grace_ms = 250",
+            &format!("remote_eof_grace_ms = 250\ndata_plane_probe_timeout_ms = {value}"),
+        );
+        assert!(
+            load_config(&config, &config_dir, &state_dir).is_err(),
+            "{value} ms should be rejected"
+        );
+    }
+}
+
+#[test]
+fn probe_timeout_in_range_is_accepted() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    for value in ["100", "5000", "60000"] {
+        let config_dir = temp_dir.path().join(format!("config-{value}"));
+        let state_dir = temp_dir.path().join(format!("state-{value}"));
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "remote_eof_grace_ms = 250",
+            &format!("remote_eof_grace_ms = 250\ndata_plane_probe_timeout_ms = {value}"),
+        );
+        let loaded = load_config(&config, &config_dir, &state_dir)
+            .unwrap_or_else(|error| panic!("{value} ms should load: {error}"));
+        let expected = value.parse::<u64>().expect("test value parses as u64");
+        assert_eq!(loaded.tunnel.data_plane_probe_timeout_ms, expected);
+    }
 }

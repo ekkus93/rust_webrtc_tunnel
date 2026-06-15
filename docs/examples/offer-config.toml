@@ -35,11 +35,20 @@ insecure_skip_verify = false
 stun_urls = ["stun:stun.l.google.com:19302"]
 enable_trickle_ice = true
 enable_ice_restart = true
+# ICE candidate-gathering strategy: "auto" (default), "native", or "vnet".
+# Honored on all platforms; mainly used to work around / diagnose restricted
+# interface enumeration on Android 11+. Optional; omitting it defaults to "auto".
+android_ice_mode = "auto"
 
 [tunnel]
 read_chunk_size = 16384
 local_eof_grace_ms = 250
 remote_eof_grace_ms = 250
+# Post-data-channel-open data-plane readiness probe timeout (ms). The offer sends a
+# tunnel-level Ping after the channel opens and requires a Pong before bridging, so a
+# silently-black-holed data plane fails fast instead of hanging. Optional; defaults to
+# 5000. Valid range: 100..=60000.
+data_plane_probe_timeout_ms = 5000
 
 [[forwards]]
 id = "ssh"

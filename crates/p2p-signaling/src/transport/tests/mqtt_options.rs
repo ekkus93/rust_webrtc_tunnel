@@ -36,11 +36,13 @@ fn sample_config(base: &std::path::Path) -> AppConfig {
             stun_urls: vec!["stun:stun.l.google.com:19302".to_owned()],
             enable_trickle_ice: true,
             enable_ice_restart: true,
+            android_ice_mode: Default::default(),
         },
         tunnel: TunnelConfig {
             read_chunk_size: 1024,
             local_eof_grace_ms: 250,
             remote_eof_grace_ms: 250,
+            data_plane_probe_timeout_ms: 5000,
         },
         forwards: vec![ForwardRule {
             id: "ssh".to_owned(),

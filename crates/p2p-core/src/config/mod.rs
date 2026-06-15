@@ -98,12 +98,53 @@ pub struct BrokerTlsConfig {
     pub insecure_skip_verify: bool,
 }
 
+/// ICE candidate-gathering strategy selector.
+///
+/// Historical name: this controls whether WebRTC uses the native/default
+/// `SettingEngine` or the `Net::Ifs` vnet fallback that works around restricted
+/// interface enumeration on Android 11+. Despite the name, it is honored on **all**
+/// platforms (the vnet fallback is already runtime-selected by interface-enumeration
+/// success, not by `#[cfg(target_os = "android")]`) so desktop integration tests can
+/// force `native`/`vnet` too.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AndroidIceMode {
+    /// Use native enumeration if it yields a usable address, else fall back to vnet.
+    #[default]
+    Auto,
+    /// Always use the native/default setting engine; never call `set_vnet`. Fails loudly
+    /// (no fallback) if enumeration yields no usable candidate.
+    Native,
+    /// Always force the `Net::Ifs` vnet fallback; fail loudly if a fallback local IPv4
+    /// cannot be constructed. Never silently falls back to native.
+    Vnet,
+}
+
+pub const fn default_android_ice_mode() -> AndroidIceMode {
+    AndroidIceMode::Auto
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebRtcConfig {
     pub stun_urls: Vec<String>,
     pub enable_trickle_ice: bool,
     pub enable_ice_restart: bool,
+    #[serde(default = "default_android_ice_mode")]
+    pub android_ice_mode: AndroidIceMode,
+}
+
+/// Lower bound for the post-DCEP data-plane probe timeout (ms). A zero or tiny value
+/// would fire a spurious timeout before any round trip could complete.
+pub const MIN_DATA_PLANE_PROBE_TIMEOUT_MS: u64 = 100;
+/// Default data-plane probe timeout (ms).
+pub const DEFAULT_DATA_PLANE_PROBE_TIMEOUT_MS: u64 = 5000;
+/// Upper bound for the data-plane probe timeout (ms). Past this a stalled session would
+/// wedge a local client for an unreasonable time before failing fast.
+pub const MAX_DATA_PLANE_PROBE_TIMEOUT_MS: u64 = 60000;
+
+pub const fn default_data_plane_probe_timeout_ms() -> u64 {
+    DEFAULT_DATA_PLANE_PROBE_TIMEOUT_MS
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -112,6 +153,8 @@ pub struct TunnelConfig {
     pub read_chunk_size: usize,
     pub local_eof_grace_ms: u64,
     pub remote_eof_grace_ms: u64,
+    #[serde(default = "default_data_plane_probe_timeout_ms")]
+    pub data_plane_probe_timeout_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

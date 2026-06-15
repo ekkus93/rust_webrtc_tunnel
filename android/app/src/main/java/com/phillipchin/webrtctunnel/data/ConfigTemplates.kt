@@ -4,9 +4,31 @@ import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.SetupConfigInput
 import java.io.File
 
-// Config sections that are byte-identical across the default and offer templates.
-// Kept as top-level constants (verbatim) so both renderers share them and stay short.
-private val STATIC_TLS_WEBRTC_TUNNEL_SECTIONS =
+/** Valid `android_ice_mode` values; anything else falls back to [DEFAULT_ANDROID_ICE_MODE]. */
+internal val VALID_ANDROID_ICE_MODES = setOf("auto", "native", "vnet")
+
+/** Default ICE mode used unless a debug override selects another valid value. */
+internal const val DEFAULT_ANDROID_ICE_MODE = "auto"
+
+/** Render-time options for the config templates. */
+internal data class ConfigRenderOptions(
+    val debugLogs: Boolean = false,
+    val androidIceMode: String = DEFAULT_ANDROID_ICE_MODE,
+)
+
+/**
+ * Normalize a raw (possibly-null, possibly-untrusted debug) `android_ice_mode` value to one
+ * of [VALID_ANDROID_ICE_MODES], defaulting to [DEFAULT_ANDROID_ICE_MODE]. Pure and
+ * test-only-aware: invalid input never produces an invalid config.
+ */
+internal fun normalizeAndroidIceMode(raw: String?): String {
+    val trimmed = raw?.trim()?.lowercase().orEmpty()
+    return if (trimmed in VALID_ANDROID_ICE_MODES) trimmed else DEFAULT_ANDROID_ICE_MODE
+}
+
+// Config sections that are identical across the default and offer templates (apart from the
+// injected `android_ice_mode`). Shared so both renderers stay short and in sync.
+private fun tlsWebrtcTunnelSections(androidIceMode: String): String =
     """
     [broker.tls]
     client_cert_file = ""
@@ -17,11 +39,13 @@ private val STATIC_TLS_WEBRTC_TUNNEL_SECTIONS =
     stun_urls = ["stun:stun.l.google.com:19302"]
     enable_trickle_ice = true
     enable_ice_restart = true
+    android_ice_mode = "$androidIceMode"
 
     [tunnel]
     read_chunk_size = 16384
     local_eof_grace_ms = 250
     remote_eof_grace_ms = 250
+    data_plane_probe_timeout_ms = 5000
     """.trimIndent()
 
 private val STATIC_RECONNECT_SECURITY_SECTIONS =
@@ -101,7 +125,7 @@ private fun loggingHealthSections(
 
 internal fun buildDefaultConfigTemplate(
     filesDir: File,
-    debugLogs: Boolean = false,
+    options: ConfigRenderOptions = ConfigRenderOptions(),
 ): String =
     listOf(
         """
@@ -126,7 +150,7 @@ internal fun buildDefaultConfigTemplate(
         connect_timeout_secs = 5
         session_expiry_secs = 0
         """.trimIndent(),
-        STATIC_TLS_WEBRTC_TUNNEL_SECTIONS,
+        tlsWebrtcTunnelSections(options.androidIceMode),
         """
         [[forwards]]
         id = "llama"
@@ -139,7 +163,7 @@ internal fun buildDefaultConfigTemplate(
         remote_peer_id = "home-server"
         """.trimIndent(),
         STATIC_RECONNECT_SECURITY_SECTIONS,
-        loggingHealthSections(filesDir, debugLogs),
+        loggingHealthSections(filesDir, options.debugLogs),
     ).joinToString("\n\n")
 
 internal fun buildOfferConfig(
@@ -147,7 +171,7 @@ internal fun buildOfferConfig(
     forwards: List<ForwardConfig>,
     filesDir: File,
     passwordFile: String,
-    debugLogs: Boolean = false,
+    options: ConfigRenderOptions = ConfigRenderOptions(),
 ): String {
     val scheme = if (input.brokerUseTls) "mqtts" else "mqtt"
     val forwardsToml =
@@ -188,9 +212,9 @@ internal fun buildOfferConfig(
         connect_timeout_secs = 5
         session_expiry_secs = 0
         """.trimIndent(),
-        STATIC_TLS_WEBRTC_TUNNEL_SECTIONS,
+        tlsWebrtcTunnelSections(options.androidIceMode),
         listOf(forwardsToml, peerSection).joinToString("\n\n"),
         STATIC_RECONNECT_SECURITY_SECTIONS,
-        loggingHealthSections(filesDir, debugLogs),
+        loggingHealthSections(filesDir, options.debugLogs),
     ).joinToString("\n\n")
 }

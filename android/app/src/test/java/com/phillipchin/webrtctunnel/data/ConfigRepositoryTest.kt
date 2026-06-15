@@ -61,6 +61,31 @@ class ConfigRepositoryTest {
     }
 
     @Test
+    fun defaultTemplateInjectsDataPlaneFields() {
+        val template = repository.defaultConfigTemplate()
+        // Release/default builds emit the "auto" ICE mode and the probe timeout.
+        assertTrue(template.contains("android_ice_mode = \"auto\""))
+        assertTrue(template.contains("data_plane_probe_timeout_ms = 5000"))
+    }
+
+    @Test
+    fun normalizeAndroidIceModeAcceptsValidModes() {
+        assertEquals("auto", normalizeAndroidIceMode("auto"))
+        assertEquals("native", normalizeAndroidIceMode("native"))
+        assertEquals("vnet", normalizeAndroidIceMode("vnet"))
+        // Case-insensitive and whitespace-tolerant.
+        assertEquals("vnet", normalizeAndroidIceMode("  VNET \n"))
+    }
+
+    @Test
+    fun normalizeAndroidIceModeFallsBackToAutoOnInvalidInput() {
+        assertEquals("auto", normalizeAndroidIceMode(null))
+        assertEquals("auto", normalizeAndroidIceMode(""))
+        assertEquals("auto", normalizeAndroidIceMode("turn"))
+        assertEquals("auto", normalizeAndroidIceMode("vnet; rm -rf"))
+    }
+
+    @Test
     fun writeAndReadConfigRoundTrip() {
         val contents = "format = \"p2ptunnel-config-v3\"\n[node]\npeer_id=\"x\""
         repository.writeConfig(contents)

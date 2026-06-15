@@ -219,6 +219,18 @@ impl AppConfig {
             )?;
         }
 
+        let probe_timeout = self.tunnel.data_plane_probe_timeout_ms;
+        if !(super::MIN_DATA_PLANE_PROBE_TIMEOUT_MS..=super::MAX_DATA_PLANE_PROBE_TIMEOUT_MS)
+            .contains(&probe_timeout)
+        {
+            return Err(ConfigError::InvalidConfig(format!(
+                "tunnel.data_plane_probe_timeout_ms must be between {} and {} ms (got {})",
+                super::MIN_DATA_PLANE_PROBE_TIMEOUT_MS,
+                super::MAX_DATA_PLANE_PROBE_TIMEOUT_MS,
+                probe_timeout
+            )));
+        }
+
         self.validate_forwards()?;
 
         Ok(())

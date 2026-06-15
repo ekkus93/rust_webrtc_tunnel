@@ -72,6 +72,9 @@ type OfferBridgeFuture<'a> = Pin<
     >,
 >;
 
+/// In-flight data-plane probe future stored across select-loop iterations.
+type OfferProbeFuture = Pin<Box<dyn Future<Output = Result<(), p2p_tunnel::TunnelError>> + Send>>;
+
 pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
     config: &'a AppConfig,
     codec: &SignalCodec<'_>,
@@ -169,12 +172,40 @@ pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
     // first goes active; a working tunnel disables it so a live stream is never killed.
     let first_data_channel_deadline = Instant::now() + FIRST_DATA_CHANNEL_OPEN_TIMEOUT;
     let mut bridge_ever_active = false;
+    // Post-DCEP data-plane probe: once the channel opens we send a tunnel Ping and require
+    // a Pong before bridging, so a silently-black-holed data plane fails fast instead of
+    // hanging the local client at zero bytes. The probe runs as a cancel-safe select arm
+    // (it races ICE failure below) and is the sole consumer of the channel until it
+    // resolves; `run_multiplex_offer` only takes over after `probe_succeeded`.
+    let mut offer_probe: Option<OfferProbeFuture> = None;
+    let mut probe_succeeded = false;
     let result = async {
         loop {
+            // Once the data channel first opens, gate bridging on an application-level
+            // data-plane round trip. Start the probe (it resolves in the select arm below).
             if pending_client.is_some()
-                && session.data_channel.as_ref().is_some_and(|channel| channel.is_open())
+                && !probe_succeeded
+                && offer_probe.is_none()
                 && offer_bridge.is_none()
+                && session.data_channel.as_ref().is_some_and(|channel| channel.is_open())
             {
+                let channel =
+                    session.data_channel.clone().ok_or(DaemonError::MissingDataChannel)?;
+                let probe_timeout =
+                    Duration::from_millis(config.tunnel.data_plane_probe_timeout_ms);
+                tracing::debug!(
+                    session_id = %session.session_id,
+                    remote_peer_id = %session.remote_peer_id,
+                    timeout = ?probe_timeout,
+                    "data channel open; probing data plane before bridging",
+                );
+                offer_probe = Some(Box::pin(async move {
+                    p2p_tunnel::probe_data_plane(&channel, probe_timeout).await
+                }));
+            }
+
+            // Start the bridge only after the probe confirms the data plane round-trips.
+            if pending_client.is_some() && probe_succeeded && offer_bridge.is_none() {
                 write_daemon_status(
                     ctx,
                     StatusSnapshot {
@@ -203,7 +234,10 @@ pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
             }
             tokio::select! {
                 _ = sleep_until(first_data_channel_deadline),
-                    if !bridge_ever_active && offer_bridge.is_none() =>
+                    if !bridge_ever_active
+                        && offer_bridge.is_none()
+                        && offer_probe.is_none()
+                        && !probe_succeeded =>
                 {
                     tracing::warn!(
                         session_id = %session.session_id,
@@ -265,6 +299,10 @@ pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
                     if let Some(ice_state) = ice_state {
                         if matches!(ice_state, IceConnectionState::Failed | IceConnectionState::Disconnected) {
                             offer_bridge = None;
+                            // Drop any in-flight probe and require a fresh one after a
+                            // successful reconnect, since the data plane just broke.
+                            offer_probe = None;
+                            probe_succeeded = false;
                             if let Some(handle) = session.bridge_handle.take() {
                                 handle.abort();
                             }
@@ -368,6 +406,27 @@ pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
                     .await;
                     result?;
                     return Ok(());
+                }
+                probe_result = async {
+                    let probe = offer_probe.as_mut().expect("guarded by select");
+                    probe.as_mut().await
+                }, if offer_probe.is_some() => {
+                    offer_probe = None;
+                    match probe_result {
+                        Ok(()) => {
+                            // Data plane round-trips; the bridge-start block runs next iteration.
+                            probe_succeeded = true;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                session_id = %session.session_id,
+                                remote_peer_id = %session.remote_peer_id,
+                                reason = %error,
+                                "data-plane probe failed after data channel open; tearing down session",
+                            );
+                            return Err(DaemonError::DataPlaneProbeFailed(error));
+                        }
+                    }
                 }
                 bridge_result = async {
                     let bridge = offer_bridge.as_mut().expect("guarded by select");

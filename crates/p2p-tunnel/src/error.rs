@@ -24,6 +24,10 @@ pub enum TunnelError {
     Busy,
     #[error("data channel closed")]
     DataChannelClosed,
+    #[error("data-plane probe timed out after {0:?}")]
+    DataPlaneProbeTimeout(std::time::Duration),
+    #[error("data-plane probe failed: {0}")]
+    DataPlaneProbeFailed(String),
     #[error("data channel writer closed")]
     WriterClosed,
     #[error("stream id space exhausted")]

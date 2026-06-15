@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.phillipchin.webrtctunnel.BuildConfig
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
 import com.phillipchin.webrtctunnel.model.ForwardConfig
 import com.phillipchin.webrtctunnel.model.SetupConfigInput
@@ -46,7 +47,11 @@ class ConfigRepository(private val context: Context) {
         }
     }
 
-    fun defaultConfigTemplate(): String = buildDefaultConfigTemplate(context.filesDir)
+    fun defaultConfigTemplate(): String =
+        buildDefaultConfigTemplate(
+            context.filesDir,
+            ConfigRenderOptions(androidIceMode = debugAndroidIceModeOverride()),
+        )
 
     fun readConfig(): String = configFile.takeIf { it.exists() }?.readText().orEmpty()
 
@@ -90,12 +95,37 @@ class ConfigRepository(private val context: Context) {
             forwards,
             context.filesDir,
             resolveBrokerPasswordFile(input, context.filesDir),
-            debugLogs,
+            ConfigRenderOptions(debugLogs = debugLogs, androidIceMode = debugAndroidIceModeOverride()),
         )
 
     fun redactConfig(config: String): String {
         return SensitiveDataRedactor.redactText(config)
     }
+}
+
+/**
+ * Debug/test-only `android_ice_mode` override read from the `debug.p2p.android_ice_mode`
+ * system property (e.g. `adb shell setprop debug.p2p.android_ice_mode vnet`). Returns
+ * [DEFAULT_ANDROID_ICE_MODE] in release builds, when the property is unset, or when it holds
+ * anything other than a valid mode. This is device-agnostic — it works on emulators and
+ * physical devices, and (unlike patching app-private config) survives the SELinux
+ * restriction on `run-as` writes. Read at config-render time, so it must be set before the
+ * wizard saves the config.
+ */
+private fun debugAndroidIceModeOverride(): String {
+    if (!BuildConfig.DEBUG) {
+        return DEFAULT_ANDROID_ICE_MODE
+    }
+    val raw =
+        runCatching {
+            ProcessBuilder("getprop", "debug.p2p.android_ice_mode")
+                .redirectErrorStream(true)
+                .start()
+                .inputStream
+                .bufferedReader()
+                .use { reader -> reader.readLine() }
+        }.getOrNull()
+    return normalizeAndroidIceMode(raw)
 }
 
 private object Keys {

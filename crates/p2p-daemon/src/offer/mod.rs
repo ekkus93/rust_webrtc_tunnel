@@ -8,7 +8,7 @@ use p2p_crypto::{AuthorizedKeys, IdentityFile};
 use p2p_signaling::{MessageBody, MqttSignalingTransport, SignalCodec};
 use p2p_tunnel::{OfferClient, OfferListener};
 use tokio::sync::mpsc;
-use tokio::time::sleep;
+use tokio::time::{Instant, sleep};
 
 use crate::DaemonError;
 use crate::config::*;
@@ -17,7 +17,10 @@ use crate::signaling::*;
 use crate::status::*;
 use crate::types::*;
 
+mod cooldown;
 mod session;
+
+use cooldown::ProbeFailureCooldown;
 
 use session::{OfferSessionIo, run_offer_session};
 
@@ -150,6 +153,7 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
         .get_by_peer_id(&remote_peer_id)
         .cloned()
         .ok_or_else(|| DaemonError::MissingAuthorizedPeer(remote_peer_id.to_string()))?;
+    let mut probe_cooldown = ProbeFailureCooldown::new();
 
     loop {
         write_steady_state_status(&ctx).await;
@@ -157,6 +161,17 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
             client = accepted_clients.recv() => {
                 let client = client
                     .ok_or_else(|| DaemonError::Logging("offer accept loop stopped".to_owned()))??;
+                // If the data plane recently failed its probe, refuse new clients during the
+                // cooldown instead of re-running negotiate+probe (which would hot-loop).
+                if let Some(remaining) = probe_cooldown.remaining(Instant::now()) {
+                    tracing::warn!(
+                        remote_peer_id = %remote.peer_id,
+                        cooldown_remaining = ?remaining,
+                        "data-plane probe recently failed; dropping local client during cooldown",
+                    );
+                    drop(client);
+                    continue;
+                }
                 tracing::info!("accepted local client and entering busy offer session state");
                 let result =
                     run_offer_session(
@@ -173,6 +188,16 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
                         },
                     )
                     .await;
+                if matches!(result, Err(DaemonError::DataPlaneProbeFailed(_))) {
+                    let wait = probe_cooldown.record_failure(Instant::now());
+                    tracing::warn!(
+                        remote_peer_id = %remote.peer_id,
+                        cooldown = ?wait,
+                        "entering data-plane probe-failure cooldown before accepting new clients",
+                    );
+                } else {
+                    probe_cooldown.reset();
+                }
                 recover_daemon_after_session(&ctx, result).await;
                 tracing::info!("offer daemon returned to waiting state");
             }

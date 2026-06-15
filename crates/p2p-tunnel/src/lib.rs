@@ -2,6 +2,7 @@ mod error;
 mod frame;
 mod multiplex;
 mod offer;
+mod probe;
 
 pub use error::TunnelError;
 pub use frame::{ErrorPayload, OpenPayload, TunnelFrame, TunnelFrameCodec};
@@ -10,3 +11,4 @@ pub use multiplex::{
     StreamLifecycle, StreamManager, StreamState, run_multiplex_answer, run_multiplex_offer,
 };
 pub use offer::{OfferClient, OfferListener};
+pub use probe::probe_data_plane;

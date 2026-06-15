@@ -3,6 +3,25 @@
 **Status:** open. Root cause localized but not yet proven. This document is a
 self-contained brief for deep research (assume no prior context).
 
+> **Update (hardening pass landed):** a detector/guardrail pass has shipped (see
+> `docs/ANDROID_WEBRTC_EMULATOR_DATA_PLANE_SPEC.md`). It does **not** fix this issue; it
+> makes the failure deterministic and observable and adds a test lever:
+> - **Post-DCEP data-plane probe.** After the data channel opens, the offer sends a
+>   tunnel `Ping` and requires a matching `Pong` before bridging. The exact failure here
+>   (offer→answer DATA black-holed) now surfaces as a fast `DataPlaneProbeTimeout` and a
+>   clean teardown instead of the client hanging at zero bytes. A per-remote-peer cooldown
+>   prevents a reconnect hot loop.
+> - **Explicit `android_ice_mode` (`auto`/`native`/`vnet`), honored on all platforms.** The
+>   previously-implicit vnet fallback is now selectable and logged (requested mode →
+>   selected path + reason + whether `set_vnet` ran), so root-cause work can force `vnet`
+>   vs `native` and compare. Default `auto` preserves prior behavior.
+> - **Test coverage.** `tests/e2e/android_tunnel_matrix.sh` runs `auto|vnet × host|bridge`
+>   plus a `native` diagnostic row, and a **black-hole** row (`P2P_TUNNEL_DEBUG_DROP_PING`)
+>   that exercises the probe-failure teardown end-to-end. Caveat unchanged: **no local
+>   network shape reproduces the original remote-answer stall**, so the emulator/Docker
+>   matrix proves the guardrail, not the fix. Proving the fix still needs `answer-office`
+>   (or another physical-device remote target) back online.
+
 ---
 
 ## 1. Executive summary

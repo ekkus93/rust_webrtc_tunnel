@@ -120,11 +120,13 @@ insecure_skip_verify = false
 stun_urls = []
 enable_trickle_ice = false
 enable_ice_restart = true
+android_ice_mode = "auto"
 
 [tunnel]
 read_chunk_size = 16384
 local_eof_grace_ms = 250
 remote_eof_grace_ms = 250
+data_plane_probe_timeout_ms = 5000
 
 [[forwards]]
 id = "web"

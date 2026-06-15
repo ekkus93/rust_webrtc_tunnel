@@ -9,11 +9,21 @@ use p2p_webrtc::{DataChannelEvent, WebRtcPeer};
 use tokio::time::timeout;
 
 fn sample_webrtc_config() -> WebRtcConfig {
-    WebRtcConfig { stun_urls: Vec::new(), enable_trickle_ice: false, enable_ice_restart: true }
+    WebRtcConfig {
+        stun_urls: Vec::new(),
+        enable_trickle_ice: false,
+        enable_ice_restart: true,
+        android_ice_mode: Default::default(),
+    }
 }
 
 fn sample_tunnel_config() -> TunnelConfig {
-    TunnelConfig { read_chunk_size: 16_384, local_eof_grace_ms: 250, remote_eof_grace_ms: 250 }
+    TunnelConfig {
+        read_chunk_size: 16_384,
+        local_eof_grace_ms: 250,
+        remote_eof_grace_ms: 250,
+        data_plane_probe_timeout_ms: 5000,
+    }
 }
 
 fn forward_table_for_peer(target_port: u16, allowed_peer: &str) -> ForwardTable {

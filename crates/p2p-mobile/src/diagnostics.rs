@@ -98,6 +98,7 @@ async fn gather_candidates(secs: u64) -> GatherReport {
         stun_urls: vec![STUN_URL.to_owned()],
         enable_trickle_ice: true,
         enable_ice_restart: false,
+        android_ice_mode: Default::default(),
     };
     let peer = match WebRtcPeer::new(&config).await {
         Ok(peer) => peer,
@@ -189,6 +190,7 @@ async fn loopback_inner(secs: u64) -> Result<(), String> {
         stun_urls: Vec::new(),
         enable_trickle_ice: false,
         enable_ice_restart: false,
+        android_ice_mode: Default::default(),
     };
 
     let offer = WebRtcPeer::new(&config).await.map_err(|error| format!("offer build: {error}"))?;

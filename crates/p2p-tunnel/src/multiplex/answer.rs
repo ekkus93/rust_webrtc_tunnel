@@ -228,14 +228,41 @@ pub(crate) async fn handle_answer_frame(
             close_stream(frame.stream_id, manager, streams).await?;
         }
         TunnelFrameType::Ping => {
-            frame_tx
-                .send(TunnelFrame::pong(frame.payload))
-                .await
-                .map_err(|_| TunnelError::WriterClosed)?;
+            if debug_drop_ping() {
+                // Debug/test-only black-hole: open the channel normally but never reply,
+                // so the offer's data-plane probe times out and the fail-fast teardown +
+                // cooldown path can be exercised end-to-end. Never enabled in production.
+                tracing::warn!(
+                    target: "tunnel",
+                    "DEBUG: dropping inbound tunnel PING (P2P_TUNNEL_DEBUG_DROP_PING set); not sending PONG",
+                );
+            } else {
+                // Info level: the probe Ping is a once-per-session control event, and
+                // making it observable is a goal of this pass. No payload is logged.
+                tracing::info!(target: "tunnel", "answer received tunnel PING; sending PONG");
+                frame_tx
+                    .send(TunnelFrame::pong(frame.payload))
+                    .await
+                    .map_err(|_| TunnelError::WriterClosed)?;
+            }
         }
         TunnelFrameType::Pong => {}
     }
     Ok(())
+}
+
+/// Whether the debug/test-only "black-hole" mode is enabled, in which the answer drops
+/// inbound `Ping` frames instead of replying with `Pong`. Gated by the
+/// `P2P_TUNNEL_DEBUG_DROP_PING` environment variable (`1`/`true`), read once. Exposed by
+/// `p2p-answer`'s `--debug-drop-ping` flag for exercising the offer's probe-failure path.
+fn debug_drop_ping() -> bool {
+    use std::sync::OnceLock;
+    static DROP_PING: OnceLock<bool> = OnceLock::new();
+    *DROP_PING.get_or_init(|| {
+        std::env::var("P2P_TUNNEL_DEBUG_DROP_PING")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
 }
 
 async fn handle_target_connect_result(
