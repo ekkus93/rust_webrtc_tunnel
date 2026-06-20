@@ -112,6 +112,18 @@ data class NativeRuntimeStatusDto(
     // Real remote peer of the active offer session, surfaced so the UI shows who the
     // offer is talking to instead of "Not configured". Null when no session is active.
     @SerialName("remote_peer_id") val remotePeerId: String? = null,
+    // ICE path decision (requested mode, selected path, fallback) captured at start, so the
+    // UI can show which path is active without reading logs. Null before a run starts.
+    val ice: NativeIceInfoDto? = null,
+)
+
+@Serializable
+data class NativeIceInfoDto(
+    @SerialName("requested_mode") val requestedMode: String? = null,
+    @SerialName("selected_path") val selectedPath: String? = null,
+    val fallback: Boolean = false,
+    val reason: String? = null,
+    @SerialName("advertised_local_ipv4") val advertisedLocalIpv4: String? = null,
 )
 
 @Serializable

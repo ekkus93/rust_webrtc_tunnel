@@ -44,6 +44,32 @@ pub struct AndroidRuntimeStatus {
     /// Per-forward runtime status (offer role). Empty unless the daemon is running
     /// and reporting forwards.
     pub forwards: Vec<AndroidForwardRuntimeStatus>,
+    /// The ICE path decision (requested mode, selected path, fallback) for the current run,
+    /// captured at start so the UI can show which path is active without reading logs.
+    /// `None` before a run starts.
+    pub ice: Option<AndroidIceInfo>,
+}
+
+/// Serializable mirror of [`p2p_webrtc::IceDecisionInfo`] surfaced in the Android status.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AndroidIceInfo {
+    pub requested_mode: String,
+    pub selected_path: String,
+    pub fallback: bool,
+    pub reason: String,
+    pub advertised_local_ipv4: Option<String>,
+}
+
+impl AndroidIceInfo {
+    pub(crate) fn from_decision(info: p2p_webrtc::IceDecisionInfo) -> Self {
+        Self {
+            requested_mode: info.requested_mode.to_owned(),
+            selected_path: info.selected_path.to_owned(),
+            fallback: info.fallback,
+            reason: info.reason.to_owned(),
+            advertised_local_ipv4: info.advertised_local_ipv4,
+        }
+    }
 }
 
 /// Per-forward runtime status surfaced to the Android UI. Joins the daemon's

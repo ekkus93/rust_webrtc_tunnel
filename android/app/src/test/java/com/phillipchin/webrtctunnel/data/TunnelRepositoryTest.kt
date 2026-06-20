@@ -67,6 +67,19 @@ class TunnelRepositoryTest {
     }
 
     @Test
+    fun refreshStatusDecodesIceDecisionFields() {
+        // A status payload carrying the ICE decision must decode cleanly (not error).
+        bridge.statusPayload =
+            """
+            {"state":"running","mode":"offer","active":true,
+             "ice":{"requested_mode":"vnet_mux","selected_path":"vnet_mux",
+                    "fallback":false,"reason":"mode_vnet_mux","advertised_local_ipv4":"10.1.3.11"}}
+            """.trimIndent()
+        repository.refreshStatus()
+        assertTrue(repository.status.value.serviceState != ServiceState.Error)
+    }
+
+    @Test
     fun recentLogsParsesValidJson() {
         bridge.logsJson = Json.encodeToString(listOf(NativeLogEventDto(1L, "info", "ok")))
         val logs = repository.recentLogs(10)

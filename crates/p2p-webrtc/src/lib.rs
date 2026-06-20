@@ -443,6 +443,52 @@ const fn ice_decision_reason(mode: AndroidIceMode, enumeration_works: bool) -> &
     }
 }
 
+/// The stable config string for an [`AndroidIceMode`].
+const fn ice_mode_str(mode: AndroidIceMode) -> &'static str {
+    match mode {
+        AndroidIceMode::Auto => "auto",
+        AndroidIceMode::Native => "native",
+        AndroidIceMode::Vnet => "vnet",
+        AndroidIceMode::VnetMux => "vnet_mux",
+    }
+}
+
+/// A snapshot of the ICE path decision for status/diagnostics, computed the same way as
+/// [`build_setting_engine`] so the UI can show which path is actually active. Carries no
+/// secrets (the advertised IPv4 is a LAN host address the peer already learns via ICE).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IceDecisionInfo {
+    /// The requested `android_ice_mode` (`auto`/`native`/`vnet`/`vnet_mux`).
+    pub requested_mode: &'static str,
+    /// The path actually selected (`native`/`vnet`/`vnet_mux`).
+    pub selected_path: &'static str,
+    /// True when `auto` engaged its best-effort fallback (enumeration failed → mux path).
+    pub fallback: bool,
+    /// A short, stable reason string for the decision.
+    pub reason: &'static str,
+    /// The local IPv4 that will be advertised as the host candidate, if any.
+    pub advertised_local_ipv4: Option<String>,
+}
+
+/// Describe the ICE path decision for the given config, matching what
+/// [`build_setting_engine`] would actually do on this host right now.
+pub fn describe_ice_decision(config: &WebRtcConfig) -> IceDecisionInfo {
+    let mode = config.android_ice_mode;
+    let enumeration_works = os_interface_enumeration_works();
+    let selected_path = match decide_ice_path(mode, enumeration_works) {
+        IcePath::Native => "native",
+        IcePath::Vnet { mux: true, .. } => "vnet_mux",
+        IcePath::Vnet { mux: false, .. } => "vnet",
+    };
+    IceDecisionInfo {
+        requested_mode: ice_mode_str(mode),
+        selected_path,
+        fallback: matches!(mode, AndroidIceMode::Auto) && !enumeration_works,
+        reason: ice_decision_reason(mode, enumeration_works),
+        advertised_local_ipv4: advertised_local_ipv4(config).map(|ip| ip.to_string()),
+    }
+}
+
 /// Build the WebRTC `SettingEngine`, honoring [`WebRtcConfig::android_ice_mode`].
 ///
 /// `auto` (default): use the native/default engine when OS interface enumeration works
@@ -653,7 +699,7 @@ mod tests {
 
     use super::{
         IceConnectionState, IcePath, WebRtcError, WebRtcPeer, advertised_local_ipv4,
-        build_rtc_configuration, build_setting_engine, decide_ice_path,
+        build_rtc_configuration, build_setting_engine, decide_ice_path, describe_ice_decision,
         expected_data_channel_label, fallback_net, parse_advertised_ipv4, zero_bound_udp_mux,
     };
     use p2p_core::AndroidIceMode;
@@ -739,6 +785,24 @@ mod tests {
             decide_ice_path(AndroidIceMode::VnetMux, false),
             IcePath::Vnet { required: true, mux: true }
         );
+    }
+
+    #[test]
+    fn describe_ice_decision_reports_requested_selected_and_address() {
+        let mut config = sample_config();
+        config.android_ice_mode = AndroidIceMode::VnetMux;
+        config.advertised_local_ipv4 = Some("10.1.3.11".to_owned());
+        let info = describe_ice_decision(&config);
+        assert_eq!(info.requested_mode, "vnet_mux");
+        assert_eq!(info.selected_path, "vnet_mux");
+        assert!(!info.fallback, "an explicit mode is never a best-effort fallback");
+        assert_eq!(info.advertised_local_ipv4.as_deref(), Some("10.1.3.11"));
+
+        // native is always native, with no injected address consulted as a fallback.
+        config.android_ice_mode = AndroidIceMode::Native;
+        let native = describe_ice_decision(&config);
+        assert_eq!(native.requested_mode, "native");
+        assert_eq!(native.selected_path, "native");
     }
 
     #[test]

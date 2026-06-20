@@ -21,8 +21,8 @@ use log_bridge::install_tracing_once;
 use state::{RuntimeInner, record_start_error, reset_runtime_metadata, unix_ms};
 
 pub use types::{
-    AndroidForwardRuntimeStatus, AndroidLogEvent, AndroidRuntimeState, AndroidRuntimeStatus,
-    AndroidTunnelMode, AndroidValidationResult,
+    AndroidForwardRuntimeStatus, AndroidIceInfo, AndroidLogEvent, AndroidRuntimeState,
+    AndroidRuntimeStatus, AndroidTunnelMode, AndroidValidationResult,
 };
 
 // Used by the unit-test module's `super::*` (it asserts the daemon→UI mapping).
@@ -87,6 +87,9 @@ impl AndroidTunnelController {
             .map_err(|error| record_start_error(&mut inner, error.to_string()))?;
         let authorized_keys = AuthorizedKeys::from_file(&config.paths.authorized_keys)
             .map_err(|error| record_start_error(&mut inner, error.to_string()))?;
+        // Capture the ICE path decision so the UI can show which path is active.
+        inner.state.ice =
+            Some(AndroidIceInfo::from_decision(p2p_webrtc::describe_ice_decision(&config.webrtc)));
         match (mode, &config.node.role) {
             (AndroidTunnelMode::Offer, NodeRole::Offer)
             | (AndroidTunnelMode::Answer, NodeRole::Answer) => {}
@@ -238,6 +241,7 @@ impl AndroidTunnelController {
             session_capacity: None,
             remote_peer_id: None,
             forwards: Vec::new(),
+            ice: None,
         })
     }
 
