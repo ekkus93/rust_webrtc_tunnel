@@ -60,6 +60,48 @@ async fn probe_times_out_when_no_pong_arrives() {
     );
 }
 
+/// Receive (and decode) the inbound `Ping` — proving offer→answer delivery works — but
+/// deliberately never reply, modeling a one-way data plane. Returns whether the ping arrived.
+async fn receive_ping_without_replying(channel: DataChannelHandle) -> bool {
+    loop {
+        match channel.next_event().await {
+            Some(DataChannelEvent::Message(bytes)) => {
+                let frame = TunnelFrameCodec::decode(&bytes).expect("answer decodes frame");
+                if frame.frame_type == TunnelFrameType::Ping {
+                    return true;
+                }
+            }
+            Some(_) => {}
+            None => return false,
+        }
+    }
+}
+
+#[tokio::test]
+async fn probe_fails_when_delivery_is_one_way_only() {
+    // Offer→answer delivery succeeds, but no pong returns: the probe must still fail so user
+    // forwarding never starts on a one-way data plane.
+    let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
+
+    let answer_task = tokio::spawn(receive_ping_without_replying(answer_channel));
+
+    let error = probe_data_plane(&offer_channel, Duration::from_millis(500))
+        .await
+        .expect_err("a one-way-only data plane must fail the probe");
+    assert!(
+        matches!(error, TunnelError::DataPlaneProbeTimeout(_)),
+        "expected a timeout, got {error:?}",
+    );
+
+    let delivered = timeout(Duration::from_secs(5), answer_task)
+        .await
+        .expect("answer task finishes")
+        .expect("join");
+    assert!(delivered, "the offer→answer ping should have been delivered");
+    offer_peer.close().await.expect("offer peer closes");
+    answer_peer.close().await.expect("answer peer closes");
+}
+
 #[tokio::test]
 async fn probe_ignores_mismatched_pong_and_times_out() {
     let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;

@@ -195,7 +195,7 @@ async fn loopback_handshake(secs: u64) -> LoopbackReport {
     match loopback_inner(secs).await {
         Ok(()) => LoopbackReport {
             ok: true,
-            detail: "data channel opened and bytes echoed on-device".to_owned(),
+            detail: "data channel opened and bytes round-tripped (echoed) on-device".to_owned(),
             elapsed_ms: started.elapsed().as_millis() as u64,
         },
         Err(detail) => {
@@ -240,10 +240,25 @@ async fn loopback_inner(secs: u64) -> Result<(), String> {
     offer_channel.wait_for_open(timeout).await.map_err(|error| format!("offer open: {error}"))?;
     answer_channel.wait_for_open(timeout).await.map_err(|error| format!("answer open: {error}"))?;
 
+    // True round trip: the answer echoes the first message back, and the offer verifies the
+    // bytes it gets back — so "echoed"/"round-trip" wording is honest, not one-way only.
+    let answer_echo = tokio::spawn(async move {
+        loop {
+            match answer_channel.next_event().await {
+                Some(DataChannelEvent::Message(bytes)) => {
+                    let _ = answer_channel.send(&bytes).await;
+                    return;
+                }
+                Some(_) => continue,
+                None => return,
+            }
+        }
+    });
+
     offer_channel.send(PROBE_PING).await.map_err(|error| format!("send: {error}"))?;
     let received = tokio::time::timeout(timeout, async {
         loop {
-            match answer_channel.next_event().await {
+            match offer_channel.next_event().await {
                 Some(DataChannelEvent::Message(bytes)) => return Some(bytes),
                 Some(_) => continue,
                 None => return None,
@@ -255,10 +270,11 @@ async fn loopback_inner(secs: u64) -> Result<(), String> {
 
     match received {
         Some(bytes) if bytes == PROBE_PING => {}
-        Some(_) => return Err("answer received unexpected bytes".to_owned()),
-        None => return Err("answer channel closed before bytes arrived".to_owned()),
+        Some(_) => return Err("offer received unexpected echoed bytes".to_owned()),
+        None => return Err("offer channel closed before the echo arrived".to_owned()),
     }
 
+    let _ = answer_echo.await;
     let _ = offer.close().await;
     let _ = answer.close().await;
     Ok(())

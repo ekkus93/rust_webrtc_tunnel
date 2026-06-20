@@ -204,6 +204,16 @@ pub(crate) async fn run_offer_session<'a, T: DaemonSignalingTransport>(
                     timeout = ?probe_timeout,
                     "data channel open; probing data plane before bridging",
                 );
+                // Surface the probe window so the UI does not imply full readiness before the
+                // application-level round trip succeeds.
+                write_daemon_status(
+                    ctx,
+                    StatusSnapshot {
+                        active_session_id: Some(session.session_id),
+                        current_state: DaemonState::ProbingDataPlane,
+                    },
+                )
+                .await;
                 offer_probe = Some(Box::pin(async move {
                     p2p_tunnel::probe_data_plane(&channel, probe_timeout).await
                 }));

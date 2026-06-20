@@ -578,6 +578,12 @@ pub(crate) fn handle_answer_incoming_data_channel(
         let tunnel = config.tunnel.clone();
         let forward_table = ForwardTable::new(&config.forwards);
         let remote_peer_id = session.remote_peer_id.clone();
+        // The channel is open and the bridge is about to serve the data plane (answering the
+        // offer's round-trip probe). Report ProbingDataPlane rather than leaving the stale
+        // ConnectingDataChannel, so the status never implies full readiness too early. The
+        // answer has a single serving loop and cannot observe the offer's probe completion,
+        // so this is its serving state; the offer's TunnelOpen is the authoritative signal.
+        session.state = DaemonState::ProbingDataPlane;
         session.bridge_state = BridgeSessionState::Active;
         session.bridge_handle = Some(tokio::spawn(async move {
             p2p_tunnel::run_multiplex_answer(channel, &tunnel, forward_table, remote_peer_id).await

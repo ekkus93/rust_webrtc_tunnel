@@ -19,6 +19,11 @@ pub enum DaemonState {
     WaitingForLocalClient,
     Negotiating,
     ConnectingDataChannel,
+    /// Data channel is open but bridging is gated on the post-DCEP application-level
+    /// round-trip probe. The offer holds here until the matching `Pong` returns (then
+    /// `TunnelOpen`); the answer reports this while it serves the data plane, since it
+    /// cannot observe the offer's probe completion.
+    ProbingDataPlane,
     TunnelOpen,
     IceRestarting,
     Renegotiating,

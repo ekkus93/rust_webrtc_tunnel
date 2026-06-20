@@ -89,6 +89,7 @@ pub(crate) fn android_state_from_daemon(state: DaemonState) -> AndroidRuntimeSta
         | DaemonState::TunnelOpen => AndroidRuntimeState::Running,
         DaemonState::Negotiating
         | DaemonState::ConnectingDataChannel
+        | DaemonState::ProbingDataPlane
         | DaemonState::IceRestarting
         | DaemonState::Renegotiating
         | DaemonState::Backoff => AndroidRuntimeState::Starting,
