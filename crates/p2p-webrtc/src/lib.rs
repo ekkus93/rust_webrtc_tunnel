@@ -419,7 +419,14 @@ const fn decide_ice_path(mode: AndroidIceMode, enumeration_works: bool) -> IcePa
             if enumeration_works {
                 IcePath::Native
             } else {
-                IcePath::Vnet { required: false, mux: false }
+                // Enumeration only fails where the OS restricts it — in practice Android
+                // 11+. There a plain vnet host-candidate socket (bound to the specific
+                // interface IP) gets its egress dropped/misrouted, black-holing offer→answer
+                // data; the UDP-mux path (0.0.0.0-bound socket, real IP advertised) is the
+                // proven fix. So auto's fallback engages the mux by default, making it work
+                // without the `vnet_mux` debug override. Best-effort (`required: false`): if
+                // no fallback IPv4 is found we still continue with the native engine.
+                IcePath::Vnet { required: false, mux: true }
             }
         }
     }
@@ -438,11 +445,13 @@ const fn ice_decision_reason(mode: AndroidIceMode, enumeration_works: bool) -> &
 
 /// Build the WebRTC `SettingEngine`, honoring [`WebRtcConfig::android_ice_mode`].
 ///
-/// `auto` (default) preserves the historical behavior: use the native/default engine when
-/// OS interface enumeration works (desktop), else inject a real-socket `Net::Ifs` fallback
-/// carrying the primary local IPv4 — needed on Android 11+ (API 30+) where
-/// `getifaddrs`/NETLINK enumeration is restricted, so webrtc-rs otherwise gathers no host
-/// candidate. `native` always uses the default engine (never `set_vnet`) and fails loudly
+/// `auto` (default): use the native/default engine when OS interface enumeration works
+/// (desktop), else inject a real-socket `Net::Ifs` fallback carrying the primary local IPv4
+/// **and** route ICE through a single `0.0.0.0`-bound UDP-mux socket — needed on Android 11+
+/// (API 30+) where `getifaddrs`/NETLINK enumeration is restricted (so webrtc-rs gathers no
+/// host candidate) and where a socket pinned to the interface IP has its egress dropped (so
+/// the mux is required to actually carry data). `native` always uses the default engine
+/// (never `set_vnet`) and fails loudly
 /// through the normal connect path if no candidate is gathered. `vnet` always forces the
 /// fallback and returns an error if a fallback local IPv4 cannot be determined. Every call
 /// logs the requested mode and the selected path + reason; there is no silent fallback.
@@ -648,11 +657,12 @@ mod tests {
 
     #[test]
     fn ice_path_decision_covers_all_modes() {
-        // auto follows enumeration; vnet fallback when auto can't enumerate is best-effort.
+        // auto follows enumeration; when it can't enumerate (Android) it falls back to the
+        // mux path (best-effort) so the data-plane fix applies without the debug override.
         assert_eq!(decide_ice_path(AndroidIceMode::Auto, true), IcePath::Native);
         assert_eq!(
             decide_ice_path(AndroidIceMode::Auto, false),
-            IcePath::Vnet { required: false, mux: false }
+            IcePath::Vnet { required: false, mux: true }
         );
         // native is always native, regardless of enumeration; never engages vnet.
         assert_eq!(decide_ice_path(AndroidIceMode::Native, true), IcePath::Native);
