@@ -654,3 +654,48 @@ fn probe_timeout_in_range_is_accepted() {
         assert_eq!(loaded.tunnel.data_plane_probe_timeout_ms, expected);
     }
 }
+
+#[test]
+fn heartbeat_settings_out_of_range_are_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let cases = [
+        ("data_plane_heartbeat_interval_ms", ["0", "499", "60001", "120000"].as_slice()),
+        ("data_plane_heartbeat_max_misses", ["0", "101", "1000"].as_slice()),
+    ];
+    for (field, values) in cases {
+        for value in values {
+            let config_dir = temp_dir.path().join(format!("cfg-{field}-{value}"));
+            let state_dir = temp_dir.path().join(format!("st-{field}-{value}"));
+            let config = sample_config(&config_dir, &state_dir).replace(
+                "remote_eof_grace_ms = 250",
+                &format!("remote_eof_grace_ms = 250\n{field} = {value}"),
+            );
+            assert!(
+                load_config(&config, &config_dir, &state_dir).is_err(),
+                "{field} = {value} should be rejected"
+            );
+        }
+    }
+}
+
+#[test]
+fn heartbeat_settings_default_and_parse() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    // Defaults apply when omitted (backward-compatible).
+    let cfg_default = sample_config(&temp_dir.path().join("c-def"), &temp_dir.path().join("s-def"));
+    let loaded =
+        load_config(&cfg_default, &temp_dir.path().join("c-def"), &temp_dir.path().join("s-def"))
+            .expect("default config should load");
+    assert_eq!(loaded.tunnel.data_plane_heartbeat_interval_ms, 5000);
+    assert_eq!(loaded.tunnel.data_plane_heartbeat_max_misses, 3);
+
+    // In-range overrides are honored.
+    let cfg = sample_config(&temp_dir.path().join("c-set"), &temp_dir.path().join("s-set")).replace(
+        "remote_eof_grace_ms = 250",
+        "remote_eof_grace_ms = 250\ndata_plane_heartbeat_interval_ms = 2000\ndata_plane_heartbeat_max_misses = 5",
+    );
+    let loaded = load_config(&cfg, &temp_dir.path().join("c-set"), &temp_dir.path().join("s-set"))
+        .expect("overridden config should load");
+    assert_eq!(loaded.tunnel.data_plane_heartbeat_interval_ms, 2000);
+    assert_eq!(loaded.tunnel.data_plane_heartbeat_max_misses, 5);
+}

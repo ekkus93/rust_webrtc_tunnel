@@ -109,7 +109,9 @@ pub struct BrokerTlsConfig {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AndroidIceMode {
-    /// Use native enumeration if it yields a usable address, else fall back to vnet.
+    /// Use native enumeration if it yields a usable address (desktop), else fall back to the
+    /// UDP-mux vnet path (Android 11+, where enumeration is restricted) — equivalent to
+    /// `vnet_mux` but best-effort. This is the default and needs no debug override.
     #[default]
     Auto,
     /// Always use the native/default setting engine; never call `set_vnet`. Fails loudly
@@ -157,6 +159,31 @@ pub const fn default_data_plane_probe_timeout_ms() -> u64 {
     DEFAULT_DATA_PLANE_PROBE_TIMEOUT_MS
 }
 
+/// Lower bound for the mid-session data-plane heartbeat interval (ms). Too small floods the
+/// control stream and risks false positives under brief network jitter.
+pub const MIN_DATA_PLANE_HEARTBEAT_INTERVAL_MS: u64 = 500;
+/// Default data-plane heartbeat interval (ms).
+pub const DEFAULT_DATA_PLANE_HEARTBEAT_INTERVAL_MS: u64 = 5000;
+/// Upper bound for the data-plane heartbeat interval (ms). Past this a mid-session path
+/// death would take too long to detect and self-heal.
+pub const MAX_DATA_PLANE_HEARTBEAT_INTERVAL_MS: u64 = 60000;
+
+pub const fn default_data_plane_heartbeat_interval_ms() -> u64 {
+    DEFAULT_DATA_PLANE_HEARTBEAT_INTERVAL_MS
+}
+
+/// Lower bound for the heartbeat miss threshold (1 = a single unacknowledged heartbeat
+/// declares the data plane dead).
+pub const MIN_DATA_PLANE_HEARTBEAT_MAX_MISSES: u32 = 1;
+/// Default consecutive unacknowledged heartbeats before declaring the data plane dead.
+pub const DEFAULT_DATA_PLANE_HEARTBEAT_MAX_MISSES: u32 = 3;
+/// Upper bound for the heartbeat miss threshold.
+pub const MAX_DATA_PLANE_HEARTBEAT_MAX_MISSES: u32 = 100;
+
+pub const fn default_data_plane_heartbeat_max_misses() -> u32 {
+    DEFAULT_DATA_PLANE_HEARTBEAT_MAX_MISSES
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TunnelConfig {
@@ -165,6 +192,13 @@ pub struct TunnelConfig {
     pub remote_eof_grace_ms: u64,
     #[serde(default = "default_data_plane_probe_timeout_ms")]
     pub data_plane_probe_timeout_ms: u64,
+    /// While bridging, the offer sends a heartbeat `Ping` this often and tears the session
+    /// down after `data_plane_heartbeat_max_misses` consecutive unacknowledged ones, so a
+    /// mid-session data-plane death self-heals (the next client rebuilds a fresh session).
+    #[serde(default = "default_data_plane_heartbeat_interval_ms")]
+    pub data_plane_heartbeat_interval_ms: u64,
+    #[serde(default = "default_data_plane_heartbeat_max_misses")]
+    pub data_plane_heartbeat_max_misses: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

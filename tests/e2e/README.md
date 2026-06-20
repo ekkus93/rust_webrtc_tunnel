@@ -114,14 +114,19 @@ Env knobs:
 - `ANSWER_NET=host|bridge` — answer networking (default `host`). `bridge` puts the answer
   behind Docker NAT (closer to a Dockerized answer-office); the forward target is reached
   via the `docker0` gateway.
-- `ANDROID_ICE_MODE=auto|native|vnet` — force the app's `android_ice_mode` via the
+- `ANDROID_ICE_MODE=auto|native|vnet|vnet_mux` — force the app's `android_ice_mode` via the
   `debug.p2p.android_ice_mode` system property (read by the **debug** build at config-render
   time). Device-agnostic: works on emulators *and* physical devices, and (unlike patching
   app-private config) survives the SELinux restriction on `run-as` **writes**. The script
   sets the prop **before** the wizard, then verifies the generated config picked it up.
-  `native` on an **emulator**/Android 11+ is expected to fail (no candidates gathered → fails
-  via the ~30s first-open timeout, not the probe), but on a **physical device** with a
-  reachable (host-networked) answer it typically **passes** via a STUN srflx candidate — so
+  Modes: `auto` (default) uses the native engine when interface enumeration works (desktop),
+  else the **UDP-mux vnet** fallback (Android 11+) — this is what fixes the offer→remote
+  data-plane black-hole, so no override is needed in normal use. `vnet` forces the plain
+  (non-mux) vnet fallback whose host-candidate socket is pinned to the interface IP (the
+  black-holing path — diagnostic only). `vnet_mux` forces the mux path explicitly even where
+  enumeration works. `native` never injects a fallback; on an **emulator**/Android 11+ it
+  fails (no candidates gathered → ~30s first-open timeout), but on a **physical device** with
+  a reachable host-networked answer it typically **passes** via a STUN srflx candidate — so
   the matrix tolerates either outcome for that row. Empty leaves the app default (`auto`).
 - `BLACK_HOLE=1` — run the answer with `P2P_TUNNEL_DEBUG_DROP_PING=1` so it opens the data
   channel but never replies to the tunnel `Ping`. The offer's data-plane probe then times

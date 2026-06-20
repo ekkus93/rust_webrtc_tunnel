@@ -49,6 +49,13 @@ remote_eof_grace_ms = 250
 # silently-black-holed data plane fails fast instead of hanging. Optional; defaults to
 # 5000. Valid range: 100..=60000.
 data_plane_probe_timeout_ms = 5000
+# Mid-session data-plane heartbeat. While bridging, the offer sends a tunnel Ping every
+# `interval` ms and tears the session down after `max_misses` consecutive unacknowledged
+# ones, so a path that dies mid-session (e.g. a NAT rebinding) self-heals — the next client
+# rebuilds a fresh session. Optional; default 5000 ms / 3. Ranges: interval 500..=60000,
+# max_misses 1..=100.
+data_plane_heartbeat_interval_ms = 5000
+data_plane_heartbeat_max_misses = 3
 
 [[forwards]]
 id = "ssh"

@@ -138,6 +138,8 @@ pub(super) fn sample_config() -> AppConfig {
             local_eof_grace_ms: 250,
             remote_eof_grace_ms: 250,
             data_plane_probe_timeout_ms: 5000,
+            data_plane_heartbeat_interval_ms: 5000,
+            data_plane_heartbeat_max_misses: 3,
         },
         forwards: vec![ForwardRule {
             id: "ssh".to_owned(),

@@ -43,6 +43,10 @@ remote_eof_grace_ms = 250
 # Data-plane probe timeout (ms) used by the offer side; harmless on the answer.
 # Optional; defaults to 5000. Valid range: 100..=60000.
 data_plane_probe_timeout_ms = 5000
+# Mid-session data-plane heartbeat knobs, used by the offer side; harmless on the answer.
+# Optional; default 5000 ms / 3. Ranges: interval 500..=60000, max_misses 1..=100.
+data_plane_heartbeat_interval_ms = 5000
+data_plane_heartbeat_max_misses = 3
 
 [[forwards]]
 id = "ssh"

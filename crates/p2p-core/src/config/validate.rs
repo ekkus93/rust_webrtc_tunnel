@@ -231,6 +231,32 @@ impl AppConfig {
             )));
         }
 
+        let heartbeat_interval = self.tunnel.data_plane_heartbeat_interval_ms;
+        if !(super::MIN_DATA_PLANE_HEARTBEAT_INTERVAL_MS
+            ..=super::MAX_DATA_PLANE_HEARTBEAT_INTERVAL_MS)
+            .contains(&heartbeat_interval)
+        {
+            return Err(ConfigError::InvalidConfig(format!(
+                "tunnel.data_plane_heartbeat_interval_ms must be between {} and {} ms (got {})",
+                super::MIN_DATA_PLANE_HEARTBEAT_INTERVAL_MS,
+                super::MAX_DATA_PLANE_HEARTBEAT_INTERVAL_MS,
+                heartbeat_interval
+            )));
+        }
+
+        let heartbeat_misses = self.tunnel.data_plane_heartbeat_max_misses;
+        if !(super::MIN_DATA_PLANE_HEARTBEAT_MAX_MISSES
+            ..=super::MAX_DATA_PLANE_HEARTBEAT_MAX_MISSES)
+            .contains(&heartbeat_misses)
+        {
+            return Err(ConfigError::InvalidConfig(format!(
+                "tunnel.data_plane_heartbeat_max_misses must be between {} and {} (got {})",
+                super::MIN_DATA_PLANE_HEARTBEAT_MAX_MISSES,
+                super::MAX_DATA_PLANE_HEARTBEAT_MAX_MISSES,
+                heartbeat_misses
+            )));
+        }
+
         self.validate_forwards()?;
 
         Ok(())

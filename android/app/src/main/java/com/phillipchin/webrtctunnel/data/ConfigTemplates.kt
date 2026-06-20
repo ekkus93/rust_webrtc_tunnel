@@ -46,6 +46,8 @@ private fun tlsWebrtcTunnelSections(androidIceMode: String): String =
     local_eof_grace_ms = 250
     remote_eof_grace_ms = 250
     data_plane_probe_timeout_ms = 5000
+    data_plane_heartbeat_interval_ms = 5000
+    data_plane_heartbeat_max_misses = 3
     """.trimIndent()
 
 private val STATIC_RECONNECT_SECURITY_SECTIONS =

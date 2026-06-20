@@ -63,9 +63,12 @@ class ConfigRepositoryTest {
     @Test
     fun defaultTemplateInjectsDataPlaneFields() {
         val template = repository.defaultConfigTemplate()
-        // Release/default builds emit the "auto" ICE mode and the probe timeout.
+        // Release/default builds emit the "auto" ICE mode, the probe timeout, and the
+        // mid-session heartbeat knobs.
         assertTrue(template.contains("android_ice_mode = \"auto\""))
         assertTrue(template.contains("data_plane_probe_timeout_ms = 5000"))
+        assertTrue(template.contains("data_plane_heartbeat_interval_ms = 5000"))
+        assertTrue(template.contains("data_plane_heartbeat_max_misses = 3"))
     }
 
     @Test

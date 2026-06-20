@@ -15,15 +15,6 @@ use super::state::*;
 use super::stream::*;
 use crate::{OfferClient, OpenPayload, TunnelError, TunnelFrame, TunnelFrameCodec};
 
-/// How often the offer sends a data-plane heartbeat `Ping` while bridging.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-/// Consecutive unacknowledged heartbeats that mark the data plane dead. The startup probe
-/// only gates the *first* transition to bridging; this catches a path that dies *mid*-session
-/// (e.g. a NAT rebinding) while the WebRTC data channel still reports "open" and ICE consent
-/// still passes, so nothing else tears it down. On loss the bridge returns an error, the
-/// session ends, and the next local client rebuilds a fresh session (with its own probe).
-const HEARTBEAT_MAX_MISSES: u32 = 3;
-
 /// Outcome of a heartbeat tick.
 enum HeartbeatAction {
     /// Send this `Ping` frame; a matching `Pong` must arrive before the next tick.
@@ -33,9 +24,17 @@ enum HeartbeatAction {
 }
 
 /// Tracks the offer's periodic data-plane liveness check over the shared control stream.
-/// Nonces are a monotonic counter (the answer echoes the `Ping` payload in its `Pong`).
+///
+/// The startup probe only gates the *first* transition to bridging; this catches a path that
+/// dies *mid*-session (e.g. a NAT rebinding) while the WebRTC data channel still reports
+/// "open" and ICE consent still passes, so nothing else tears it down. On loss the bridge
+/// returns an error, the session ends, and the next local client rebuilds a fresh session
+/// (with its own probe). Interval and miss threshold come from `TunnelConfig`. Nonces are a
+/// monotonic counter (the answer echoes the `Ping` payload in its `Pong`).
 struct OfferHeartbeat {
     ticker: Interval,
+    /// Consecutive unacknowledged heartbeats that declare the data plane dead.
+    max_misses: u32,
     counter: u64,
     /// Counter value of the in-flight heartbeat, cleared when its `Pong` returns.
     outstanding: Option<u64>,
@@ -43,21 +42,21 @@ struct OfferHeartbeat {
 }
 
 impl OfferHeartbeat {
-    fn new() -> Self {
+    fn new(interval: Duration, max_misses: u32) -> Self {
         // First heartbeat fires one interval out (not immediately): the startup probe just
         // verified the data plane at t=0, and deferring also keeps sub-interval unit tests
         // from ever seeing a heartbeat frame.
-        let mut ticker = interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+        let mut ticker = interval_at(Instant::now() + interval, interval);
         // If the select loop is briefly busy, don't fire a catch-up burst of pings.
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        Self { ticker, counter: 0, outstanding: None, misses: 0 }
+        Self { ticker, max_misses, counter: 0, outstanding: None, misses: 0 }
     }
 
     /// Advance one interval: an unacked prior heartbeat is a miss; otherwise emit a new one.
     fn on_tick(&mut self) -> HeartbeatAction {
         if self.outstanding.is_some() {
             self.misses += 1;
-            if self.misses >= HEARTBEAT_MAX_MISSES {
+            if self.misses >= self.max_misses {
                 return HeartbeatAction::Dead(self.misses);
             }
         }
@@ -105,7 +104,10 @@ pub async fn run_multiplex_offer(
     .await?;
 
     let mut accepting_clients = true;
-    let mut heartbeat = OfferHeartbeat::new();
+    let mut heartbeat = OfferHeartbeat::new(
+        Duration::from_millis(tunnel_config.data_plane_heartbeat_interval_ms),
+        tunnel_config.data_plane_heartbeat_max_misses,
+    );
     let result = loop {
         tokio::select! {
             _ = heartbeat.ticker.tick() => {
@@ -323,8 +325,18 @@ pub(crate) async fn handle_offer_frame(
 
 #[cfg(test)]
 mod heartbeat_tests {
-    use super::{HEARTBEAT_MAX_MISSES, HeartbeatAction, OfferHeartbeat};
+    use std::time::Duration;
+
+    use super::{HeartbeatAction, OfferHeartbeat};
     use p2p_core::TunnelFrameType;
+
+    const TEST_MAX_MISSES: u32 = 3;
+
+    fn test_heartbeat() -> OfferHeartbeat {
+        // Interval is irrelevant to the on_tick/on_pong logic under test (the ticker is only
+        // polled by the select loop); a real value keeps `new` happy inside the runtime.
+        OfferHeartbeat::new(Duration::from_secs(5), TEST_MAX_MISSES)
+    }
 
     fn expect_send(action: HeartbeatAction) -> Vec<u8> {
         match action {
@@ -338,7 +350,7 @@ mod heartbeat_tests {
 
     #[tokio::test]
     async fn acked_heartbeat_resets_and_keeps_running() {
-        let mut hb = OfferHeartbeat::new();
+        let mut hb = test_heartbeat();
         let p1 = expect_send(hb.on_tick());
         assert_eq!(p1, 1u64.to_le_bytes());
         assert_eq!(hb.misses, 0);
@@ -352,24 +364,24 @@ mod heartbeat_tests {
 
     #[tokio::test]
     async fn unacked_heartbeats_eventually_report_dead() {
-        let mut hb = OfferHeartbeat::new();
+        let mut hb = test_heartbeat();
         let _ = expect_send(hb.on_tick());
         // Without a Pong, each tick accrues a miss until the threshold.
-        for expected_miss in 1..HEARTBEAT_MAX_MISSES {
+        for expected_miss in 1..TEST_MAX_MISSES {
             match hb.on_tick() {
                 HeartbeatAction::Send(_) => assert_eq!(hb.misses, expected_miss),
                 HeartbeatAction::Dead(n) => panic!("died early at miss {n}"),
             }
         }
         match hb.on_tick() {
-            HeartbeatAction::Dead(missed) => assert_eq!(missed, HEARTBEAT_MAX_MISSES),
+            HeartbeatAction::Dead(missed) => assert_eq!(missed, TEST_MAX_MISSES),
             HeartbeatAction::Send(_) => panic!("expected Dead at the miss threshold"),
         }
     }
 
     #[tokio::test]
     async fn mismatched_pong_does_not_clear_outstanding() {
-        let mut hb = OfferHeartbeat::new();
+        let mut hb = test_heartbeat();
         let _ = expect_send(hb.on_tick());
         hb.on_pong(&[9u8; 8]);
         assert!(hb.outstanding.is_some());
