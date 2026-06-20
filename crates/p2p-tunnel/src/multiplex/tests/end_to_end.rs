@@ -73,6 +73,84 @@ async fn multiplex_open_handshake_bridges_bytes_after_target_connect() {
 }
 
 #[tokio::test]
+async fn answer_reports_premature_close_with_active_streams() {
+    // A data channel that closes while a stream is still active is a premature disconnect,
+    // not a clean shutdown — the answer must report DataChannelClosedWithActiveStreams.
+    let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
+
+    let target_listener =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("target listener should bind");
+    let table = forward_table(target_listener.local_addr().expect("target addr").port());
+
+    // The target reads the first bytes (so the stream is established on both ends), signals,
+    // then holds the connection open so the answer's stream stays active.
+    let (established_tx, established_rx) = oneshot::channel();
+    let target_task = tokio::spawn(async move {
+        let (mut target, _) = target_listener.accept().await.expect("target accept");
+        let mut buf = [0_u8; 4];
+        target.read_exact(&mut buf).await.expect("target read");
+        established_tx.send(()).expect("signal established");
+        // Hold the connection open until the test aborts this task.
+        std::future::pending::<()>().await;
+    });
+
+    let local_listener =
+        TcpListener::bind(("127.0.0.1", 0)).await.expect("local listener should bind");
+    let local_addr = local_listener.local_addr().expect("local addr");
+    let client_task = tokio::spawn(async move {
+        let mut client = TcpStream::connect(local_addr).await.expect("client connect");
+        client.write_all(b"ping").await.expect("client write");
+        std::future::pending::<()>().await;
+    });
+    let (offer_stream, _) = local_listener.accept().await.expect("offer accept");
+
+    let answer_tunnel = sample_tunnel_config();
+    let answer_task = tokio::spawn(async move {
+        run_multiplex_answer(
+            answer_channel,
+            &answer_tunnel,
+            table,
+            "offer-home".parse().expect("peer id"),
+        )
+        .await
+    });
+    let offer_tunnel = sample_tunnel_config();
+    let offer_task = tokio::spawn(async move {
+        let (tx, mut rx) = mpsc::channel(1);
+        drop(tx);
+        run_multiplex_offer(
+            offer_channel,
+            &offer_tunnel,
+            OfferClient::new("ssh", offer_stream),
+            &mut rx,
+        )
+        .await
+    });
+
+    // Wait until the stream is fully established, then abruptly close the offer side so the
+    // answer observes a data-channel close while its stream is still active.
+    timeout(Duration::from_secs(10), established_rx)
+        .await
+        .expect("stream should establish")
+        .expect("established signal");
+    offer_peer.close().await.expect("offer peer should close");
+
+    let answer_result = timeout(Duration::from_secs(10), answer_task)
+        .await
+        .expect("answer mux should finish")
+        .expect("answer mux join should succeed");
+    assert!(
+        matches!(answer_result, Err(TunnelError::DataChannelClosedWithActiveStreams { .. })),
+        "expected a premature-close error, got {answer_result:?}",
+    );
+
+    offer_task.abort();
+    client_task.abort();
+    target_task.abort();
+    answer_peer.close().await.expect("answer peer should close");
+}
+
+#[tokio::test]
 async fn target_connect_failure_closes_only_failed_offer_stream() {
     let (offer_peer, answer_peer, offer_channel, answer_channel) = connected_channels().await;
 

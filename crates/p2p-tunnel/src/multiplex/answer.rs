@@ -78,7 +78,15 @@ pub async fn run_multiplex_answer(
                             &mut streams,
                         ).await?;
                     }
-                    Some(DataChannelEvent::Closed) | None => break Ok(()),
+                    Some(DataChannelEvent::Closed) | None => {
+                        // Clean shutdown only when no streams remain; a close with active
+                        // streams is a premature disconnect, reported distinctly.
+                        let active = manager.active_count() + streams.len();
+                        if active > 0 {
+                            break Err(TunnelError::DataChannelClosedWithActiveStreams { active });
+                        }
+                        break Ok(());
+                    }
                     Some(DataChannelEvent::Open) => {}
                 }
             }

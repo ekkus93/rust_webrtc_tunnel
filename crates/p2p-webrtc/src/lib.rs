@@ -63,6 +63,9 @@ pub enum IceConnectionState {
     Disconnected,
     Failed,
     Closed,
+    /// An upstream ICE state we do not model. Kept distinct from `New` so an unexpected
+    /// state is not misread as normal startup.
+    Unknown,
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -100,7 +103,10 @@ impl DataChannelHandle {
         inner.on_open(Box::new(move || {
             let open_tx = open_tx.clone();
             Box::pin(async move {
-                let _ = open_tx.send(DataChannelEvent::Open).await;
+                if open_tx.send(DataChannelEvent::Open).await.is_err() {
+                    // The session loop dropped its receiver — expected only during teardown.
+                    tracing::debug!(target: "tunnel", "data channel open event dropped; receiver gone");
+                }
             })
         }));
 
@@ -108,15 +114,23 @@ impl DataChannelHandle {
         inner.on_close(Box::new(move || {
             let close_tx = close_tx.clone();
             Box::pin(async move {
-                let _ = close_tx.send(DataChannelEvent::Closed).await;
+                if close_tx.send(DataChannelEvent::Closed).await.is_err() {
+                    tracing::debug!(target: "tunnel", "data channel close event dropped; receiver gone");
+                }
             })
         }));
 
         let message_tx = events_tx.clone();
         inner.on_message(Box::new(move |message: DataChannelMessage| {
             let message_tx = message_tx.clone();
+            let len = message.data.len();
             Box::pin(async move {
-                let _ = message_tx.send(DataChannelEvent::Message(message.data.to_vec())).await;
+                if message_tx.send(DataChannelEvent::Message(message.data.to_vec())).await.is_err() {
+                    // Receiver gone: the session loop stopped consuming. Warn — a dropped
+                    // message during an active session loses real tunnel data, which is not a
+                    // clean shutdown.
+                    tracing::warn!(target: "tunnel", bytes = len, "data channel message dropped; receiver gone");
+                }
             })
         }));
 
@@ -291,13 +305,20 @@ impl WebRtcPeer {
         &self,
         candidate: IceCandidateSignal,
     ) -> Result<(), WebRtcError> {
-        let candidate = RTCIceCandidateInit {
-            candidate: candidate.candidate.unwrap_or_default(),
-            sdp_mid: candidate.sdp_mid,
-            sdp_mline_index: candidate.sdp_mline_index,
-            username_fragment: None,
-        };
-        self.peer_connection.add_ice_candidate(candidate).await?;
+        let IceCandidateSignal { candidate, sdp_mid, sdp_mline_index } = candidate;
+        // End-of-candidates is signaled by a separate message type, so a candidate message
+        // with no content here is a protocol error — never coerce it to an empty string and
+        // hand it to WebRTC as if it were a real candidate.
+        let candidate = candidate.ok_or_else(|| {
+            WebRtcError::InvalidConfig(
+                "remote ICE candidate had no candidate content (empty candidate is invalid; \
+                 end-of-candidates is signaled separately)"
+                    .to_owned(),
+            )
+        })?;
+        let init =
+            RTCIceCandidateInit { candidate, sdp_mid, sdp_mline_index, username_fragment: None };
+        self.peer_connection.add_ice_candidate(init).await?;
         Ok(())
     }
 
@@ -683,7 +704,10 @@ impl From<RTCIceConnectionState> for IceConnectionState {
             RTCIceConnectionState::Disconnected => Self::Disconnected,
             RTCIceConnectionState::Failed => Self::Failed,
             RTCIceConnectionState::Closed => Self::Closed,
-            _ => Self::New,
+            other => {
+                tracing::warn!(target: "ice", ?other, "unmapped upstream ICE state; reporting Unknown");
+                Self::Unknown
+            }
         }
     }
 }
@@ -742,8 +766,9 @@ mod tests {
             (Rtc::Disconnected, IceConnectionState::Disconnected),
             (Rtc::Failed, IceConnectionState::Failed),
             (Rtc::Closed, IceConnectionState::Closed),
-            // `Unspecified` (and any future unmapped variant) falls through to `New`.
-            (Rtc::Unspecified, IceConnectionState::New),
+            // `Unspecified` (and any future unmapped variant) maps to the explicit `Unknown`,
+            // never `New`, so an unexpected state is not misread as normal startup.
+            (Rtc::Unspecified, IceConnectionState::Unknown),
         ];
         for (input, expected) in cases {
             assert_eq!(IceConnectionState::from(input), expected, "mapping {input:?}");
@@ -785,6 +810,22 @@ mod tests {
             decide_ice_path(AndroidIceMode::VnetMux, false),
             IcePath::Vnet { required: true, mux: true }
         );
+    }
+
+    #[tokio::test]
+    async fn add_remote_candidate_rejects_missing_content() {
+        // A candidate message with no content is a protocol error, not an empty candidate.
+        let mut config = sample_config();
+        config.stun_urls = Vec::new();
+        let peer = WebRtcPeer::new(&config).await.expect("peer builds");
+        let signal = super::IceCandidateSignal {
+            candidate: None,
+            sdp_mid: Some("0".to_owned()),
+            sdp_mline_index: Some(0),
+        };
+        let error =
+            peer.add_remote_candidate(signal).await.expect_err("missing content is rejected");
+        assert!(matches!(error, WebRtcError::InvalidConfig(_)), "got {error:?}");
     }
 
     #[test]

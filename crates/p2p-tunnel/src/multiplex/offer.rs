@@ -193,7 +193,17 @@ pub async fn run_multiplex_offer(
                             break Ok(());
                         }
                     }
-                    Some(DataChannelEvent::Closed) | None => break Ok(()),
+                    Some(DataChannelEvent::Closed) | None => {
+                        // A close with no remaining streams is a clean shutdown; a close while
+                        // streams are active/opening is a premature disconnect, surfaced
+                        // distinctly so it is not mistaken for an orderly teardown.
+                        let active =
+                            manager.active_count() + opening_streams.len() + streams.len();
+                        if active > 0 {
+                            break Err(TunnelError::DataChannelClosedWithActiveStreams { active });
+                        }
+                        break Ok(());
+                    }
                     Some(DataChannelEvent::Open) => {}
                 }
             }
