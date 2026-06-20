@@ -643,11 +643,22 @@ mod tests {
     }
 
     #[test]
-    fn state_translation_maps_failed() {
-        let state = IceConnectionState::from(
-            webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Failed,
-        );
-        assert_eq!(state, IceConnectionState::Failed);
+    fn state_translation_covers_every_variant() {
+        use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState as Rtc;
+        let cases = [
+            (Rtc::New, IceConnectionState::New),
+            (Rtc::Checking, IceConnectionState::Checking),
+            (Rtc::Connected, IceConnectionState::Connected),
+            (Rtc::Completed, IceConnectionState::Completed),
+            (Rtc::Disconnected, IceConnectionState::Disconnected),
+            (Rtc::Failed, IceConnectionState::Failed),
+            (Rtc::Closed, IceConnectionState::Closed),
+            // `Unspecified` (and any future unmapped variant) falls through to `New`.
+            (Rtc::Unspecified, IceConnectionState::New),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(IceConnectionState::from(input), expected, "mapping {input:?}");
+        }
     }
 
     #[test]

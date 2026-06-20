@@ -16,6 +16,20 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
+use crate::DaemonError;
+
+/// Whether a finished offer session's outcome should open the probe-failure cooldown.
+///
+/// ONLY a post-DCEP startup data-plane probe failure does. In particular a mid-session
+/// [`p2p_tunnel::TunnelError::DataPlaneHeartbeatLost`] — which reaches here as
+/// [`DaemonError::Tunnel`], not [`DaemonError::DataPlaneProbeFailed`] — must NOT: the path
+/// may well be healthy on a fresh session, so the next local client should retry immediately
+/// rather than wait out a backoff. Every other outcome (success, ICE failure, ack timeout,
+/// other tunnel errors) likewise resets the cooldown.
+pub(crate) fn session_outcome_enters_cooldown(result: &Result<(), DaemonError>) -> bool {
+    matches!(result, Err(DaemonError::DataPlaneProbeFailed(_)))
+}
+
 /// Tracks the probe-failure backoff window for the offer daemon's remote peer.
 #[derive(Debug)]
 pub(crate) struct ProbeFailureCooldown {
@@ -59,6 +73,25 @@ impl ProbeFailureCooldown {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p2p_tunnel::TunnelError;
+
+    #[test]
+    fn only_startup_probe_failure_enters_cooldown() {
+        // A post-DCEP probe failure opens the cooldown.
+        assert!(session_outcome_enters_cooldown(&Err(DaemonError::DataPlaneProbeFailed(
+            TunnelError::DataPlaneProbeTimeout(Duration::from_secs(5)),
+        ))));
+        // A mid-session heartbeat loss arrives as Tunnel(..) and must NOT cool down, so the
+        // next client immediately rebuilds a fresh session.
+        assert!(!session_outcome_enters_cooldown(&Err(DaemonError::Tunnel(
+            TunnelError::DataPlaneHeartbeatLost { missed: 3 },
+        ))));
+        // Other tunnel errors and clean success also reset (no cooldown).
+        assert!(!session_outcome_enters_cooldown(&Err(DaemonError::Tunnel(
+            TunnelError::WriterClosed,
+        ))));
+        assert!(!session_outcome_enters_cooldown(&Ok(())));
+    }
 
     #[test]
     fn no_cooldown_until_a_failure_is_recorded() {

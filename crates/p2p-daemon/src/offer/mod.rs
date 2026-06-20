@@ -188,7 +188,7 @@ async fn run_offer_daemon_inner<T: DaemonSignalingTransport>(
                         },
                     )
                     .await;
-                if matches!(result, Err(DaemonError::DataPlaneProbeFailed(_))) {
+                if cooldown::session_outcome_enters_cooldown(&result) {
                     let wait = probe_cooldown.record_failure(Instant::now());
                     tracing::warn!(
                         remote_peer_id = %remote.peer_id,

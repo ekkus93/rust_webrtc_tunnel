@@ -7,6 +7,7 @@ mod support;
 
 mod answer_frames;
 mod end_to_end;
+mod heartbeat;
 mod offer_frames;
 mod probe;
 mod state;
