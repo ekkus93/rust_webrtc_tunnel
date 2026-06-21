@@ -50,7 +50,6 @@ fun ForwardsScreen(
 ) {
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
-    val message by vm.message.collectAsStateWithLifecycle()
     val isBusy by vm.isBusy.collectAsStateWithLifecycle()
     var showAddDialog by remember { mutableStateOf(false) }
     LazyColumn(
@@ -72,8 +71,6 @@ fun ForwardsScreen(
                     Icon(Icons.Filled.Add, contentDescription = "Add forward")
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
         if (forwards.isEmpty()) {
             item { EmptyStateCard("No forwards configured. Tap + to add one.") }
@@ -106,7 +103,6 @@ fun ForwardDetailsScreen(
 ) {
     val forwards by vm.forwards.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
-    val message by vm.message.collectAsStateWithLifecycle()
     val isBusy by vm.isBusy.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -128,7 +124,6 @@ fun ForwardDetailsScreen(
             onTestPort = { vm.testLocalPort(forward) },
             onToggleEnabled = { vm.saveForward(forward.copy(enabled = !forward.enabled)) },
         )
-        message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = { showEditDialog = true },

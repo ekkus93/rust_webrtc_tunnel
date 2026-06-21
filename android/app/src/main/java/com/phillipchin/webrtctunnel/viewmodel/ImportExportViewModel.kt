@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.phillipchin.webrtctunnel.data.AppDependencies
+import com.phillipchin.webrtctunnel.data.SnackbarController
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +31,7 @@ class ImportExportViewModel(private val deps: AppDependencies) : ViewModel() {
     private val importService = ImportExportService(deps)
 
     // Shared IO-op runner bound to this ViewModel's scope/state/dispatcher.
-    private val io = ImportExportOps(viewModelScope, _state, deps.dispatchers.io)
+    private val io = ImportExportOps(viewModelScope, _state, deps.dispatchers.io, deps.snackbar)
 
     fun updateState(transform: (ImportExportState) -> ImportExportState) {
         _state.value = transform(_state.value).copy(resultMessage = null)
@@ -120,6 +121,7 @@ private class ImportExportOps(
     private val scope: CoroutineScope,
     private val state: MutableStateFlow<ImportExportState>,
     private val io: CoroutineDispatcher,
+    private val snackbar: SnackbarController,
 ) {
     fun run(
         successMessage: String,
@@ -130,11 +132,9 @@ private class ImportExportOps(
         scope.launch {
             state.value = state.value.copy(isBusy = true, resultMessage = null)
             val result = withContext(io) { runCatching { block() } }
-            state.value =
-                state.value.copy(
-                    isBusy = false,
-                    resultMessage = result.fold({ successMessage }, { it.message ?: failureFallback }),
-                )
+            val message = result.fold({ successMessage }, { it.message ?: failureFallback })
+            state.value = state.value.copy(isBusy = false, resultMessage = message)
+            snackbar.show(message)
         }
     }
 }

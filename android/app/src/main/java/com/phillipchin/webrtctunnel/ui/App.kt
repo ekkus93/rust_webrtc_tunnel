@@ -12,8 +12,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModelProvider
@@ -84,9 +87,15 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
     val factory = remember(deps) { appViewModelFactory(deps) }
     val models = rememberSharedScreenModels(factory)
     val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     WebRtcTunnelTheme {
         NotificationPermissionGate()
+        // One snackbar host for the whole app: every viewmodel's one-shot result message is
+        // funneled through deps.snackbar so mutating actions always get a visible confirmation.
+        LaunchedEffect(deps.snackbar) {
+            deps.snackbar.messages.collect { snackbarHostState.showSnackbar(it) }
+        }
         val backStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = backStackEntry?.destination?.route
         val showBottomBar = currentRoute in mainTabs.map { it.route.value }
@@ -94,6 +103,7 @@ fun WebRtcTunnelApp(deps: AppDependencies) {
         val title = routeTitle(currentRoute)
 
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TunnelTopAppBar(
                     title = title,

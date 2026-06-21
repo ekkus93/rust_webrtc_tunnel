@@ -33,6 +33,12 @@ class ForwardsViewModel(
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
+    /** Record a result for this screen and surface it through the app-wide snackbar. */
+    private fun report(message: String) {
+        _message.value = message
+        deps.snackbar.show(message)
+    }
+
     fun reload() {
         viewModelScope.launch { deps.forwardsRepository.refresh() }
     }
@@ -44,7 +50,7 @@ class ForwardsViewModel(
             try {
                 val before = deps.forwardsRepository.current()
                 val result = deps.forwardsRepository.upsert(forward)
-                _message.value =
+                report(
                     if (!result.valid) {
                         result.message ?: "Forward update failed"
                     } else {
@@ -55,7 +61,8 @@ class ForwardsViewModel(
                         } else {
                             "Forward saved"
                         }
-                    }
+                    },
+                )
             } finally {
                 _isBusy.value = false
             }
@@ -69,7 +76,7 @@ class ForwardsViewModel(
             try {
                 val before = deps.forwardsRepository.current()
                 val result = deps.forwardsRepository.delete(forwardId)
-                _message.value =
+                report(
                     if (!result.valid) {
                         result.message ?: "Forward delete failed"
                     } else {
@@ -80,7 +87,8 @@ class ForwardsViewModel(
                         } else {
                             "Forward deleted"
                         }
-                    }
+                    },
+                )
             } finally {
                 _isBusy.value = false
             }
@@ -112,7 +120,7 @@ class ForwardsViewModel(
                 }.getOrElse {
                     "Local port test failed for $host:${forward.localPort}: ${it.message}"
                 }
-            _message.value = SensitiveDataRedactor.redactText(resultMessage)
+            report(SensitiveDataRedactor.redactText(resultMessage))
         }
     }
 

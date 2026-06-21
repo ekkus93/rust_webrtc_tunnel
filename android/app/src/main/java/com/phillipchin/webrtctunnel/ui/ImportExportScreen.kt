@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -69,8 +68,6 @@ fun ImportExportScreen(
             expanded = showAdvanced,
             onToggle = { showAdvanced = !showAdvanced },
         )
-        Spacer(Modifier.height(8.dp))
-        state.resultMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
     }
 
     ImportExportDialogs(

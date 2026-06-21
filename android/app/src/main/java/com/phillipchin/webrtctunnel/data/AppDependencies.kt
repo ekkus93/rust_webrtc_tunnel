@@ -17,6 +17,10 @@ class AppDependencies(
 ) {
     val context: Context = context.applicationContext
 
+    // App-wide snackbar bus: viewmodels emit one-shot success/failure messages here and the
+    // top-level Scaffold renders them, so every mutating action gets a visible confirmation.
+    val snackbar: SnackbarController = SnackbarController()
+
     // Resolves the active network's IPv4 (ConnectivityManager/LinkProperties) to advertise as
     // the vnet_mux host candidate; replaces the desktop-only 8.8.8.8 route probe on Android.
     val localAddressResolver: LocalAddressResolver = LocalAddressResolver(this.context)
