@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use ipnet::IpNet;
 use webrtc::api::setting_engine::SettingEngine;
+use webrtc::ice::mdns::MulticastDnsMode;
 use webrtc::ice::udp_mux::{UDPMuxDefault, UDPMuxParams};
 use webrtc::ice::udp_network::UDPNetwork;
 use webrtc_util::ifaces;
@@ -132,6 +133,12 @@ pub fn describe_ice_decision(config: &WebRtcConfig) -> IceDecisionInfo {
 /// logs the requested mode and the selected path + reason; there is no silent fallback.
 pub(crate) fn build_setting_engine(config: &WebRtcConfig) -> Result<SettingEngine, WebRtcError> {
     let mut engine = SettingEngine::default();
+    // We are STUN-only and advertise raw-IP host candidates (never `.local` mDNS names), so
+    // disable the ICE agent's mDNS subsystem entirely (it defaults to `QueryOnly`, which still
+    // starts an mDNS listener). Besides being the correct config for us, this avoids that
+    // listener's interface enumeration (`getifaddrs`), which is restricted on Android 11+ and
+    // otherwise logs a spurious "Error getting interfaces" at error level every session.
+    engine.set_ice_multicast_dns_mode(MulticastDnsMode::Disabled);
     let mode = config.android_ice_mode;
     let enumeration_works = os_interface_enumeration_works();
     let reason = ice_decision_reason(mode, enumeration_works);
