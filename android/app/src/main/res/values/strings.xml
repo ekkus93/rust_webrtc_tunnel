@@ -8,6 +8,8 @@
 
     <!-- Notification action buttons -->
     <string name="notification_action_stop">Stop</string>
+    <string name="notification_action_retry">Retry</string>
+    <string name="notification_action_allow_session">Allow This Session</string>
 
     <!-- Notification content titles (per service state) -->
     <string name="notification_title_stopped">WebRTC Tunnel stopped</string>

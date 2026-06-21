@@ -81,7 +81,7 @@ class NotificationController(
                 Intent(context, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        val action =
+        val stopIntent =
             PendingIntent.getService(
                 context,
                 1,
@@ -103,14 +103,43 @@ class NotificationController(
                 ServiceState.Stopping -> R.string.notification_title_stopping
                 ServiceState.Error, ServiceState.ConfigInvalid -> R.string.notification_title_error
             }
+        val secondaryIntent = secondaryActionIntent(state)
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(context.getString(titleRes))
             .setContentText(body)
             .setContentIntent(openIntent)
-            .addAction(R.drawable.ic_notification_stop, context.getString(R.string.notification_action_stop), action)
+            .addAction(
+                R.drawable.ic_notification_stop,
+                context.getString(R.string.notification_action_stop),
+                stopIntent,
+            )
+            .apply {
+                secondaryIntent?.let { (intent, labelRes) -> addAction(0, context.getString(labelRes), intent) }
+            }
             .setOngoing(true)
             .build()
+    }
+
+    private fun secondaryActionIntent(state: ServiceState): Pair<PendingIntent, Int>? {
+        val (serviceAction, labelRes) =
+            when (state) {
+                ServiceState.Error, ServiceState.ConfigInvalid ->
+                    com.phillipchin.webrtctunnel.TunnelForegroundService.ACTION_START_OFFER to
+                        R.string.notification_action_retry
+                ServiceState.PausedMeteredBlocked ->
+                    com.phillipchin.webrtctunnel.TunnelForegroundService.ACTION_ALLOW_METERED_SESSION to
+                        R.string.notification_action_allow_session
+                else -> return null
+            }
+        return PendingIntent.getService(
+            context,
+            2,
+            Intent(context, com.phillipchin.webrtctunnel.TunnelForegroundService::class.java).apply {
+                action = serviceAction
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        ) to labelRes
     }
 
     fun show(notification: android.app.Notification) {
