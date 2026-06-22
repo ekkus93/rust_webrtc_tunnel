@@ -3,6 +3,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ipnet::IpNet;
 use webrtc::api::setting_engine::SettingEngine;
@@ -195,6 +196,17 @@ pub(crate) fn build_setting_engine(config: &WebRtcConfig) -> Result<SettingEngin
             }
         },
     }
+    // Keep disconnected_timeout at the 5 s library default (must exceed the 2 s ICE
+    // keepalive interval or connected sessions spuriously flip to Disconnected between
+    // pings). Reduce only failed_timeout so the total Checking-state deadline shrinks.
+    let disconnected_ms = 5_000_u64;
+    let failed_ms = config.ice_checking_timeout_ms.saturating_sub(disconnected_ms).max(5_000);
+    engine.set_ice_timeouts(
+        Some(Duration::from_millis(disconnected_ms)),
+        Some(Duration::from_millis(failed_ms)),
+        None,
+    );
+
     Ok(engine)
 }
 
@@ -305,7 +317,7 @@ mod tests {
         describe_ice_decision, fallback_net, parse_advertised_ipv4, zero_bound_udp_mux,
     };
     use crate::WebRtcError;
-    use p2p_core::{AndroidIceMode, WebRtcConfig};
+    use p2p_core::{AndroidIceMode, DEFAULT_ICE_CHECKING_TIMEOUT_MS, WebRtcConfig};
 
     fn sample_config() -> WebRtcConfig {
         WebRtcConfig {
@@ -314,6 +326,7 @@ mod tests {
             enable_ice_restart: true,
             android_ice_mode: Default::default(),
             advertised_local_ipv4: None,
+            ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
         }
     }
 

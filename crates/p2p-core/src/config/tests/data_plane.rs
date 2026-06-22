@@ -1,5 +1,5 @@
 //! The data-plane / ICE-mode config fields: `android_ice_mode`, `advertised_local_ipv4`,
-//! TURN rejection, and the probe/heartbeat range validation.
+//! `ice_checking_timeout_ms`, TURN rejection, and the probe/heartbeat range validation.
 
 use super::support::*;
 
@@ -14,6 +14,7 @@ fn missing_new_fields_default_to_auto_and_5000() {
         .expect("base config should load");
     assert_eq!(config.webrtc.android_ice_mode, AndroidIceMode::Auto);
     assert_eq!(config.tunnel.data_plane_probe_timeout_ms, 5000);
+    assert_eq!(config.webrtc.ice_checking_timeout_ms, crate::DEFAULT_ICE_CHECKING_TIMEOUT_MS);
 }
 
 #[test]
@@ -78,6 +79,41 @@ fn advertised_local_ipv4_invalid_is_rejected() {
             load_config(&config, &config_dir, &state_dir).is_err(),
             "advertised_local_ipv4 = {value} should be rejected"
         );
+    }
+}
+
+#[test]
+fn ice_checking_timeout_out_of_range_is_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    for value in ["0", "5000", "9999", "120001", "999999"] {
+        let config_dir = temp_dir.path().join(format!("config-{value}"));
+        let state_dir = temp_dir.path().join(format!("state-{value}"));
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "enable_ice_restart = true",
+            &format!("enable_ice_restart = true\nice_checking_timeout_ms = {value}"),
+        );
+        assert!(
+            load_config(&config, &config_dir, &state_dir).is_err(),
+            "ice_checking_timeout_ms = {value} should be rejected"
+        );
+    }
+}
+
+#[test]
+fn ice_checking_timeout_in_range_is_accepted() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    for value in ["10000", "15000", "30000", "120000"] {
+        let config_dir = temp_dir.path().join(format!("config-{value}"));
+        let state_dir = temp_dir.path().join(format!("state-{value}"));
+        let config = sample_config(&config_dir, &state_dir).replace(
+            "enable_ice_restart = true",
+            &format!("enable_ice_restart = true\nice_checking_timeout_ms = {value}"),
+        );
+        let loaded = load_config(&config, &config_dir, &state_dir).unwrap_or_else(|error| {
+            panic!("ice_checking_timeout_ms = {value} should load: {error}")
+        });
+        let expected: u64 = value.parse().expect("test value parses as u64");
+        assert_eq!(loaded.webrtc.ice_checking_timeout_ms, expected);
     }
 }
 

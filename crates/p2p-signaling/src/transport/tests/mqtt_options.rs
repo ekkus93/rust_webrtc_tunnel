@@ -38,6 +38,7 @@ fn sample_config(base: &std::path::Path) -> AppConfig {
             enable_ice_restart: true,
             android_ice_mode: Default::default(),
             advertised_local_ipv4: None,
+            ice_checking_timeout_ms: p2p_core::DEFAULT_ICE_CHECKING_TIMEOUT_MS,
         },
         tunnel: TunnelConfig {
             read_chunk_size: 1024,

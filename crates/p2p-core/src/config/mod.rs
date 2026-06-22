@@ -152,6 +152,32 @@ pub struct WebRtcConfig {
     /// injected address fail loudly rather than silently dropping to native ICE.
     #[serde(default)]
     pub advertised_local_ipv4: Option<String>,
+    /// Total ICE checking timeout in milliseconds. The ICE agent declares the session
+    /// failed if no valid candidate pair is established within this window. Internally
+    /// split 1:5 into the ICE `disconnected_timeout` and `failed_timeout` sub-timers,
+    /// matching the library ratio (default 5 s + 25 s). Lower values cause dead sessions
+    /// (e.g. when a trickle candidate never arrives) to recycle faster; higher values give
+    /// slow networks more time for STUN server-reflexive candidates to arrive. The library
+    /// default would be 30 000 ms (5 s + 25 s). Default here is
+    /// [`DEFAULT_ICE_CHECKING_TIMEOUT_MS`].
+    #[serde(default = "default_ice_checking_timeout_ms")]
+    pub ice_checking_timeout_ms: u64,
+}
+
+/// Lower bound for the ICE checking timeout (ms). The disconnected-timeout sub-timer is
+/// fixed at 5 s (must exceed the 2 s ICE keepalive interval); the remaining budget goes
+/// to the failed sub-timer, which needs at least 5 s for the ICE-restart path. Minimum
+/// is therefore 10 s (5 s disconnected + 5 s failed).
+pub const MIN_ICE_CHECKING_TIMEOUT_MS: u64 = 10_000;
+/// Default total ICE checking timeout (ms). Split 1:5 into disconnected and failed
+/// sub-timeouts, matching the library ratio. Reduced from the 30 s library default to
+/// 10 s so sessions with no viable candidate path recycle ~3× faster.
+pub const DEFAULT_ICE_CHECKING_TIMEOUT_MS: u64 = 10_000;
+/// Upper bound for the ICE checking timeout (ms).
+pub const MAX_ICE_CHECKING_TIMEOUT_MS: u64 = 120_000;
+
+pub const fn default_ice_checking_timeout_ms() -> u64 {
+    DEFAULT_ICE_CHECKING_TIMEOUT_MS
 }
 
 /// Lower bound for the post-DCEP data-plane probe timeout (ms). A zero or tiny value

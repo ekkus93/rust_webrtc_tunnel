@@ -334,7 +334,7 @@ mod tests {
         expected_data_channel_label,
     };
     use crate::WebRtcError;
-    use p2p_core::{DATA_CHANNEL_LABEL, WebRtcConfig};
+    use p2p_core::{DATA_CHANNEL_LABEL, DEFAULT_ICE_CHECKING_TIMEOUT_MS, WebRtcConfig};
     use tokio::time::timeout;
 
     fn sample_config() -> WebRtcConfig {
@@ -344,6 +344,7 @@ mod tests {
             enable_ice_restart: true,
             android_ice_mode: Default::default(),
             advertised_local_ipv4: None,
+            ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
         }
     }
 

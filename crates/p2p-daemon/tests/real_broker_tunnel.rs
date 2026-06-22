@@ -21,9 +21,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use p2p_core::{
-    AppConfig, BrokerConfig, BrokerTlsConfig, ForwardAnswerConfig, ForwardOfferConfig, ForwardRule,
-    HealthConfig, LoggingConfig, NodeConfig, NodeRole, PathConfig, PeerConfig, ReconnectConfig,
-    SecurityConfig, TunnelConfig, WebRtcConfig,
+    AppConfig, BrokerConfig, BrokerTlsConfig, DEFAULT_ICE_CHECKING_TIMEOUT_MS, ForwardAnswerConfig,
+    ForwardOfferConfig, ForwardRule, HealthConfig, LoggingConfig, NodeConfig, NodeRole, PathConfig,
+    PeerConfig, ReconnectConfig, SecurityConfig, TunnelConfig, WebRtcConfig,
 };
 use p2p_crypto::{AuthorizedKeys, GeneratedIdentity, generate_identity};
 use p2p_daemon::{run_answer_daemon, run_offer_daemon};
@@ -269,6 +269,7 @@ fn peer_config(params: PeerParams) -> AppConfig {
             enable_ice_restart: true,
             android_ice_mode: Default::default(),
             advertised_local_ipv4: None,
+            ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
         },
         tunnel: TunnelConfig {
             read_chunk_size: 16_384,

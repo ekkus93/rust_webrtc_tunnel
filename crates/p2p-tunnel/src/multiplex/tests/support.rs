@@ -9,8 +9,8 @@ pub(super) use std::future;
 pub(super) use std::time::Duration;
 
 pub(super) use p2p_core::{
-    ForwardAnswerConfig, ForwardOfferConfig, ForwardRule, ForwardTable, TunnelConfig,
-    TunnelFrameType, WebRtcConfig,
+    DEFAULT_ICE_CHECKING_TIMEOUT_MS, ForwardAnswerConfig, ForwardOfferConfig, ForwardRule,
+    ForwardTable, TunnelConfig, TunnelFrameType, WebRtcConfig,
 };
 pub(super) use p2p_webrtc::WebRtcPeer;
 pub(super) use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -53,6 +53,7 @@ pub(super) fn sample_webrtc_config() -> WebRtcConfig {
         enable_ice_restart: true,
         android_ice_mode: Default::default(),
         advertised_local_ipv4: None,
+        ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
     }
 }
 

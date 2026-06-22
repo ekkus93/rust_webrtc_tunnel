@@ -15,7 +15,7 @@
 
 use std::time::{Duration, Instant};
 
-use p2p_core::WebRtcConfig;
+use p2p_core::{DEFAULT_ICE_CHECKING_TIMEOUT_MS, WebRtcConfig};
 use p2p_webrtc::{DataChannelEvent, WebRtcPeer};
 use serde::Serialize;
 
@@ -139,6 +139,7 @@ async fn gather_candidates(secs: u64) -> GatherReport {
         enable_ice_restart: false,
         android_ice_mode: Default::default(),
         advertised_local_ipv4: None,
+        ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
     };
     let peer = match WebRtcPeer::new(&config).await {
         Ok(peer) => peer,
@@ -232,6 +233,7 @@ async fn loopback_inner(secs: u64) -> Result<(), String> {
         enable_ice_restart: false,
         android_ice_mode: Default::default(),
         advertised_local_ipv4: None,
+        ice_checking_timeout_ms: DEFAULT_ICE_CHECKING_TIMEOUT_MS,
     };
 
     let offer = WebRtcPeer::new(&config).await.map_err(|error| format!("offer build: {error}"))?;

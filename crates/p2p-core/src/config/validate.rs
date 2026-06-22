@@ -268,6 +268,18 @@ impl AppConfig {
     /// tunnel startup, in addition to the construction-time guard in `p2p-webrtc`) and
     /// the optional injected `advertised_local_ipv4` host-candidate address.
     fn validate_webrtc(&self) -> Result<(), ConfigError> {
+        let ice_timeout = self.webrtc.ice_checking_timeout_ms;
+        if !(super::MIN_ICE_CHECKING_TIMEOUT_MS..=super::MAX_ICE_CHECKING_TIMEOUT_MS)
+            .contains(&ice_timeout)
+        {
+            return Err(ConfigError::InvalidConfig(format!(
+                "webrtc.ice_checking_timeout_ms must be between {} and {} ms (got {})",
+                super::MIN_ICE_CHECKING_TIMEOUT_MS,
+                super::MAX_ICE_CHECKING_TIMEOUT_MS,
+                ice_timeout
+            )));
+        }
+
         if let Some(url) = self
             .webrtc
             .stun_urls
