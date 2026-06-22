@@ -4,7 +4,7 @@ Experimental Android control panel and foreground-service host for the WebRTC tu
 
 - **Min SDK**: 26 (Android 8.0 Oreo)
 - **Target SDK**: 35
-- **Version**: 0.3.0
+- **Version**: 0.3.2
 - **App ID**: `com.phillipchin.webrtctunnel`
 - **Language**: Kotlin 2.0 + Jetpack Compose + Material 3
 
@@ -162,6 +162,21 @@ All runtime files live under the app's `filesDir` (not accessible without root o
 ## Network policy
 
 Cellular and metered Wi-Fi tunnels are **blocked by default**. The user must explicitly enable `Allow metered connections` in Settings, or tap `Allow for this session` on the Home screen to override once. When the device moves back to unmetered Wi-Fi, the tunnel automatically resumes if `Resume on unmetered Wi-Fi` is enabled (default: on).
+
+## Connection (ICE) mode
+
+`Settings → Advanced → Connection (ICE) mode` lets you choose how ICE candidates
+are gathered, written into the generated config as `[webrtc].android_ice_mode`:
+
+| Mode | When to use |
+|---|---|
+| `native` | Reach a peer on a **different** network (over the internet). Gathers server-reflexive (srflx) candidates via STUN, so it can traverse NAT. |
+| `vnet_mux` | Reach a peer on the **same** Wi-Fi. Binds a `0.0.0.0` UDP mux and advertises the device's real local IPv4 (injected from `ConnectivityManager`) as the host candidate. |
+
+The choice takes effect the next time the tunnel is started; it rewrites only the
+`android_ice_mode` line in the active config, so saved broker/peer/forward settings
+and the identity key are preserved. New installs default to `vnet_mux` (the strict,
+proven Android path); switch to `native` for cross-network peers.
 
 ## Identity security
 

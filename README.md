@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ekkus93/webrtc_tunnel/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ekkus93/webrtc_tunnel/actions/workflows/ci.yml)
 
-`webrtc_tunnel` is a CLI-only secure TCP tunnel that carries multiple logical TCP streams over one reliable ordered WebRTC data channel per peer session while using MQTT only as an untrusted signaling transport.
+`webrtc_tunnel` is a secure TCP tunnel that carries multiple logical TCP streams over one reliable ordered WebRTC data channel per peer session while using MQTT only as an untrusted signaling transport. The core is a CLI (offer and answer daemons); an experimental Android app provides offer-mode tunnelling from a phone — see [`android/README.md`](android/README.md).
 
 GitHub Actions runs linting and tests for normal branch and pull request CI. Tagged pushes build release tarballs and publish them as GitHub release assets.
 
@@ -53,6 +53,9 @@ Status: **experimental (offer mode first)**.
 - Android talks to shared Rust code through `crates/p2p-mobile` JNI exports
 - Cellular/metered tunnels are blocked by default unless user opts in
 - Private identity is stored encrypted at rest with Android Keystore-backed key material
+- Selectable ICE mode (`native` for cross-network peers, `vnet_mux` for same-Wi-Fi peers)
+
+See [`android/README.md`](android/README.md) for build, install, architecture, and configuration details.
 
 ## Architecture
 
@@ -142,7 +145,7 @@ p2pctl fingerprint ~/.config/p2ptunnel/identity.pub
 
 ## Config file
 
-The current release line is v0.3. The config format string is `p2ptunnel-config-v3` for schema identification and compatibility.
+The current version is v0.3.2, on the v0.3 release line. The config format string is `p2ptunnel-config-v3` for schema identification and compatibility.
 
 `~/.config/p2ptunnel/config.toml` must be a complete config file. `p2pctl check-config` does not accept isolated section snippets such as only `[broker]` or only one `[[forwards]]` block; it expects the top-level `format` field and all required sections.
 
@@ -153,9 +156,9 @@ Parse-tested sample configs are maintained in `docs/examples/offer-config.toml` 
 - `[node]`: local `peer_id` and role (`offer` or `answer`)
 - `[paths]`: identity, authorized keys, and local runtime file paths such as the state and log directories
 - `[broker]`: the MQTT server connection settings, including broker URL, topic prefix, optional credentials, and TLS requirements
-- `[webrtc]`: STUN URLs, trickle ICE, and ICE restart
+- `[webrtc]`: STUN URLs, trickle ICE, ICE restart, and the optional ICE candidate-gathering controls `android_ice_mode` (`auto`/`native`/`vnet`/`vnet_mux`) and `advertised_local_ipv4`
 - `[peer]`: offer-side remote answer peer
-- `[tunnel]`: shared tunnel read/EOF behavior
+- `[tunnel]`: shared tunnel read/EOF behavior plus the data-plane probe (`data_plane_probe_timeout_ms`) and mid-session heartbeat (`data_plane_heartbeat_interval_ms`, `data_plane_heartbeat_max_misses`)
 - `[[forwards]]`: one logical forward per local listener/answer target mapping
 - `[forwards.offer]`: offer-side local listen host/port for that forward
 - `[forwards.answer]`: answer-side target host/port and per-forward peer allowlist
@@ -216,6 +219,9 @@ enable_ice_restart = true
 read_chunk_size = 16384
 local_eof_grace_ms = 250
 remote_eof_grace_ms = 250
+data_plane_probe_timeout_ms = 5000
+data_plane_heartbeat_interval_ms = 5000
+data_plane_heartbeat_max_misses = 3
 
 [[forwards]]
 id = "ssh"
@@ -322,6 +328,9 @@ enable_ice_restart = true
 read_chunk_size = 16384
 local_eof_grace_ms = 250
 remote_eof_grace_ms = 250
+data_plane_probe_timeout_ms = 5000
+data_plane_heartbeat_interval_ms = 5000
+data_plane_heartbeat_max_misses = 3
 
 [[forwards]]
 id = "ssh"
