@@ -132,8 +132,14 @@ class ForwardsViewModel(
                 return ValidationResult(false, "Saved setup is corrupt; re-run setup before changing forwards")
             }
         val forwards = deps.forwardsRepository.current().filter { it.enabled }
-        val debugLogs = deps.configRepository.preferences.first().debugLogsEnabled
-        val candidate = deps.configRepository.renderOfferConfig(input, forwards, debugLogs)
+        val prefs = deps.configRepository.preferences.first()
+        val candidate =
+            deps.configRepository.renderOfferConfig(
+                input,
+                forwards,
+                prefs.debugLogsEnabled,
+                prefs.androidIceMode,
+            )
         val temp = File(deps.context.cacheDir, "config-forwards-candidate.toml")
         val identity = runCatching { deps.identityRepository.readPrivateIdentityPlaintext() }.getOrNull()
         return runCatching {

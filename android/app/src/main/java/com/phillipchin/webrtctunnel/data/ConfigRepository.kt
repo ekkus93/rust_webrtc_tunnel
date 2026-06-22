@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.phillipchin.webrtctunnel.BuildConfig
 import com.phillipchin.webrtctunnel.model.AndroidAppPreferences
@@ -36,6 +37,7 @@ class ConfigRepository(private val context: Context) {
             prefs[Keys.showMeteredWarning] = update.showMeteredWarning
             prefs[Keys.debugLogsEnabled] = update.debugLogsEnabled
             prefs[Keys.advancedSettingsEnabled] = update.advancedSettingsEnabled
+            prefs[Keys.androidIceMode] = normalizeAndroidIceMode(update.androidIceMode)
             prefs.remove(Keys.pauseOnMetered)
         }
     }
@@ -50,22 +52,30 @@ class ConfigRepository(private val context: Context) {
     fun defaultConfigTemplate(): String =
         buildDefaultConfigTemplate(
             context.filesDir,
-            ConfigRenderOptions(androidIceMode = debugAndroidIceModeOverride()),
+            ConfigRenderOptions(androidIceMode = resolveAndroidIceMode(DEFAULT_ANDROID_ICE_MODE)),
         )
 
     fun readConfig(): String = configFile.takeIf { it.exists() }?.readText().orEmpty()
 
     /**
-     * Refresh the `advertised_local_ipv4` field in the active config with a freshly-resolved
-     * address (or remove it when [address] is null) so a strict `vnet_mux` start advertises
-     * the current network's host candidate. No-op when no config exists yet.
+     * Prepare the active config for a tunnel start by surgically rewriting the two
+     * network-dependent `[webrtc]` fields: `android_ice_mode` (the user's chosen [iceMode], or
+     * the debug `getprop` override) and `advertised_local_ipv4` ([advertisedIpv4], or removed
+     * when null so a strict `vnet_mux` start fails loudly rather than advertising a stale
+     * address). Each edit touches only its own line, so both are key-safe on an already-rendered
+     * config. No-op when no config exists yet; changes take effect on the next engine build
+     * (tunnel restart), since the ICE mode is fixed when the WebRTC engine is built.
      */
-    fun refreshAdvertisedAddress(address: String?) {
+    fun prepareActiveConfigForStart(
+        iceMode: String,
+        advertisedIpv4: String?,
+    ) {
         val current = readConfig()
         if (current.isBlank()) {
             return
         }
-        writeConfigAtomically(upsertAdvertisedLocalIpv4(current, address))
+        val withIceMode = upsertAndroidIceMode(current, resolveAndroidIceMode(iceMode))
+        writeConfigAtomically(upsertAdvertisedLocalIpv4(withIceMode, advertisedIpv4))
     }
 
     fun writeConfig(contents: String) {
@@ -107,28 +117,38 @@ class ConfigRepository(private val context: Context) {
         input: SetupConfigInput,
         forwards: List<ForwardConfig>,
         debugLogs: Boolean = false,
+        androidIceMode: String = DEFAULT_ANDROID_ICE_MODE,
     ): String =
         buildOfferConfig(
             input,
             forwards,
             context.filesDir,
             resolveBrokerPasswordFile(input, context.filesDir),
-            ConfigRenderOptions(debugLogs = debugLogs, androidIceMode = debugAndroidIceModeOverride()),
+            ConfigRenderOptions(
+                debugLogs = debugLogs,
+                androidIceMode = resolveAndroidIceMode(androidIceMode),
+            ),
         )
 }
 
 /**
- * Debug/test-only `android_ice_mode` override read from the `debug.p2p.android_ice_mode`
- * system property (e.g. `adb shell setprop debug.p2p.android_ice_mode vnet`). Returns
- * [DEFAULT_ANDROID_ICE_MODE] in release builds, when the property is unset, or when it holds
- * anything other than a valid mode. This is device-agnostic — it works on emulators and
- * physical devices, and (unlike patching app-private config) survives the SELinux
- * restriction on `run-as` writes. Read at config-render time, so it must be set before the
- * wizard saves the config.
+ * Resolve the effective `android_ice_mode`: the debug `getprop` override wins when present
+ * (so the E2E harness can force a mode), otherwise the user's chosen [userPreference]
+ * (normalized). This is the single chokepoint every render/apply path goes through.
  */
-private fun debugAndroidIceModeOverride(): String {
+private fun resolveAndroidIceMode(userPreference: String): String =
+    debugAndroidIceModeOverrideOrNull() ?: normalizeAndroidIceMode(userPreference)
+
+/**
+ * Debug/test-only `android_ice_mode` override read from the `debug.p2p.android_ice_mode`
+ * system property (e.g. `adb shell setprop debug.p2p.android_ice_mode vnet`). Returns `null`
+ * in release builds, when the property is unset, or when it holds anything other than a valid
+ * mode — meaning "no override, defer to the user preference". Device-agnostic (works on
+ * emulators and physical devices) and survives the SELinux restriction on `run-as` writes.
+ */
+private fun debugAndroidIceModeOverrideOrNull(): String? {
     if (!BuildConfig.DEBUG) {
-        return DEFAULT_ANDROID_ICE_MODE
+        return null
     }
     val raw =
         runCatching {
@@ -139,7 +159,8 @@ private fun debugAndroidIceModeOverride(): String {
                 .bufferedReader()
                 .use { reader -> reader.readLine() }
         }.getOrNull()
-    return normalizeAndroidIceMode(raw)
+    val trimmed = raw?.trim()?.lowercase().orEmpty()
+    return if (trimmed in VALID_ANDROID_ICE_MODES) trimmed else null
 }
 
 private object Keys {
@@ -149,6 +170,7 @@ private object Keys {
     val showMeteredWarning = booleanPreferencesKey("show_metered_warning")
     val debugLogsEnabled = booleanPreferencesKey("debug_logs_enabled")
     val advancedSettingsEnabled = booleanPreferencesKey("advanced_settings_enabled")
+    val androidIceMode = stringPreferencesKey("android_ice_mode")
 }
 
 private fun Preferences.toAppPreferences() =
@@ -158,6 +180,7 @@ private fun Preferences.toAppPreferences() =
         showMeteredWarning = this[Keys.showMeteredWarning] ?: true,
         debugLogsEnabled = this[Keys.debugLogsEnabled] ?: false,
         advancedSettingsEnabled = this[Keys.advancedSettingsEnabled] ?: false,
+        androidIceMode = normalizeAndroidIceMode(this[Keys.androidIceMode]),
     )
 
 private fun resolveBrokerPasswordFile(

@@ -149,6 +149,9 @@ data class AndroidAppPreferences(
     val showMeteredWarning: Boolean = true,
     val debugLogsEnabled: Boolean = false,
     val advancedSettingsEnabled: Boolean = false,
+    // Mirrors data.DEFAULT_ANDROID_ICE_MODE; the data layer normalizes on read/write so a
+    // stale or empty value can never produce an invalid config.
+    val androidIceMode: String = "vnet_mux",
 )
 
 @Serializable

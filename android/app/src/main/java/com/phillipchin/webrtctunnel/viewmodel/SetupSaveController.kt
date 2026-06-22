@@ -106,8 +106,14 @@ class SetupSaveController(
                         importPublicIdentity(deps, current.importPublicIdentity, input.remotePeerId)
                             .getOrElse { saveError(it.message ?: "Failed importing public identity", redact = true) }
                     }
-                    val debugLogs = deps.configRepository.preferences.first().debugLogsEnabled
-                    val candidate = deps.configRepository.renderOfferConfig(input, enabledForwards, debugLogs)
+                    val prefs = deps.configRepository.preferences.first()
+                    val candidate =
+                        deps.configRepository.renderOfferConfig(
+                            input,
+                            enabledForwards,
+                            prefs.debugLogsEnabled,
+                            prefs.androidIceMode,
+                        )
                     val validation =
                         withContext(ioDispatcher) { validateCandidateConfig(deps, candidate, identity.first) }
                     if (!validation.valid) {

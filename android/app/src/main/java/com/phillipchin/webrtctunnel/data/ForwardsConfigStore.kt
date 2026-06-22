@@ -22,14 +22,27 @@ private const val TAG = "ForwardsConfigStore"
 class ForwardsConfigStore(private val context: Context) {
     private val forwardsFile: File get() = File(context.filesDir, "forwards.json")
 
+    // Seeded on a clean install. The remoteForwardId of each entry must match a forward `id`
+    // on the answer peer — they are the contract between the two sides. These mirror the
+    // repo's canonical example configs (docs/examples/{offer,answer}-config.toml), which both
+    // define `ssh` (-> :22) and `web-ui` (-> :8080), so a fresh install interoperates with an
+    // answer set up per the docs instead of seeding an id that matches neither.
     private fun defaultForwards(): List<ForwardConfig> =
         listOf(
             ForwardConfig(
-                id = "llama",
-                name = "Llama server",
+                id = "ssh",
+                name = "SSH",
+                localHost = "127.0.0.1",
+                localPort = 2222,
+                remoteForwardId = "ssh",
+                enabled = true,
+            ),
+            ForwardConfig(
+                id = "web-ui",
+                name = "Web UI",
                 localHost = "127.0.0.1",
                 localPort = 8080,
-                remoteForwardId = "llama",
+                remoteForwardId = "web-ui",
                 enabled = true,
             ),
         )

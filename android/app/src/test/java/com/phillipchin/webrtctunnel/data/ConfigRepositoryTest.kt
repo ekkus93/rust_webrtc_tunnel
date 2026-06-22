@@ -140,17 +140,71 @@ class ConfigRepositoryTest {
     }
 
     @Test
-    fun refreshAdvertisedAddressRewritesActiveConfig() {
+    fun upsertAndroidIceModeReplacesExistingValue() {
+        val config =
+            """
+            [webrtc]
+            stun_urls = ["stun:stun.l.google.com:19302"]
+            android_ice_mode = "vnet_mux"
+
+            [tunnel]
+            read_chunk_size = 16384
+            """.trimIndent()
+        val updated = upsertAndroidIceMode(config, "native")
+        assertTrue(updated.contains("android_ice_mode = \"native\""))
+        assertFalse(updated.contains("\"vnet_mux\""))
+        assertEquals(1, updated.lines().count { it.trimStart().startsWith("android_ice_mode") })
+    }
+
+    @Test
+    fun upsertAndroidIceModeNormalizesInvalidInput() {
+        val config =
+            """
+            [webrtc]
+            android_ice_mode = "native"
+            """.trimIndent()
+        // An unknown/untrusted value must never produce an invalid config.
+        val updated = upsertAndroidIceMode(config, "turn; rm -rf")
+        assertTrue(updated.contains("android_ice_mode = \"vnet_mux\""))
+    }
+
+    @Test
+    fun upsertAndroidIceModeInsertsUnderWebrtcWhenMissing() {
+        val config =
+            """
+            [webrtc]
+            stun_urls = ["stun:stun.l.google.com:19302"]
+            """.trimIndent()
+        val updated = upsertAndroidIceMode(config, "native")
+        val webrtcIdx = updated.lines().indexOfFirst { it.trimStart() == "[webrtc]" }
+        val iceIdx = updated.lines().indexOfFirst { it.trimStart().startsWith("android_ice_mode") }
+        assertEquals(webrtcIdx + 1, iceIdx)
+        assertTrue(updated.contains("android_ice_mode = \"native\""))
+    }
+
+    @Test
+    fun prepareActiveConfigForStartRewritesIceModeAndAddress() {
         repository.writeConfig(
             """
             [webrtc]
             android_ice_mode = "vnet_mux"
             """.trimIndent(),
         )
-        repository.refreshAdvertisedAddress("10.1.3.11")
-        assertTrue(repository.readConfig().contains("advertised_local_ipv4 = \"10.1.3.11\""))
-        repository.refreshAdvertisedAddress(null)
-        assertFalse(repository.readConfig().contains("advertised_local_ipv4"))
+        repository.prepareActiveConfigForStart("native", "10.1.3.11")
+        val config = repository.readConfig()
+        assertTrue(config.contains("android_ice_mode = \"native\""))
+        assertTrue(config.contains("advertised_local_ipv4 = \"10.1.3.11\""))
+        // A null address clears the advertised line while leaving the chosen mode intact.
+        repository.prepareActiveConfigForStart("native", null)
+        val cleared = repository.readConfig()
+        assertTrue(cleared.contains("android_ice_mode = \"native\""))
+        assertFalse(cleared.contains("advertised_local_ipv4"))
+    }
+
+    @Test
+    fun prepareActiveConfigForStartIsNoOpWhenNoConfigExists() {
+        repository.prepareActiveConfigForStart("native", "10.1.3.11")
+        assertEquals("", repository.readConfig())
     }
 
     @Test
@@ -190,6 +244,8 @@ class ConfigRepositoryTest {
                     resumeOnUnmetered = false,
                     showMeteredWarning = false,
                     debugLogsEnabled = true,
+                    advancedSettingsEnabled = true,
+                    androidIceMode = "native",
                 )
             repository.savePreferences(update)
             assertEquals(update, repository.preferences.first())

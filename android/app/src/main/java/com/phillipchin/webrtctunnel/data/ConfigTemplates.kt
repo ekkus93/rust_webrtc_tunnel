@@ -110,6 +110,34 @@ internal fun upsertAdvertisedLocalIpv4(
     return lines.joinToString("\n")
 }
 
+/**
+ * Replace the `android_ice_mode` value in the `[webrtc]` section of a config TOML with
+ * [mode] (normalized to one of [VALID_ANDROID_ICE_MODES]). If no `android_ice_mode` line
+ * exists, inserts one directly under the `[webrtc]` header, preserving its indentation.
+ * Pure and surgical — it touches only that one line, so it is key-safe to apply to an
+ * already-rendered config (like [upsertAdvertisedLocalIpv4]). Returns the config unchanged
+ * if neither anchor is found.
+ */
+internal fun upsertAndroidIceMode(
+    configToml: String,
+    mode: String,
+): String {
+    val normalized = normalizeAndroidIceMode(mode)
+    val lines = configToml.lines().toMutableList()
+    val existing = lines.indexOfFirst { it.trimStart().startsWith("android_ice_mode") }
+    if (existing >= 0) {
+        val indent = lines[existing].takeWhile { it == ' ' || it == '\t' }
+        lines[existing] = "${indent}android_ice_mode = ${tomlString(normalized)}"
+        return lines.joinToString("\n")
+    }
+    val header = lines.indexOfFirst { it.trimStart() == "[webrtc]" }
+    if (header >= 0) {
+        val indent = lines[header].takeWhile { it == ' ' || it == '\t' }
+        lines.add(header + 1, "${indent}android_ice_mode = ${tomlString(normalized)}")
+    }
+    return lines.joinToString("\n")
+}
+
 internal fun tomlString(value: String): String =
     buildString(value.length + 2) {
         append('"')
@@ -187,7 +215,14 @@ internal fun buildDefaultConfigTemplate(
         tlsWebrtcTunnelSections(options.androidIceMode),
         """
         [[forwards]]
-        id = "llama"
+        id = "ssh"
+
+        [forwards.offer]
+        listen_host = "127.0.0.1"
+        listen_port = 2222
+
+        [[forwards]]
+        id = "web-ui"
 
         [forwards.offer]
         listen_host = "127.0.0.1"

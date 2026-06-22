@@ -326,12 +326,15 @@ class TunnelForegroundService
                         .getOrElse {
                             abortStartup("Unable to decrypt private identity: ${it.message}", "identity_decrypt_failed")
                         }
-                // Inject the active network's IPv4 (ConnectivityManager/LinkProperties) as the
-                // vnet_mux host candidate before validating/starting. With no address the field
-                // is cleared, so a strict vnet_mux start fails loudly in native rather than
+                // Apply the user's chosen ICE mode and inject the active network's IPv4
+                // (ConnectivityManager/LinkProperties) as the vnet_mux host candidate before
+                // validating/starting, so a strict vnet_mux start fails loudly rather than
                 // advertising a stale address or silently dropping to native ICE.
                 withContext(ioDispatcher) {
-                    configRepository.refreshAdvertisedAddress(localAddressResolver.currentIpv4())
+                    configRepository.prepareActiveConfigForStart(
+                        prefs.androidIceMode,
+                        localAddressResolver.currentIpv4(),
+                    )
                 }
                 val validation =
                     withContext(ioDispatcher) {

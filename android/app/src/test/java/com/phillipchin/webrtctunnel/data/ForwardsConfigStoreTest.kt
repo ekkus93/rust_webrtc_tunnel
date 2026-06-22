@@ -43,6 +43,16 @@ class ForwardsConfigStoreTest {
     }
 
     @Test
+    fun seededDefaultsUseCanonicalRemoteForwardIds() {
+        // The seeded defaults must match the answer-side convention in the repo's example
+        // configs (`ssh`, `web-ui`); a non-matching id (e.g. "llama") makes a clean install
+        // fail with `unknown_forward` against a docs-configured answer.
+        file.delete()
+        val remoteIds = store.loadForwards().map { it.remoteForwardId }.toSet()
+        assertEquals(setOf("ssh", "web-ui"), remoteIds)
+    }
+
+    @Test
     fun corruptJsonIsFailureAndDoesNotThrowFromLoadForwards() {
         file.writeText("{ this is not valid json")
         assertTrue(store.loadForwardsResult().isFailure)
