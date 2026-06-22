@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -175,7 +173,7 @@ private fun CancelSetupDialog(
         onDismissRequest = onDismiss,
         title = { Text("Discard setup?") },
         text = { Text("This clears everything you've entered in the wizard. This cannot be undone.") },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Keep editing") } },
+        dismissButton = { AppOutlinedButton(onClick = onDismiss) { Text("Keep editing") } },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text("Discard", color = MaterialTheme.colorScheme.error)
@@ -196,20 +194,20 @@ private fun WizardNavigationButtons(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onCancelRequest, enabled = !busy) { Text("Cancel") }
-                OutlinedButton(
+                AppOutlinedButton(onClick = onCancelRequest, enabled = !busy) { Text("Cancel") }
+                AppOutlinedButton(
                     onClick = vm::goBack,
                     enabled = state.currentStep != SetupStep.Mode && !busy,
                 ) { Text("Back") }
             }
             if (state.currentStep == SetupStep.Review) {
-                OutlinedButton(onClick = vm.save::saveAndApplyConfig, enabled = canAdvance && !busy) { Text("Save") }
+                AppOutlinedButton(onClick = vm.save::saveAndApplyConfig, enabled = canAdvance && !busy) { Text("Save") }
             } else {
-                Button(onClick = vm::goNext, enabled = canAdvance && !busy) { Text("Next") }
+                AppFilledButton(onClick = vm::goNext, enabled = canAdvance && !busy) { Text("Next") }
             }
         }
         if (state.currentStep == SetupStep.Review) {
-            Button(
+            AppFilledButton(
                 onClick = { vm.save.startTunnelFromReview(onStartSuccess) },
                 enabled = canAdvance && !busy,
                 modifier = Modifier.fillMaxWidth(),

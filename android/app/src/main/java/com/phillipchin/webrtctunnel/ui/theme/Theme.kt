@@ -49,7 +49,7 @@ private val AppTypography =
         bodyLarge = TextStyle(fontSize = 16.sp),
         bodyMedium = TextStyle(fontSize = 14.sp),
         bodySmall = TextStyle(fontSize = 12.sp),
-        labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.3.sp),
     )
 
 @Composable

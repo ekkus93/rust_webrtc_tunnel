@@ -23,7 +23,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -161,10 +160,10 @@ private fun LogActionsRow(
 ) {
     var showActionsMenu by remember { mutableStateOf(false) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onTogglePause, modifier = Modifier.weight(1f)) {
+        AppOutlinedButton(onClick = onTogglePause, modifier = Modifier.weight(1f)) {
             Text(if (paused) "Resume Logs" else "Pause Logs")
         }
-        OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) { Text("Clear Logs") }
+        AppOutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) { Text("Clear Logs") }
         IconButton(onClick = { showActionsMenu = true }) {
             Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.cd_log_actions_menu))
         }

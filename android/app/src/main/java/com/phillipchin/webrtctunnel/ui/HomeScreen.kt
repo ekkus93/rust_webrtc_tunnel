@@ -18,11 +18,9 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -351,40 +349,40 @@ private fun HomeActionRow(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         when (status.serviceState) {
             ServiceState.Stopped -> {
-                Button(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Start Tunnel") }
-                OutlinedButton(onClick = onOpenSetup, modifier = Modifier.weight(1f)) { Text("Setup") }
+                AppFilledButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Start Tunnel") }
+                AppOutlinedButton(onClick = onOpenSetup, modifier = Modifier.weight(1f)) { Text("Setup") }
             }
             ServiceState.Starting, ServiceState.Connecting, ServiceState.Reconnecting -> {
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
-                OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                AppOutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
+                AppOutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
             }
             ServiceState.Connected, ServiceState.Listening, ServiceState.Serving -> {
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop Tunnel") }
-                OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                AppOutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop Tunnel") }
+                AppOutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
                 onOpenBrowser?.let {
-                    OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("Open URL") }
+                    AppOutlinedButton(onClick = it, modifier = Modifier.weight(1f)) { Text("Open URL") }
                 }
             }
             ServiceState.PausedMeteredBlocked -> {
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
-                OutlinedButton(
+                AppOutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
+                AppOutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) { Text("Stop") }
+                AppOutlinedButton(
                     onClick = onAllowMeteredTemporary,
                     modifier = Modifier.weight(1f),
                 ) { Text("Allow This Session") }
             }
             ServiceState.NoNetwork -> {
-                OutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
+                AppOutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
+                AppOutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
             }
             ServiceState.Error -> {
-                OutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
-                OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                AppOutlinedButton(onClick = onStart, modifier = Modifier.weight(1f)) { Text("Retry") }
+                AppOutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
             }
             ServiceState.ConfigInvalid -> {
-                OutlinedButton(onClick = onOpenSetup, modifier = Modifier.weight(1f)) { Text("Open Setup") }
-                OutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
+                AppOutlinedButton(onClick = onOpenSetup, modifier = Modifier.weight(1f)) { Text("Open Setup") }
+                AppOutlinedButton(onClick = onOpenLogs, modifier = Modifier.weight(1f)) { Text("View Logs") }
             }
             ServiceState.Stopping -> {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)

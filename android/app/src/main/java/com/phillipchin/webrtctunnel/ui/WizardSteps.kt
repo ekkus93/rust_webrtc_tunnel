@@ -12,11 +12,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -67,12 +65,12 @@ internal fun IdentityStepContent(
             vm.setInput(state.input.copy(localPeerId = it))
         }, label = { Text("Local peer id") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            AppFilledButton(
                 onClick = onImportIdentityFile,
                 enabled = !state.isBusy,
                 modifier = Modifier.weight(1f),
             ) { Text("Import identity file") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = vm.identity::generateIdentity,
                 enabled = !state.isBusy,
                 modifier = Modifier.weight(1f),
@@ -82,7 +80,7 @@ internal fun IdentityStepContent(
             "Import opens the device file picker, or generate a fresh identity for this phone.",
             style = MaterialTheme.typography.bodySmall,
         )
-        OutlinedButton(onClick = { showRawPathImport = !showRawPathImport }, modifier = Modifier.fillMaxWidth()) {
+        AppOutlinedButton(onClick = { showRawPathImport = !showRawPathImport }, modifier = Modifier.fillMaxWidth()) {
             Text(if (showRawPathImport) "Hide advanced import options" else "Show advanced import options")
         }
         if (showRawPathImport) {
@@ -96,7 +94,7 @@ internal fun IdentityStepContent(
                 label = { Text("Private identity file path") },
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = vm.identity::importIdentityFromPath,
                 enabled = !state.isBusy,
                 modifier = Modifier.fillMaxWidth(),
@@ -115,11 +113,11 @@ private fun LocalPublicIdentitySection(identity: String) {
     Text("Local public identity:")
     Text(identity, style = MaterialTheme.typography.bodySmall)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { clipboard.setText(AnnotatedString(identity)) },
             modifier = Modifier.weight(1f),
         ) { Text("Copy Public Key") }
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = {
                 val share =
                     android.content.Intent(android.content.Intent.ACTION_SEND).apply {
@@ -189,7 +187,7 @@ internal fun BrokerStepContent(
             value = state.input.brokerPassword,
             onChange = { vm.setInput(state.input.copy(brokerPassword = it)) },
         )
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { vm.setAdvancedExpanded(!state.advancedExpanded) },
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -198,7 +196,7 @@ internal fun BrokerStepContent(
         if (state.advancedExpanded) {
             BrokerAdvancedFields(vm = vm, state = state)
         }
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = vm.save::testBrokerConnection,
             enabled = !state.isBusy,
             modifier = Modifier.fillMaxWidth(),
@@ -269,15 +267,15 @@ internal fun PeerStepContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            AppFilledButton(
                 onClick = vm.identity::validateRemotePublicIdentity,
                 enabled = !state.isBusy,
                 modifier = Modifier.weight(1f),
             ) { Text("Validate remote identity") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onPaste, modifier = Modifier.weight(1f)) { Text("Paste from clipboard") }
-            OutlinedButton(onClick = onImportFile, modifier = Modifier.weight(1f)) { Text("Import from file") }
+            AppOutlinedButton(onClick = onPaste, modifier = Modifier.weight(1f)) { Text("Paste from clipboard") }
+            AppOutlinedButton(onClick = onImportFile, modifier = Modifier.weight(1f)) { Text("Import from file") }
         }
         Text("The answer side must authorize this phone's public identity.")
     }
@@ -314,7 +312,7 @@ internal fun ForwardsStepContent(
                             Text("${forward.localHost}:${forward.localPort} -> ${forward.remoteForwardId}")
                         }
                         Row {
-                            OutlinedButton(onClick = { onEdit(forward) }) { Text("Edit") }
+                            AppOutlinedButton(onClick = { onEdit(forward) }) { Text("Edit") }
                             IconButton(onClick = { onDelete(forward.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete forward ${forward.name}")
                             }

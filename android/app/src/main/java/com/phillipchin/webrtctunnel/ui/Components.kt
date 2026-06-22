@@ -12,7 +12,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -190,7 +189,7 @@ fun ErrorResolutionCard(
             Text(summary, color = Error, style = MaterialTheme.typography.titleMedium)
             Text(fix, style = MaterialTheme.typography.bodyMedium)
             details?.takeIf { it.isNotBlank() }?.let {
-                OutlinedButton(onClick = { showDetails = !showDetails }) {
+                AppOutlinedButton(onClick = { showDetails = !showDetails }) {
                     Text(if (showDetails) "Hide technical details" else "Show technical details")
                 }
                 if (showDetails) {

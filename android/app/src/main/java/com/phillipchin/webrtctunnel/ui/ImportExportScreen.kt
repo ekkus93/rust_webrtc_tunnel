@@ -15,11 +15,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -155,7 +153,7 @@ private fun ImportExportAdvancedToggle(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    OutlinedButton(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
+    AppOutlinedButton(onClick = onToggle, modifier = Modifier.fillMaxWidth()) {
         Text(if (expanded) "Hide Advanced paths" else "Show Advanced paths")
     }
     if (expanded) {
@@ -190,30 +188,30 @@ private fun ImportExportPrimaryActions(
         }
     SettingsSection("Primary actions") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
+            AppOutlinedButton(onClick = {
                 openTextDocumentLauncher.launch(arrayOf("text/*", "application/toml"))
             }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Import config") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = onExportConfigRequest,
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
             ) { Text("Export config") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
+            AppOutlinedButton(onClick = {
                 openPrivateIdentityLauncher.launch(arrayOf("text/*"))
             }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Import identity") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = onExportPrivateRequest,
                 enabled = !busy,
                 modifier = Modifier.weight(1f),
             ) { Text("Export private identity") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
+            AppOutlinedButton(onClick = {
                 openPublicIdentityLauncher.launch(arrayOf("text/*"))
             }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Import public identity") }
-            OutlinedButton(onClick = {
+            AppOutlinedButton(onClick = {
                 exportPublicIdentityLauncher.launch("identity-public.txt")
             }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Export public identity") }
         }
@@ -227,7 +225,7 @@ private fun PublicIdentityShareRow(vm: ImportExportViewModel) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = {
                 scope.launch {
                     runCatching {
@@ -251,7 +249,7 @@ private fun PublicIdentityShareRow(vm: ImportExportViewModel) {
             Spacer(Modifier.size(4.dp))
             Text("Share public identity")
         }
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = {
                 scope.launch { runCatching { clipboard.setText(AnnotatedString(vm.publicIdentityForShare())) } }
             },
@@ -293,7 +291,7 @@ private fun ImportExportAdvancedSection(
             label = { Text("Config import path") },
             modifier = Modifier.fillMaxWidth(),
         )
-        Button(
+        AppFilledButton(
             onClick = { pendingImport = ImportKind.Config },
             enabled = !state.isBusy,
             modifier = Modifier.fillMaxWidth(),
@@ -302,7 +300,7 @@ private fun ImportExportAdvancedSection(
                 value ->
             vm.updateState { it.copy(privateIdentityImportPath = value) }
         }, label = { Text("Private identity import path") }, modifier = Modifier.fillMaxWidth())
-        Button(
+        AppFilledButton(
             onClick = { pendingImport = ImportKind.PrivateIdentity },
             enabled = !state.isBusy,
             modifier = Modifier.fillMaxWidth(),
@@ -311,7 +309,7 @@ private fun ImportExportAdvancedSection(
                 value ->
             vm.updateState { it.copy(publicIdentityLine = value) }
         }, label = { Text("Remote public identity line") }, modifier = Modifier.fillMaxWidth())
-        Button(
+        AppFilledButton(
             onClick = { pendingImport = ImportKind.PublicIdentity },
             enabled = !state.isBusy,
             modifier = Modifier.fillMaxWidth(),

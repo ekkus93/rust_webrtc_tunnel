@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -127,7 +126,7 @@ fun ForwardDetailsScreen(
             onToggleEnabled = { vm.saveForward(forward.copy(enabled = !forward.enabled)) },
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { showEditDialog = true },
             enabled = !isBusy,
             modifier = Modifier.fillMaxWidth(),
@@ -222,7 +221,7 @@ private fun ForwardDetailActions(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val copyLabel = if (canOpenBrowser) "Copy URL" else "Copy address"
         val copyValue = if (canOpenBrowser) browserUrl else localAddress
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { clipboard.setText(AnnotatedString(copyValue)) },
             modifier = Modifier.weight(1f),
         ) {
@@ -231,7 +230,7 @@ private fun ForwardDetailActions(
             Text(copyLabel)
         }
         if (canOpenBrowser) {
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = {
                     val intent =
                         Intent(
@@ -252,10 +251,10 @@ private fun ForwardDetailActions(
     }
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onTestPort, enabled = !busy, modifier = Modifier.weight(1f)) {
+        AppOutlinedButton(onClick = onTestPort, enabled = !busy, modifier = Modifier.weight(1f)) {
             Text("Test Local Port")
         }
-        OutlinedButton(onClick = onToggleEnabled, enabled = !busy, modifier = Modifier.weight(1f)) {
+        AppOutlinedButton(onClick = onToggleEnabled, enabled = !busy, modifier = Modifier.weight(1f)) {
             Text(if (forward.enabled) "Disable" else "Enable")
         }
     }

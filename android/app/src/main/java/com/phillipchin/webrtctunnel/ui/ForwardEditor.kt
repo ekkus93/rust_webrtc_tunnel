@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -83,7 +82,7 @@ internal fun EditForwardDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         confirmButton = {
-            Button(
+            AppFilledButton(
                 enabled = !errors.hasError,
                 onClick = {
                     val error = validateDraft(value, existingForwards)

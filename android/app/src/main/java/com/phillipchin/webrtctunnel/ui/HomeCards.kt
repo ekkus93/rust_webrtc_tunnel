@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -145,7 +144,7 @@ internal fun HomeErrorCard(
         details = error.details,
         action = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onOpenLogs) { Text("View Logs") }
+                AppOutlinedButton(onClick = onOpenLogs) { Text("View Logs") }
                 TextButton(onClick = { dismissed = true }) { Text("Dismiss") }
             }
         },

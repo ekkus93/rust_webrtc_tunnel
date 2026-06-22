@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -98,7 +97,7 @@ fun SettingsScreen(
 @Composable
 private fun SettingsTunnelSection(onOpenSetup: () -> Unit) {
     SettingsSection("Tunnel") {
-        OutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Run setup wizard again") }
+        AppOutlinedButton(onClick = onOpenSetup, modifier = Modifier.fillMaxWidth()) { Text("Run setup wizard again") }
     }
 }
 
@@ -120,7 +119,7 @@ private fun SettingsNetworkPolicySection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = onOpenNetworkPolicy, modifier = Modifier.fillMaxWidth()) {
+        AppOutlinedButton(onClick = onOpenNetworkPolicy, modifier = Modifier.fillMaxWidth()) {
             Text("Open network policy details")
         }
     }
@@ -133,7 +132,7 @@ private fun SettingsConfigurationSection(
     onReset: () -> Unit,
 ) {
     SettingsSection("Configuration") {
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { vm.validateConfig() },
             enabled = !uiState.isValidatingConfig,
             modifier = Modifier.fillMaxWidth(),
@@ -171,15 +170,15 @@ private fun SettingsIdentitySection(
         )
         uiState.publicIdentityLoadError?.let { error ->
             Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = onRetryIdentity, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
+            AppOutlinedButton(onClick = onRetryIdentity, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = { clipboard.setText(AnnotatedString(publicIdentity.orEmpty())) },
                 modifier = Modifier.weight(1f),
                 enabled = hasPublicIdentity,
             ) { Text("Copy identity") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = {
                     val share =
                         Intent(Intent.ACTION_SEND).apply {
@@ -198,7 +197,7 @@ private fun SettingsIdentitySection(
                 enabled = hasPublicIdentity,
             ) { Text("Share identity") }
         }
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = onOpenImportExport,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Import / Export identity") }
@@ -213,11 +212,11 @@ private fun SettingsDiagnosticsSection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     SettingsSection("Diagnostics") {
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = onOpenLogs,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Open logs / export diagnostics") }
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = {
                 scope.launch {
                     val share =
@@ -240,7 +239,7 @@ private fun SettingsAdvancedSection(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     SettingsSection("Advanced") {
-        OutlinedButton(
+        AppOutlinedButton(
             onClick = { vm.savePreferences(prefs.copy(advancedSettingsEnabled = !prefs.advancedSettingsEnabled)) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (prefs.advancedSettingsEnabled) "Hide advanced settings" else "Show advanced settings") }
@@ -249,11 +248,11 @@ private fun SettingsAdvancedSection(
                 "Enable debug logs",
                 prefs.debugLogsEnabled,
             ) { vm.savePreferences(prefs.copy(debugLogsEnabled = it)) }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = onOpenSetup,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Change topic prefix (re-runs setup)") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = onOpenSetup,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Change local bind address (re-runs setup)") }
@@ -263,11 +262,11 @@ private fun SettingsAdvancedSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = { clipboard.setText(AnnotatedString(vm.statusJson())) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Copy status JSON") }
-            OutlinedButton(
+            AppOutlinedButton(
                 onClick = { scope.launch { clipboard.setText(AnnotatedString(vm.redactedConfigOrEmpty())) } },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Copy redacted config") }
