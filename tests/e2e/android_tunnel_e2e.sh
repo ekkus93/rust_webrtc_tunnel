@@ -50,11 +50,11 @@ esac
 
 # ANDROID_ICE_MODE: force the app's android_ice_mode via a debug system property (read by
 # the debug build at config-render time). Device-agnostic; survives SELinux run-as-write
-# restrictions on physical devices. Empty => leave the app default ("auto").
+# restrictions on physical devices. Empty => leave the app default ("vnet_mux").
 ANDROID_ICE_MODE="${ANDROID_ICE_MODE:-}"
 case "$ANDROID_ICE_MODE" in
-  ""|auto|native|vnet) ;;
-  *) fail "ANDROID_ICE_MODE must be auto|native|vnet (got '$ANDROID_ICE_MODE')" ;;
+  ""|auto|native|vnet|vnet_mux) ;;
+  *) fail "ANDROID_ICE_MODE must be auto|native|vnet|vnet_mux (got '$ANDROID_ICE_MODE')" ;;
 esac
 
 # BLACK_HOLE=1: run the answer in debug drop-ping mode (opens the data channel but never

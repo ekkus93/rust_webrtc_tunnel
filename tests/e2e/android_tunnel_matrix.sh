@@ -4,15 +4,17 @@
 # combinations, plus the black-hole (probe-failure) row, and summarizes results.
 #
 # Rows (see ANDROID_WEBRTC_EMULATOR_DATA_PLANE_SPEC.md §9.2):
-#   auto   x host     - default path, must PASS (bytes delivered + probe PING/PONG)
-#   auto   x bridge   - answer behind Docker NAT, must PASS
-#   vnet   x host     - forced vnet fallback, must PASS
-#   vnet   x bridge   - forced vnet fallback behind NAT, must PASS
-#   native x host     - diagnostic; on emulator/Android 11+ this is EXPECTED_FAIL (no
-#                       candidates gathered -> fails via the ~30s first-open timeout, NOT
-#                       the probe timeout; set EXPECT_NATIVE_ICE_PASS=1 to require a pass)
-#   black-hole        - answer drops the probe PING; the offer must fail FAST and deliver
-#                       nothing (exercises the probe-failure teardown end-to-end)
+#   auto     x host     - default path, must PASS (bytes delivered + probe PING/PONG)
+#   auto     x bridge   - answer behind Docker NAT, must PASS
+#   vnet     x host     - forced vnet fallback, must PASS
+#   vnet     x bridge   - forced vnet fallback behind NAT, must PASS
+#   vnet_mux x host     - production default (DEFAULT_ANDROID_ICE_MODE), must PASS
+#   vnet_mux x bridge   - production default behind Docker NAT, must PASS
+#   native   x host     - diagnostic; on emulator/Android 11+ this is EXPECTED_FAIL (no
+#                         candidates gathered -> fails via the 10s ICE timeout, NOT the
+#                         probe timeout; set EXPECT_NATIVE_ICE_PASS=1 to require a pass)
+#   black-hole          - answer drops the probe PING; the offer must fail FAST and deliver
+#                         nothing (exercises the probe-failure teardown end-to-end)
 #
 # Each row is an independent android_tunnel_e2e.sh invocation. REBUILD=0 is forced after
 # the first row so the APK/answer are built once.
@@ -53,14 +55,17 @@ RESULTS=()
 STATUS=0
 
 # Build once on the first row, reuse afterwards.
-run_row "auto x host"   pass REBUILD="${REBUILD:-1}" ANDROID_ICE_MODE=auto ANSWER_NET=host   || STATUS=1
-run_row "auto x bridge" pass REBUILD=0               ANDROID_ICE_MODE=auto ANSWER_NET=bridge || STATUS=1
-run_row "vnet x host"   pass REBUILD=0               ANDROID_ICE_MODE=vnet ANSWER_NET=host   || STATUS=1
-run_row "vnet x bridge" pass REBUILD=0               ANDROID_ICE_MODE=vnet ANSWER_NET=bridge || STATUS=1
+run_row "auto x host"     pass REBUILD="${REBUILD:-1}" ANDROID_ICE_MODE=auto     ANSWER_NET=host   || STATUS=1
+run_row "auto x bridge"   pass REBUILD=0               ANDROID_ICE_MODE=auto     ANSWER_NET=bridge || STATUS=1
+run_row "vnet x host"     pass REBUILD=0               ANDROID_ICE_MODE=vnet     ANSWER_NET=host   || STATUS=1
+run_row "vnet x bridge"   pass REBUILD=0               ANDROID_ICE_MODE=vnet     ANSWER_NET=bridge || STATUS=1
+# vnet_mux is the production default (DEFAULT_ANDROID_ICE_MODE in ConfigTemplates.kt).
+run_row "vnet_mux x host"   pass REBUILD=0 ANDROID_ICE_MODE=vnet_mux ANSWER_NET=host   || STATUS=1
+run_row "vnet_mux x bridge" pass REBUILD=0 ANDROID_ICE_MODE=vnet_mux ANSWER_NET=bridge || STATUS=1
 
 # native is a diagnostic row: it passes on a physical device with a reachable answer +
-# STUN srflx, but fails on an emulator (no candidates gathered). Tolerate either unless
-# EXPECT_NATIVE_ICE_PASS=1 demands a pass.
+# STUN srflx (ICE checking timeout is now 10 s), but fails on an emulator (no candidates
+# gathered). Tolerate either unless EXPECT_NATIVE_ICE_PASS=1 demands a pass.
 if [ "$EXPECT_NATIVE_ICE_PASS" = "1" ]; then
   run_row "native x host" pass     REBUILD=0 ANDROID_ICE_MODE=native ANSWER_NET=host || STATUS=1
 else
